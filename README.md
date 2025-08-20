@@ -21,31 +21,27 @@ Default model uses onnx-asr hub alias `nemo-parakeet-tdt-0.6b-v2`, backed by the
 - HF: `istupakov/parakeet-tdt-0.6b-v2-onnx`  
   See: `https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx`
 
-### Install (local dev, macOS CPU)
+### Run (GPU / Runpod)
+
+**Single command setup:**
 
 ```bash
+# Clone, setup, and run
+git clone <your-repo-url> yap-stt-api && cd yap-stt-api
+chmod +x scripts/*.sh
 ./scripts/setup.sh
 source .venv/bin/activate
+export PARAKEET_NUM_LANES=6  # For L40S/A100
 ./scripts/start.sh
+
+# Test it
+python3 test/warmup.py
 ```
 
-Send a request:
-
-```bash
-python3 test/warmup.py --file /path/to/audio.wav --url http://127.0.0.1:8000
-```
-
-### Run (Linux GPU / Runpod)
-
-Build image:
+**Alternative: Docker (recommended for production)**
 
 ```bash
 docker build -t parakeet-onnx:latest .
-```
-
-Run with GPU:
-
-```bash
 docker run --gpus all -p 8000:8000 \
   -e PARAKEET_NUM_LANES=6 \
   -e TRT_ENGINE_CACHE=/models/trt_cache -e TRT_TIMING_CACHE=/models/timing.cache \
@@ -99,6 +95,27 @@ TensorRT engine and timing caches (Linux GPU with ORT TensorRT-EP builds):
 
 ```bash
 python3 test/warmup.py --file samples/your.wav
+```
+
+### Purging
+
+Stop the service and optionally clear logs/caches:
+
+```bash
+# Stop service only
+./scripts/purge_pod.sh
+
+# Clear logs and metrics
+./scripts/purge_pod.sh --logs
+
+# Clear TensorRT engine/timing caches
+./scripts/purge_pod.sh --engines
+
+# Clear onnx-asr model cache
+./scripts/purge_pod.sh --models
+
+# Do everything
+./scripts/purge_pod.sh --all
 ```
 
 ### Docker vs bare runtime
