@@ -29,6 +29,9 @@ if [[ -z "${PARAKEET_MODEL_DIR:-}" ]]; then
 fi
 export PARAKEET_MODEL_NAME=${PARAKEET_MODEL_NAME:-nemo-parakeet-tdt-0.6b-v2}
 
+# Ensure INT8 fetch uses v2 artifacts by default
+export PARAKEET_INT8_REPO=${PARAKEET_INT8_REPO:-istupakov/parakeet-tdt-0.6b-v2-onnx}
+
 # Option B: onnx-asr hub ids (fallback when no local dir)
 export PARAKEET_MODEL_ID=${PARAKEET_MODEL_ID:-nemo-parakeet-tdt-0.6b-v2}
 export PARAKEET_FALLBACK_MODEL_ID=${PARAKEET_FALLBACK_MODEL_ID:-istupakov/parakeet-tdt-0.6b-v2-onnx}

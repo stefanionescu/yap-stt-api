@@ -21,7 +21,7 @@ source scripts/env.sh
 bash scripts/fetch_int8.sh
 
 # 3) Start the API (wires TRT libs automatically)
-bash scripts/start.sh
+bash scripts/start_bg.sh && bash scripts/tail_bg_logs.sh
 
 # 4) Test once (from pod)
 python3 test/warmup.py --file samples/long.mp3
