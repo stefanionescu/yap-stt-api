@@ -15,9 +15,19 @@ export PARAKEET_MAX_AUDIO_SECONDS=${PARAKEET_MAX_AUDIO_SECONDS:-600}
 export PARAKEET_MAX_UPLOAD_MB=${PARAKEET_MAX_UPLOAD_MB:-64}
 
 # Model selection
-# Option A (recommended for performance): local INT8 model directory with files:
+# Option A (recommended): local INT8 model directory with files:
 #   encoder-model.onnx, decoder_joint-model.onnx, vocab.txt
-export PARAKEET_MODEL_DIR=${PARAKEET_MODEL_DIR:-./models/parakeet-int8}
+# Ensure absolute path to avoid runtime cwd issues
+_DEFAULT_MODEL_DIR="./models/parakeet-int8"
+if [[ -z "${PARAKEET_MODEL_DIR:-}" ]]; then
+  if command -v readlink >/dev/null 2>&1; then
+    export PARAKEET_MODEL_DIR="$(readlink -f "${_DEFAULT_MODEL_DIR}")"
+  else
+    # macOS: emulate readlink -f
+    export PARAKEET_MODEL_DIR="$(cd "${_DEFAULT_MODEL_DIR}" 2>/dev/null && pwd || echo "${_DEFAULT_MODEL_DIR}")"
+  fi
+fi
+export PARAKEET_MODEL_NAME=${PARAKEET_MODEL_NAME:-nemo-parakeet-tdt-0.6b-v2}
 
 # Option B: onnx-asr hub ids (fallback when no local dir)
 export PARAKEET_MODEL_ID=${PARAKEET_MODEL_ID:-nemo-parakeet-tdt-0.6b-v2}
@@ -39,8 +49,8 @@ export ORT_INTRA_OP_NUM_THREADS=${ORT_INTRA_OP_NUM_THREADS:-1}
 export AUTO_FETCH_INT8=${AUTO_FETCH_INT8:-1}
 # Docker is not supported inside the pod; build images off-pod if needed.
 export USE_DOCKER=${USE_DOCKER:-0}
-# Optional: install TRT runtime via apt during setup (Ubuntu 22.04 pods)
-export INSTALL_TRT=${INSTALL_TRT:-1}
+# Optional: install TRT runtime via apt during setup (Ubuntu 22.04 pods). Disabled by default when wheel is present.
+export INSTALL_TRT=${INSTALL_TRT:-0}
 
 # CPU/GPU perf knobs
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}

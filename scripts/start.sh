@@ -47,4 +47,19 @@ PY
 )
 if [[ -n "${CUDNN_LIB_DIR}" ]]; then export LD_LIBRARY_PATH="${CUDNN_LIB_DIR}:${LD_LIBRARY_PATH}"; fi
 
+# Preflight: ensure local model dir (if set) has required artifacts before starting
+if [[ -n "${PARAKEET_MODEL_DIR:-}" ]]; then
+  if [[ ! -d "${PARAKEET_MODEL_DIR}" ]]; then
+    echo "Model dir missing: ${PARAKEET_MODEL_DIR}" >&2
+    exit 1
+  fi
+  for f in encoder-model.onnx decoder_joint-model.onnx vocab.txt; do
+    if [[ ! -f "${PARAKEET_MODEL_DIR}/${f}" ]]; then
+      echo "Missing ${f} in ${PARAKEET_MODEL_DIR}" >&2
+      exit 1
+    fi
+  done
+  ls -lh "${PARAKEET_MODEL_DIR}"/encoder-model.onnx "${PARAKEET_MODEL_DIR}"/decoder_joint-model.onnx "${PARAKEET_MODEL_DIR}"/vocab.txt || true
+fi
+
 exec python -m uvicorn src.server:app --host "${HOST:-0.0.0.0}" --port "${PORT:-8000}" --loop uvloop --http httptools

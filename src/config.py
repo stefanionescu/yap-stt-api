@@ -15,12 +15,12 @@ class Settings(BaseSettings):
 
     # Optional local model directory (preferred when provided). Put INT8 artifacts here
     # and rename to encoder-model.onnx / decoder_joint-model.onnx
-    model_dir: str = os.getenv("PARAKEET_MODEL_DIR", "")
+    model_dir: str | None = os.getenv("PARAKEET_MODEL_DIR")
 
     # Enforce GPU
     require_gpu: bool = os.getenv("PARAKEET_REQUIRE_GPU", "1") not in ("0", "false", "False")
 
-    # Direct ONNX runtime path (bypass onnx_asr high-level pipeline)
+    # Deprecated: direct ORT path toggle (no longer needed; keep for compat)
     use_direct_onnx: bool = os.getenv("PARAKEET_USE_DIRECT_ONNX", "0") not in ("0", "false", "False")
     device_id: int = int(os.getenv("PARAKEET_DEVICE_ID", "0"))
     # Allow either PARAKEET_USE_TENSORRT (preferred) or PARAKEET_USE_TRT

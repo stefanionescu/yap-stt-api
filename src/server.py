@@ -29,12 +29,15 @@ _is_ready: bool = False
 async def on_startup() -> None:
     global _model, _scheduler, _is_ready
     logger.info("Available ORT providers: %s", ort.get_available_providers())
-    if settings.use_direct_onnx and settings.model_dir:
+    if settings.model_dir:
         logger.info("Using local ONNX: dir=%s name=%s", settings.model_dir, settings.model_name)
-        # Use local loader semantics (onnx_asr.load_model(model_name, onnx_dir=...))
-        _model = ParakeetModel._load_internal(settings.model_dir, settings.require_gpu)
+        _model = ParakeetModel.load_local(
+            settings.model_name,
+            settings.model_dir,
+            require_gpu=settings.require_gpu,
+        )
     else:
-        logger.info("Loading model via onnx-asr id: %s", settings.model_id)
+        logger.info("Using hub id: %s (fallback=%s)", settings.model_id, settings.fallback_model_id)
         _model = ParakeetModel.load_with_fallback(
             settings.model_id,
             settings.fallback_model_id,

@@ -36,6 +36,89 @@ class ParakeetModel:
             )
 
     @classmethod
+    def load_local(
+        cls,
+        model_name: str,
+        model_dir: str,
+        *,
+        require_gpu: bool = True,
+    ) -> "ParakeetModel":
+        if onnx_asr is None:
+            raise RuntimeError("onnx-asr is not installed; please install dependencies.")
+        cls._ensure_gpu_active(require_gpu)
+
+        onnx_dir = os.path.abspath(model_dir)
+        if not os.path.isdir(onnx_dir):
+            raise RuntimeError(f"model_dir does not exist: {onnx_dir}")
+
+        enc = os.path.join(onnx_dir, "encoder-model.onnx")
+        dec = os.path.join(onnx_dir, "decoder_joint-model.onnx")
+        if not (os.path.isfile(enc) and os.path.isfile(dec)):
+            raise RuntimeError(
+                "Model dir missing encoder-model.onnx and/or decoder_joint-model.onnx. "
+                "If you have INT8 files named *.int8.onnx, rename them accordingly."
+            )
+
+        prov_list = pick_providers(
+            device_id=settings.device_id,
+            use_tensorrt=settings.use_tensorrt,
+            trt_engine_cache=settings.trt_engine_cache,
+            trt_timing_cache=settings.trt_timing_cache,
+            trt_max_workspace_size=settings.trt_max_workspace_size,
+        )
+        prov_names_only = [p if isinstance(p, str) else p[0] for p in prov_list]
+
+        logger.info("Loading local ONNX via onnx_asr: name=%s dir=%s", model_name, onnx_dir)
+        model = onnx_asr.load_model(model_name, onnx_dir, providers=prov_names_only)
+
+        try:
+            get_providers = getattr(model, "get_providers", None) or getattr(getattr(model, "asr", None), "get_providers", None)
+            if callable(get_providers):
+                active = get_providers()
+                if require_gpu and all(x not in active for x in ("CUDAExecutionProvider", "TensorrtExecutionProvider")):
+                    raise RuntimeError(f"Model session not using GPU providers: {active}")
+                logger.info("Active model providers: %s", active)
+        except Exception:
+            pass
+
+        return cls(model_id=f"{model_name}@{onnx_dir}", _model=model)
+
+    @classmethod
+    def load_remote(
+        cls,
+        repo_id: str,
+        *,
+        require_gpu: bool = True,
+    ) -> "ParakeetModel":
+        if onnx_asr is None:
+            raise RuntimeError("onnx-asr is not installed; please install dependencies.")
+        cls._ensure_gpu_active(require_gpu)
+
+        prov_list = pick_providers(
+            device_id=settings.device_id,
+            use_tensorrt=settings.use_tensorrt,
+            trt_engine_cache=settings.trt_engine_cache,
+            trt_timing_cache=settings.trt_timing_cache,
+            trt_max_workspace_size=settings.trt_max_workspace_size,
+        )
+        prov_names_only = [p if isinstance(p, str) else p[0] for p in prov_list]
+
+        logger.info("Loading remote ONNX from hub: %s", repo_id)
+        model = onnx_asr.load_model(repo_id, providers=prov_names_only)
+
+        try:
+            get_providers = getattr(model, "get_providers", None) or getattr(getattr(model, "asr", None), "get_providers", None)
+            if callable(get_providers):
+                active = get_providers()
+                if require_gpu and all(x not in active for x in ("CUDAExecutionProvider", "TensorrtExecutionProvider")):
+                    raise RuntimeError(f"Model session not using GPU providers: {active}")
+                logger.info("Active model providers: %s", active)
+        except Exception:
+            pass
+
+        return cls(model_id=repo_id, _model=model)
+
+    @classmethod
     def _load_internal(cls, source: str, require_gpu: bool) -> "ParakeetModel":
         cls._ensure_gpu_active(require_gpu)
         # Build providers list (names only for onnx-asr)
