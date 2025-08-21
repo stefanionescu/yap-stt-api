@@ -14,11 +14,9 @@ export PARAKEET_MAX_QUEUE_WAIT_S=${PARAKEET_MAX_QUEUE_WAIT_S:-30}
 export PARAKEET_MAX_AUDIO_SECONDS=${PARAKEET_MAX_AUDIO_SECONDS:-600}
 export PARAKEET_MAX_UPLOAD_MB=${PARAKEET_MAX_UPLOAD_MB:-64}
 
-# Model selection
+# Model selection (onnx-asr ids)
 export PARAKEET_MODEL_ID=${PARAKEET_MODEL_ID:-nemo-parakeet-tdt-0.6b-v2}
-export PARAKEET_MODEL_DIR=${PARAKEET_MODEL_DIR:-/models/parakeet-int8}
-export HF_REPO_ID=${HF_REPO_ID:-istupakov/parakeet-tdt-0.6b-v2-onnx}
-export HF_REVISION=${HF_REVISION:-main}
+export PARAKEET_FALLBACK_MODEL_ID=${PARAKEET_FALLBACK_MODEL_ID:-istupakov/parakeet-tdt-0.6b-v2-onnx}
 # Optional: export HF_TOKEN in your shell for authenticated downloads
 
 # Caches (used if/when TensorRT EP is enabled in ORT build)

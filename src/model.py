@@ -56,19 +56,10 @@ class ParakeetModel:
         primary_id: str,
         fallback_id: Optional[str] = None,
         *,
-        model_dir: str = "",
         require_gpu: bool = True,
     ) -> "ParakeetModel":
         if onnx_asr is None:
             raise RuntimeError("onnx-asr is not installed; please install dependencies.")
-
-        # Try explicit local directory first, but fall back if the loader doesn't support paths
-        if model_dir:
-            try:
-                logger.info("Attempting to load model from local dir: %s", model_dir)
-                return cls._load_internal(model_dir, require_gpu)
-            except Exception as e:
-                logger.warning("Local dir load failed (%s). Falling back to hub ids.", e)
 
         # Try primary alias
         try:
@@ -83,7 +74,7 @@ class ParakeetModel:
             return cls._load_internal(fallback_id, require_gpu)
 
         # If everything fails, raise the original error
-        raise RuntimeError(f"Failed to load model from local dir/id. Primary='{primary_id}', fallback='{fallback_id}'.")
+        raise RuntimeError(f"Failed to load model by id. Primary='{primary_id}', fallback='{fallback_id}'.")
 
     def recognize_waveform(self, waveform: np.ndarray, sample_rate: int) -> str:
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as tmp:

@@ -16,7 +16,6 @@ from .metrics import Timer, RequestMetrics, log_request
 from .model import ParakeetModel
 from .scheduler import Scheduler, bucket_priority
 
-
 logger = logging.getLogger("parakeet.server")
 configure_logging()
 app = FastAPI(title="Parakeet ASR (ONNX)")
@@ -26,16 +25,14 @@ _model: ParakeetModel | None = None
 _scheduler: Scheduler | None = None
 _is_ready: bool = False
 
-
 @app.on_event("startup")
 async def on_startup() -> None:
     global _model, _scheduler, _is_ready
     logger.info("Available ORT providers: %s", ort.get_available_providers())
-    logger.info("Loading model: %s (dir=%s)", settings.model_id, settings.model_dir or "<hub>")
+    logger.info("Loading model: %s", settings.model_id)
     _model = ParakeetModel.load_with_fallback(
         settings.model_id,
         settings.fallback_model_id,
-        model_dir=settings.model_dir,
         require_gpu=settings.require_gpu,
     )
     logger.info("Model loaded from: %s", _model.model_id)
@@ -57,16 +54,13 @@ async def on_shutdown() -> None:
         await _scheduler.stop()
     _is_ready = False
 
-
 @app.get("/healthz")
 async def healthz() -> Dict[str, Any]:
     return {"status": "ok", "model": settings.model_id}
 
-
 @app.get("/readyz")
 async def readyz() -> Dict[str, Any]:
     return {"ready": bool(_is_ready)}
-
 
 @app.post("/v1/transcribe")
 async def transcribe(file: UploadFile = File(...)) -> JSONResponse:

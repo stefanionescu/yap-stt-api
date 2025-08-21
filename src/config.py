@@ -10,7 +10,6 @@ class Settings(BaseSettings):
     # Model identifiers (onnx-asr hub supports aliases)
     model_id: str = os.getenv("PARAKEET_MODEL_ID", "nemo-parakeet-tdt-0.6b-v2")
     fallback_model_id: str = os.getenv("PARAKEET_FALLBACK_MODEL_ID", "istupakov/parakeet-tdt-0.6b-v2-onnx")
-    model_dir: str = os.getenv("PARAKEET_MODEL_DIR", "")  # Prefer local INT8 folder if set
 
     # Enforce GPU
     require_gpu: bool = os.getenv("PARAKEET_REQUIRE_GPU", "1") not in ("0", "false", "False")

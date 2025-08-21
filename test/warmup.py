@@ -13,10 +13,19 @@ RESULTS_DIR = Path("test/results")
 RESULTS_FILE = RESULTS_DIR / "warmup.txt"
 
 
-def find_sample_file(samples_dir: str) -> str | None:
+def find_sample_file(samples_dir: str, filename: str = "") -> str | None:
     p = Path(samples_dir)
     if not p.exists():
         return None
+    
+    # If specific filename provided, look for exact match
+    if filename:
+        target = p / filename
+        if target.exists() and target.suffix.lower() in EXTS:
+            return str(target)
+        return None
+    
+    # Otherwise find first audio file
     for root, _, files in os.walk(p):
         for f in files:
             if Path(f).suffix.lower() in EXTS:
@@ -24,44 +33,16 @@ def find_sample_file(samples_dir: str) -> str | None:
     return None
 
 
-def find_sample_by_name(name: str, samples_dir: str) -> str | None:
-    if not name:
-        return None
-    p = Path(samples_dir)
-    if not p.exists():
-        return None
-    # Prefer exact basename match; if multiple, prefer .wav
-    candidates: list[Path] = []
-    for root, _, files in os.walk(p):
-        for f in files:
-            fp = Path(root) / f
-            if fp.suffix.lower() in EXTS and fp.stem.lower() == name.lower():
-                candidates.append(fp)
-    if not candidates:
-        return None
-    candidates_sorted = sorted(candidates, key=lambda x: (x.suffix.lower() != ".wav", str(x)))
-    return str(candidates_sorted[0])
-
-
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--file", type=str, default="", help="Absolute path to audio file")
-    parser.add_argument("--name", type=str, default="mid", help="Sample base name in samples/ (auto-detect extension)")
+    parser.add_argument("--file", type=str, default="mid.wav", help="Filename in samples/ directory (e.g., mid.wav, long.mp3)")
     parser.add_argument("--url", type=str, default="http://127.0.0.1:8000")
     args = parser.parse_args()
 
-    file_path = args.file
+    file_path = find_sample_file(SAMPLES_DIR, args.file)
     if not file_path:
-        # If a name is provided (default: mid), prefer that inside samples/
-        by_name = find_sample_by_name(args.name, SAMPLES_DIR)
-        if by_name:
-            file_path = by_name
-        else:
-            # Fallback: first audio in samples/
-            file_path = find_sample_file(SAMPLES_DIR) or ""
-            if not file_path:
-                print("No audio file provided and no samples found.")
-                return 2
+        print(f"Audio file '{args.file}' not found in {SAMPLES_DIR}/")
+        return 2
 
     url = args.url.rstrip("/") + "/v1/transcribe"
     with open(file_path, "rb") as f:

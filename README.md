@@ -1,6 +1,6 @@
 ## Parakeet 0.6B v2 ONNX FastAPI (ORT + TensorRT-EP)
 
-A single-process FastAPI service that runs NVIDIA Parakeet TDT 0.6B v2 (English) converted to ONNX, exposing a one-shot transcription endpoint.
+A single-process FastAPI service that runs NVIDIA Parakeet TDT 0.6b v2 (English) converted to ONNX, exposing a one-shot transcription endpoint.
 
 - Endpoint: `POST /v1/transcribe` (multipart form: `file`)
 - Concurrency: asyncio lane workers + priority queue
@@ -18,9 +18,10 @@ A single-process FastAPI service that runs NVIDIA Parakeet TDT 0.6B v2 (English)
 
 ### Model
 
-Default model uses onnx-asr hub alias `nemo-parakeet-tdt-0.6b-v2`, backed by the HF ONNX export:
+Models are downloaded automatically from Hugging Face by onnx-asr on first run.
 
-- HF: `istupakov/parakeet-tdt-0.6b-v2-onnx`  
+- Default model id: `nemo-parakeet-tdt-0.6b-v2`
+- Fallback: `istupakov/parakeet-tdt-0.6b-v2-onnx`  \
   See: `https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx`
 
 ### Run (venv, GPU only)
@@ -30,16 +31,16 @@ Default model uses onnx-asr hub alias `nemo-parakeet-tdt-0.6b-v2`, backed by the
 bash scripts/setup.sh
 source .venv/bin/activate
 
-# 2) Fetch INT8 model from Hugging Face (respects HF_TOKEN if set)
-bash scripts/fetch_int8_model.sh
-
-# 3) Verify GPU provider is available
+# 2) Verify GPU provider is available
 python -c "import onnxruntime as ort; print(ort.get_available_providers())"  # must include CUDAExecutionProvider
 
-# 4) Start server
+# 3) Start server (foreground)
 bash scripts/start.sh
+# or start in background and tail logs
+bash scripts/start_bg.sh
+bash scripts/tail_bg_logs.sh
 
-# 5) Warmup test (result saved to test/results/warmup.txt)
+# 4) Warmup test (result saved to test/results/warmup.txt)
 python3 test/warmup.py --url http://127.0.0.1:8000
 ```
 
@@ -68,7 +69,8 @@ python3 -m src.metrics --windows 30m 1h 3h 6h 12h 24h 3d
 
 Defaults live in `scripts/env.sh`. You can override via environment vars before `start.sh`.
 
-- `PARAKEET_MODEL_DIR` (default: `/models/parakeet-int8`) — local INT8 folder
+- `PARAKEET_MODEL_ID` (default: `nemo-parakeet-tdt-0.6b-v2`)
+- `PARAKEET_FALLBACK_MODEL_ID` (default: `istupakov/parakeet-tdt-0.6b-v2-onnx`)
 - `PARAKEET_NUM_LANES` (default: 6)
 - `PARAKEET_QUEUE_MAX_FACTOR` (default: 2)
 - `PARAKEET_MAX_QUEUE_WAIT_S` (default: 30)
@@ -83,10 +85,17 @@ TensorRT engine and timing caches (Linux GPU with ORT TensorRT-EP builds):
 ### Warmup
 
 - At startup, the service runs a short warmup (0.5s) to initialize runtime and caches.
-- You can also hit a warmup request via `test/warmup.py` using a file in `samples/` or provide a path:
+- You can also hit a warmup request via `test/warmup.py` using files in `samples/`:
 
 ```bash
-python3 test/warmup.py --file samples/your.wav
+# Default: uses samples/mid.wav
+python3 test/warmup.py
+
+# Custom file from samples/
+python3 test/warmup.py --file long.mp3
+
+# View full transcription result
+python3 -c "import json; print(json.load(open('test/results/warmup.txt'))['text'])"
 ```
 
 ### Purging
