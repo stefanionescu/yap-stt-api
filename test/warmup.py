@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 import httpx
+import time
 
 SAMPLES_DIR = "samples"
 EXTS = {".wav", ".flac", ".ogg", ".mp3"}
@@ -49,9 +50,11 @@ def main() -> int:
         files = {"file": (os.path.basename(file_path), f, "application/octet-stream")}
         with httpx.Client(timeout=60) as client:
             try:
+                t0 = time.perf_counter()
                 r = client.post(url, files=files)
                 r.raise_for_status()
                 data = r.json()
+                elapsed_s = time.perf_counter() - t0
             except httpx.HTTPStatusError as e:
                 resp = e.response
                 ct = resp.headers.get("content-type", "")
@@ -76,6 +79,10 @@ def main() -> int:
         print("No speech found")
     
     print(f"Audio duration: {duration:.4f}s")
+    try:
+        print(f"Transcription time: {elapsed_s:.4f}s")
+    except NameError:
+        pass
 
     # Write result to test/results/warmup.txt (overwrite)
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
