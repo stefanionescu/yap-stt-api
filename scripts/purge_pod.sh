@@ -10,7 +10,7 @@ VENV_DIR=${VENV_DIR:-".venv"}
 MODELS_DIR_HOST=${MODELS_DIR_HOST:-"models"}
 PARAKEET_MODEL_DIR=${PARAKEET_MODEL_DIR:-"/models/parakeet-int8"}
 
-# Purge EVERYTHING by default (no flags needed)
+# Purge core artifacts by default (no flags needed). Docker uninstall is opt-in.
 DO_LOGS=1
 DO_ENGINES=1
 DO_MODELS=1
@@ -20,21 +20,21 @@ DO_UNINSTALL_DOCKER=0
 
 usage() {
   cat <<EOF
-Usage: $0 [--logs] [--engines] [--models] [--deps] [--all] [--uninstall-docker]
+Usage: $0 [--logs] [--engines] [--models] [--deps] [--all] [--keep-docker]
 
 Stops the FastAPI service and purges logs, caches, dependencies, and local model files.
 
-Defaults: With no flags, purges EVERYTHING (logs, engines, models, deps).
+Defaults: With no flags, purges core artifacts (logs, engines, models, deps). Docker is preserved.
 
 Options (for selective purge):
   --logs       Remove logs/ and metrics logs (keeps directory)
   --engines    Remove TensorRT engine & timing caches (TRT_ENGINE_CACHE, TRT_TIMING_CACHE)
   --models     Remove onnx-asr model cache (~/.cache/onnx-asr), host ./models, and PARAKEET_MODEL_DIR
   --deps       Remove local Python venv (.venv) and pip cache (~/.cache/pip)
-  --all        Do all of the above (same as no flags)
+  --all        Purge ALL including Docker uninstall (use --keep-docker to retain Docker)
 
 Additional:
-  --uninstall-docker  Attempt to uninstall Docker Engine and remove Docker data (requires root)
+  --keep-docker       Keep Docker installed even when using --all
 
 Env:
   PORT (default: 8000)
@@ -55,8 +55,8 @@ for arg in "$@"; do
     --engines) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=1; DO_MODELS=0; DO_DEPS=0 ;;
     --models) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=0; DO_MODELS=1; DO_DEPS=0 ;;
     --deps) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=0; DO_MODELS=0; DO_DEPS=1 ;;
-    --all) SELECTIVE=0; DO_LOGS=1; DO_ENGINES=1; DO_MODELS=1; DO_DEPS=1 ;;
-    --uninstall-docker) SELECTIVE=1; DO_UNINSTALL_DOCKER=1 ;;
+    --all) SELECTIVE=0; DO_LOGS=1; DO_ENGINES=1; DO_MODELS=1; DO_DEPS=1; DO_UNINSTALL_DOCKER=1 ;;
+    --keep-docker) DO_UNINSTALL_DOCKER=0 ;;
     *) echo "Unknown arg: $arg"; usage; exit 2 ;;
   esac
   shift || true
