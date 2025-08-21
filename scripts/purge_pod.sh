@@ -174,3 +174,13 @@ if [[ $DO_UNINSTALL_DOCKER -eq 1 ]]; then
   rm -rf /var/lib/containerd || true
   echo "Docker uninstall step completed."
 fi
+
+# Attempt to exit active virtualenv if running in the same shell (when sourced)
+if [[ -n "${VIRTUAL_ENV:-}" ]]; then
+  # If script is sourced, BASH_SOURCE[0] != $0, so deactivate will affect current shell
+  if [[ "${BASH_SOURCE[0]:-}" != "$0" ]]; then
+    deactivate 2>/dev/null || true
+  else
+    echo "NOTE: An active virtualenv was detected. To exit it in your current shell, run: deactivate" >&2
+  fi
+fi
