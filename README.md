@@ -9,29 +9,20 @@ A single-process FastAPI service that runs NVIDIA Parakeet TDT 0.6b v2 (English)
 
 > GPU-only: requirements are pinned to onnxruntime-gpu and onnx-asr >= 0.7.0. CPU ORT is not supported here.
 
-### Quickstart (Docker-only)
+### Quickstart (Direct in Pod; no Docker)
 
 ```bash
-# 1) Start (installs Docker if missing, then builds and runs)
+# 1) Install TensorRT wheel (one-time)
+bash scripts/install_trt.sh
+
+# 2) Start the API (wires TRT libs automatically)
 bash scripts/start.sh
 
-# 2) Test once (from host)
+# 3) Test once (from pod)
 python3 test/warmup.py --file samples/long.mp3
-
-# 3) Verify providers (optional)
-docker compose exec yap-stt-api bash -lc 'python - <<PY
-import ctypes, onnxruntime as ort
-print("ORT available:", ort.get_available_providers())
-print("Try TRT libs:")
-for lib in ("libnvinfer.so.10","libnvinfer_plugin.so.10"):
-  try:
-    ctypes.CDLL(lib); print(lib, "OK")
-  except OSError as e:
-    print(lib, "MISSING:", e)
-PY'
 ```
 
-Defaults: `USE_DOCKER=1`, `PARAKEET_MODEL_DIR=./models/parakeet-int8`, `PARAKEET_USE_DIRECT_ONNX=1`, `AUTO_FETCH_INT8=1`, `PARAKEET_USE_TENSORRT=1`.
+Defaults: `USE_DOCKER=0`, `PARAKEET_MODEL_DIR=./models/parakeet-int8`, `PARAKEET_USE_DIRECT_ONNX=1`, `AUTO_FETCH_INT8=1`, `PARAKEET_USE_TENSORRT=1`.
 Runtime will fall back to CUDA EP automatically if TRT isn’t available.
 
 ### Admission control
@@ -75,7 +66,7 @@ bash scripts/stop.sh
 
 If you want to tweak defaults (lanes, paths, queue), edit `scripts/env.sh`.
 
-Non-Docker mode is not supported.
+Docker is not supported inside the pod. If you need containers, build/run off-pod. See: [Docker commands](https://docs.runpod.io/tutorials/introduction/containers/docker-commands), [Intro to containers](https://docs.runpod.io/tutorials/introduction/containers).
 
 ### API
 
@@ -116,15 +107,13 @@ TensorRT engine and timing caches (Linux GPU with ORT TensorRT-EP builds):
 - `TRT_TIMING_CACHE` (default: `/models/timing.cache`)
 - `PARAKEET_USE_TENSORRT` (default: 1) — enable TensorRT EP if libs present (auto-fallback to CUDA)
 
-### Enabling TensorRT EP without Docker (optional)
+### Enabling TensorRT EP (wheel method)
 
 If your pod is Ubuntu 22.04, you can install TensorRT runtime libs in-place:
 
 ```bash
-# Install TRT runtime (requires root or sudo inside the pod)
-INSTALL_TRT=1 bash scripts/setup.sh
-
-# Then enable TRT EP
+# Install TRT wheel
+bash scripts/install_trt.sh
 export PARAKEET_USE_TENSORRT=1
 bash scripts/start.sh
 ```

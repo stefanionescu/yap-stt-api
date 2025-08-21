@@ -10,33 +10,27 @@ VENV_DIR=${VENV_DIR:-".venv"}
 MODELS_DIR_HOST=${MODELS_DIR_HOST:-"models"}
 PARAKEET_MODEL_DIR=${PARAKEET_MODEL_DIR:-"/models/parakeet-int8"}
 
-# Purge core artifacts by default (no flags needed). Docker uninstall is opt-in.
+# Purge core artifacts by default (no flags needed).
 DO_LOGS=1
 DO_ENGINES=1
 DO_MODELS=1
 DO_DEPS=1
 SELECTIVE=0
-DO_UNINSTALL_DOCKER=0
-DO_REMOVE_DOCKER_USER=0
 
 usage() {
   cat <<EOF
-Usage: $0 [--logs] [--engines] [--models] [--deps] [--all] [--keep-docker] [--remove-docker-user]
+Usage: $0 [--logs] [--engines] [--models] [--deps] [--all]
 
 Stops the FastAPI service and purges logs, caches, dependencies, and local model files.
 
-Defaults: With no flags, purges core artifacts (logs, engines, models, deps). Docker is preserved.
+Defaults: With no flags, purges core artifacts (logs, engines, models, deps).
 
 Options (for selective purge):
   --logs       Remove logs/ and metrics logs (keeps directory)
   --engines    Remove TensorRT engine & timing caches (TRT_ENGINE_CACHE, TRT_TIMING_CACHE)
   --models     Remove onnx-asr model cache (~/.cache/onnx-asr), host ./models, and PARAKEET_MODEL_DIR
   --deps       Remove local Python venv (.venv) and pip cache (~/.cache/pip)
-  --all        Purge ALL including Docker uninstall (use --keep-docker to retain Docker)
-
-Additional:
-  --keep-docker       Keep Docker installed even when using --all
-  --remove-docker-user Remove the non-root Docker user (rdocker) and its home
+  --all        Do all of the above (same as no flags)
 
 Env:
   PORT (default: 8000)
@@ -57,9 +51,7 @@ for arg in "$@"; do
     --engines) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=1; DO_MODELS=0; DO_DEPS=0 ;;
     --models) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=0; DO_MODELS=1; DO_DEPS=0 ;;
     --deps) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=0; DO_MODELS=0; DO_DEPS=1 ;;
-    --all) SELECTIVE=0; DO_LOGS=1; DO_ENGINES=1; DO_MODELS=1; DO_DEPS=1; DO_UNINSTALL_DOCKER=1 ;;
-    --keep-docker) DO_UNINSTALL_DOCKER=0 ;;
-    --remove-docker-user) DO_REMOVE_DOCKER_USER=1 ;;
+    --all) SELECTIVE=0; DO_LOGS=1; DO_ENGINES=1; DO_MODELS=1; DO_DEPS=1 ;;
     *) echo "Unknown arg: $arg"; usage; exit 2 ;;
   esac
   shift || true
@@ -153,31 +145,6 @@ fi
 
 echo "Done."
 
-if [[ $DO_UNINSTALL_DOCKER -eq 1 ]]; then
-  echo "Attempting to uninstall Docker Engine and remove Docker data..."
-  if ! command -v docker >/dev/null 2>&1; then
-    echo "Docker is not installed or not in PATH. Skipping uninstall."
-    exit 0
-  fi
-  docker compose down || true
-  if command -v systemctl >/dev/null 2>&1; then
-    systemctl stop docker || true
-    systemctl stop containerd || true
-  fi
-  if command -v apt-get >/dev/null 2>&1; then
-    apt-get purge -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras || true
-    apt-get autoremove -y || true
-    rm -f /etc/apt/sources.list.d/docker.list || true
-    rm -f /etc/apt/keyrings/docker.gpg || true
-    apt-get update -y || true
-  else
-    echo "apt-get not available; skipping package purge."
-  fi
-  rm -rf /var/lib/docker || true
-  rm -rf /var/lib/containerd || true
-  echo "Docker uninstall step completed."
-fi
-
 # Attempt to exit active virtualenv if running in the same shell (when sourced)
 if [[ -n "${VIRTUAL_ENV:-}" ]]; then
   # If script is sourced, BASH_SOURCE[0] != $0, so deactivate will affect current shell
@@ -188,12 +155,3 @@ if [[ -n "${VIRTUAL_ENV:-}" ]]; then
   fi
 fi
 
-# Optionally remove non-root Docker user
-if [[ $DO_REMOVE_DOCKER_USER -eq 1 ]]; then
-  if id -u rdocker >/dev/null 2>&1; then
-    echo "Removing user 'rdocker' and its home..."
-    userdel -r rdocker || true
-  else
-    echo "User 'rdocker' not found; skipping."
-  fi
-fi

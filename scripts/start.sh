@@ -5,48 +5,31 @@ source scripts/env.sh || true
 
 mkdir -p logs logs/metrics
 
-use_docker=${USE_DOCKER:-1}
-if ! command -v docker >/dev/null 2>&1; then
-  echo "Docker not found. Installing..."
-  bash scripts/install_docker.sh
+# Wire the tensorrt wheel's lib dir at runtime so ORT TRT-EP can load
+TRT_LIB_DIR=$(python3 - <<'PY'
+import os, sysconfig
+site = sysconfig.get_paths().get('purelib') or ''
+p = os.path.join(site, 'tensorrt', 'lib')
+print(p if os.path.isdir(p) else '')
+PY
+)
+if [[ -n "${TRT_LIB_DIR}" ]]; then
+  export LD_LIBRARY_PATH="${TRT_LIB_DIR}:${LD_LIBRARY_PATH:-}"
 fi
 
-# Ensure Docker daemon is running (non-systemd environments)
-if ! docker info >/dev/null 2>&1; then
-  echo "Starting Docker daemon (dockerd) in background..."
-  mkdir -p logs
-  # Prefer rootless dockerd if rootlesskit/slirp4netns present; otherwise regular dockerd
-  if command -v rootlesskit >/dev/null 2>&1 && command -v dockerd-rootless-setuptool.sh >/dev/null 2>&1; then
-    # Ensure non-root user exists for rootless Docker
-    if ! id -u rdocker >/dev/null 2>&1; then
-      useradd -m -s /bin/bash rdocker || true
-    fi
-    echo "Starting rootless Docker as user rdocker..."
-    su - rdocker -c 'export XDG_RUNTIME_DIR=/run/user/$(id -u); mkdir -p "$XDG_RUNTIME_DIR"; dockerd-rootless-setuptool.sh install || true; nohup dockerd-rootless.sh >> /workspace/yap-stt-api/logs/dockerd.log 2>&1 & echo $! > /workspace/yap-stt-api/logs/dockerd.pid'
-  else
-    nohup dockerd --host=unix:///var/run/docker.sock --storage-driver=overlay2 \
-    > logs/dockerd.log 2>&1 & echo $! > logs/dockerd.pid
-  fi
-  # Wait for daemon to be ready
-  for i in {1..20}; do
-    if docker info >/dev/null 2>&1; then
-      echo "Docker daemon is ready."
-      break
-    fi
-    sleep 1
-  done
-  if ! docker info >/dev/null 2>&1; then
-    echo "ERROR: Docker daemon failed to start. Check logs/dockerd.log" >&2
-    exit 1
-  fi
+CUDNN_LIB_DIR=$(python3 - <<'PY'
+import os, sysconfig
+site = sysconfig.get_paths().get('purelib') or ''
+p = os.path.join(site, 'nvidia', 'cudnn', 'lib')
+print(p if os.path.isdir(p) else '')
+PY
+)
+if [[ -n "${CUDNN_LIB_DIR}" ]]; then
+  export LD_LIBRARY_PATH="${CUDNN_LIB_DIR}:${LD_LIBRARY_PATH}"
 fi
 
-# If rootless socket exists, direct docker client to it
-if id -u rdocker >/dev/null 2>&1; then
-  RUID=$(id -u rdocker)
-  if [[ -S "/run/user/${RUID}/docker.sock" ]]; then
-    export DOCKER_HOST="unix:///run/user/${RUID}/docker.sock"
-  fi
+if [[ -f .venv/bin/activate ]]; then
+  source .venv/bin/activate
 fi
 
-docker compose up --build
+exec uvicorn src.server:app --host "${HOST:-0.0.0.0}" --port "${PORT:-8000}" --loop uvloop --http httptools
