@@ -30,7 +30,12 @@ async def on_startup() -> None:
     global _model, _scheduler, _is_ready
     logger.info("Available ORT providers: %s", ort.get_available_providers())
     if settings.model_dir:
-        logger.info("Using local ONNX: dir=%s name=%s", settings.model_dir, settings.model_name)
+        try:
+            import os
+            abs_dir = os.path.abspath(settings.model_dir)
+        except Exception:
+            abs_dir = settings.model_dir  # best-effort
+        logger.info("Using local ONNX: dir=%s name=%s", abs_dir, settings.model_name)
         _model = ParakeetModel.load_local(
             settings.model_name,
             settings.model_dir,

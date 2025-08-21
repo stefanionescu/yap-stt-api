@@ -56,8 +56,7 @@ class ParakeetModel:
         dec = os.path.join(onnx_dir, "decoder_joint-model.onnx")
         if not (os.path.isfile(enc) and os.path.isfile(dec)):
             raise RuntimeError(
-                "Model dir missing encoder-model.onnx and/or decoder_joint-model.onnx. "
-                "If you have INT8 files named *.int8.onnx, rename them accordingly."
+                "Model dir missing encoder-model.onnx and/or decoder_joint-model.onnx."
             )
 
         # Check config.json for frontend configuration to ensure mel-spectrogram dimensions match
@@ -80,10 +79,9 @@ class ParakeetModel:
             trt_timing_cache=settings.trt_timing_cache,
             trt_max_workspace_size=settings.trt_max_workspace_size,
         )
-        prov_names_only = [p if isinstance(p, str) else p[0] for p in prov_list]
-
+        # Pass provider options through so TRT settings (e.g., FP16) take effect
         logger.info("Loading local ONNX via onnx_asr: name=%s dir=%s", model_name, onnx_dir)
-        model = onnx_asr.load_model(model_name, onnx_dir, providers=prov_names_only)
+        model = onnx_asr.load_model(model_name, onnx_dir, providers=prov_list)
 
         try:
             get_providers = getattr(model, "get_providers", None) or getattr(getattr(model, "asr", None), "get_providers", None)
@@ -115,10 +113,8 @@ class ParakeetModel:
             trt_timing_cache=settings.trt_timing_cache,
             trt_max_workspace_size=settings.trt_max_workspace_size,
         )
-        prov_names_only = [p if isinstance(p, str) else p[0] for p in prov_list]
-
         logger.info("Loading remote ONNX from hub: %s", repo_id)
-        model = onnx_asr.load_model(repo_id, providers=prov_names_only)
+        model = onnx_asr.load_model(repo_id, providers=prov_list)
 
         try:
             get_providers = getattr(model, "get_providers", None) or getattr(getattr(model, "asr", None), "get_providers", None)
@@ -143,8 +139,6 @@ class ParakeetModel:
             trt_timing_cache=settings.trt_timing_cache,
             trt_max_workspace_size=settings.trt_max_workspace_size,
         )
-        prov_names_only = [p if isinstance(p, str) else p[0] for p in prov_list]
-
         # If source is a directory, load local with model_name and onnx_dir
         if os.path.isdir(source):
             local_dir = source
@@ -152,18 +146,17 @@ class ParakeetModel:
             dec = os.path.join(local_dir, "decoder_joint-model.onnx")
             if not (os.path.isfile(enc) and os.path.isfile(dec)):
                 raise RuntimeError(
-                    "Model dir missing encoder-model.onnx and/or decoder_joint-model.onnx. "
-                    "If you have INT8 files named *.int8.onnx, rename them accordingly."
+                    "Model dir missing encoder-model.onnx and/or decoder_joint-model.onnx."
                 )
             ext_data = [p for p in os.listdir(local_dir) if p.endswith(".onnx.data")]
             if ext_data:
                 logger.warning("Found external-data files in model dir (possible FP32): %s", ext_data)
             logger.info("Loading local ONNX: name=%s dir=%s", settings.model_name, local_dir)
             # onnx-asr 0.7.x expects the local dir as the 2nd positional arg
-            model = onnx_asr.load_model(settings.model_name, local_dir, providers=prov_names_only)
+            model = onnx_asr.load_model(settings.model_name, local_dir, providers=prov_list)
         else:
             # Remote/hub path
-            model = onnx_asr.load_model(source, providers=prov_names_only)
+            model = onnx_asr.load_model(source, providers=prov_list)
         # Best-effort provider check if accessible
         try:
             get_providers = getattr(model, "get_providers", None) or getattr(getattr(model, "asr", None), "get_providers", None)

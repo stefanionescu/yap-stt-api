@@ -11,7 +11,7 @@ TORCH_CACHE_DIR=${TORCH_CACHE_DIR:-"$HOME/.cache/torch"}
 PIP_CACHE_DIR=${PIP_CACHE_DIR:-"$HOME/.cache/pip"}
 VENV_DIR=${VENV_DIR:-".venv"}
 MODELS_DIR_HOST=${MODELS_DIR_HOST:-"models"}
-PARAKEET_MODEL_DIR=${PARAKEET_MODEL_DIR:-"/models/parakeet-int8"}
+PARAKEET_MODEL_DIR=${PARAKEET_MODEL_DIR:-"/models/parakeet-fp32"}
 
 # Purge core artifacts by default (no flags needed).
 DO_LOGS=1
@@ -50,7 +50,7 @@ Env:
   PIP_CACHE_DIR (default: ~/.cache/pip)
   VENV_DIR (default: .venv)
   MODELS_DIR_HOST (default: ./models)
-  PARAKEET_MODEL_DIR (default: /models/parakeet-int8)
+  PARAKEET_MODEL_DIR (default: /models/parakeet-fp32)
 EOF
 }
 

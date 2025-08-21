@@ -53,13 +53,13 @@ if [[ -n "${PARAKEET_MODEL_DIR:-}" ]]; then
     echo "Model dir missing: ${PARAKEET_MODEL_DIR}" >&2
     exit 1
   fi
-  for f in encoder-model.onnx decoder_joint-model.onnx vocab.txt; do
+  for f in encoder-model.onnx decoder_joint-model.onnx vocab.txt config.json; do
     if [[ ! -f "${PARAKEET_MODEL_DIR}/${f}" ]]; then
       echo "Missing ${f} in ${PARAKEET_MODEL_DIR}" >&2
       exit 1
     fi
   done
-  ls -lh "${PARAKEET_MODEL_DIR}"/encoder-model.onnx "${PARAKEET_MODEL_DIR}"/decoder_joint-model.onnx "${PARAKEET_MODEL_DIR}"/vocab.txt || true
+  ls -lh "${PARAKEET_MODEL_DIR}"/encoder-model.onnx* "${PARAKEET_MODEL_DIR}"/decoder_joint-model.onnx "${PARAKEET_MODEL_DIR}"/vocab.txt "${PARAKEET_MODEL_DIR}"/config.json || true
 fi
 
 exec python -m uvicorn src.server:app --host "${HOST:-0.0.0.0}" --port "${PORT:-8000}" --loop uvloop --http httptools

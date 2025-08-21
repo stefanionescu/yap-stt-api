@@ -11,14 +11,14 @@ A single-process FastAPI service that runs NVIDIA Parakeet TDT 0.6b v2 (English)
 
 ### Quickstart
 
-Option A (recommended, local INT8):
+Option A (local FP32, recommended):
 ```bash
 # 1) Install TensorRT wheel (one-time)
 bash scripts/install_trt.sh
 
-# 2) Fetch INT8 artifacts locally (into PARAKEET_MODEL_DIR)
+# 2) Fetch FP32 artifacts locally (into PARAKEET_MODEL_DIR)
 source scripts/env.sh
-bash scripts/fetch_int8.sh
+bash scripts/fetch_fp32.sh
 
 # 3) Start the API (wires TRT libs automatically)
 bash scripts/start_bg.sh && bash scripts/tail_bg_logs.sh
@@ -28,7 +28,7 @@ source .venv/bin/activate 2>/dev/null || true
 python3 test/warmup.py --file long.mp3
 ```
 
-Option B (use the hub, no local INT8):
+Option B (use the hub, no local dir):
 ```bash
 source .venv/bin/activate 2>/dev/null || true
 export PARAKEET_MODEL_DIR=""
@@ -37,13 +37,13 @@ python -m uvicorn src.server:app --host 0.0.0.0 --port 8000 --loop uvloop --http
 
 One-time setup alternative:
 ```bash
-# Creates venv, installs deps, and can auto-fetch INT8 when AUTO_FETCH_INT8=1
+# Creates venv, installs deps, and can auto-fetch FP32 when AUTO_FETCH_FP32=1
 bash scripts/setup.sh
 bash scripts/start.sh
 ```
 
-Defaults: `PARAKEET_MODEL_DIR=./models/parakeet-int8`, `PARAKEET_USE_TENSORRT=1`.
-- Local vs hub is decided solely by `PARAKEET_MODEL_DIR`: if set and contains model files, the service loads local INT8; otherwise it uses the hub id.
+Defaults: `PARAKEET_MODEL_DIR=./models/parakeet-fp32`, `PARAKEET_USE_TENSORRT=1`.
+- Local vs hub is decided solely by `PARAKEET_MODEL_DIR`: if set and contains model files, the service loads the local directory; otherwise it uses the hub id.
 - Note: `PARAKEET_USE_DIRECT_ONNX` is deprecated and ignored by the server.
 - Runtime will fall back to CUDA EP automatically if TRT isn’t available.
 
@@ -56,19 +56,19 @@ Defaults: `PARAKEET_MODEL_DIR=./models/parakeet-int8`, `PARAKEET_USE_TENSORRT=1`
 
 ### Model
 
-Models can be loaded from Hugging Face by onnx-asr (hub ids) or from a local INT8 directory.
+Models can be loaded from Hugging Face by onnx-asr (hub ids) or from a local FP32 directory.
 
 - Default model id: `nemo-parakeet-tdt-0.6b-v2`
 - Fallback: `istupakov/parakeet-tdt-0.6b-v2-onnx`  \
   See: [istupakov/parakeet-tdt-0.6b-v2-onnx](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx)
 
-INT8 setup (recommended):
+FP32 setup:
 
 Use the fetch script to populate your local model directory:
 ```bash
 source scripts/env.sh
-bash scripts/fetch_int8.sh
-# FORCE_FETCH_INT8=1 bash scripts/fetch_int8.sh  # to refetch
+bash scripts/fetch_fp32.sh
+# FORCE_FETCH_FP32=1 bash scripts/fetch_fp32.sh  # to refetch
 ```
 
 If your Hugging Face downloads require auth, export your token before starting:
@@ -114,10 +114,10 @@ python3 -m src.metrics --windows 30m 1h 3h 6h 12h 24h 3d
 
 Defaults live in `scripts/env.sh`. You can override via environment vars before `start.sh`.
 
-- `PARAKEET_MODEL_DIR` (local INT8 dir; if set and contains `encoder-model.onnx`, `decoder_joint-model.onnx`, `vocab.txt`, local loading is used; otherwise the hub is used)
+- `PARAKEET_MODEL_DIR` (local FP32 dir; if set and contains `encoder-model.onnx`, `encoder-model.onnx.data`, `decoder_joint-model.onnx`, `vocab.txt`, `config.json`, local loading is used; otherwise the hub is used)
 - `PARAKEET_MODEL_ID` (default: `nemo-parakeet-tdt-0.6b-v2`)
 - `PARAKEET_FALLBACK_MODEL_ID` (default: `istupakov/parakeet-tdt-0.6b-v2-onnx`)
-- `PARAKEET_NUM_LANES` (default: 6)
+- `PARAKEET_NUM_LANES` (default: 3)
 - `PARAKEET_QUEUE_MAX_FACTOR` (default: 2)
 - `PARAKEET_MAX_QUEUE_WAIT_S` (default: 30)
 - `PARAKEET_MAX_AUDIO_SECONDS` (default: 600)
@@ -165,10 +165,10 @@ bash scripts/start.sh
 
 ### Troubleshooting
 
-- "Model dir missing: /path/to/models/parakeet-int8" → You skipped the INT8 fetch. Run:
+- "Model dir missing: /path/to/models/parakeet-fp32" → You skipped the FP32 fetch. Run:
 ```bash
 source scripts/env.sh
-bash scripts/fetch_int8.sh
+bash scripts/fetch_fp32.sh
 bash scripts/start.sh
 ```
 - Want to use hub without local files? Clear the var before launching:
@@ -179,8 +179,8 @@ python -m uvicorn src.server:app --host 0.0.0.0 --port 8000 --loop uvloop --http
 
 Docs: `https://onnxruntime.ai/docs/execution-providers/TensorRT-ExecutionProvider.html`
 - `ORT_INTRA_OP_NUM_THREADS` (default: 1)
-- `OMP_NUM_THREADS` (default: 1)
-- `MKL_NUM_THREADS` (default: 1)
+- `OMP_NUM_THREADS` (default: 6)
+- `MKL_NUM_THREADS` (default: 6)
 - `CUDA_MODULE_LOADING` (default: `LAZY`)
 
 ### Testing

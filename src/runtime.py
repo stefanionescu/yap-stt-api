@@ -42,9 +42,9 @@ def pick_providers(
                     "trt_timing_cache_enable": True,
                     "trt_timing_cache_path": trt_timing_cache,
                     "trt_max_workspace_size": trt_max_workspace_size,
-                    # Prefer fastest precision available in engine if model allows
-                    "trt_int8_enable": True,
+                    # FP16 enabled, INT8 disabled (use FP32 graphs with FP16 kernels)
                     "trt_fp16_enable": True,
+                    "trt_int8_enable": False,
                 },
             )
         )

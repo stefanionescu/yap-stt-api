@@ -13,8 +13,9 @@ class Settings(BaseSettings):
     model_id: str = os.getenv("PARAKEET_MODEL_ID", "nemo-parakeet-tdt-0.6b-v2")
     fallback_model_id: str = os.getenv("PARAKEET_FALLBACK_MODEL_ID", "istupakov/parakeet-tdt-0.6b-v2-onnx")
 
-    # Optional local model directory (preferred when provided). Put INT8 artifacts here
-    # and rename to encoder-model.onnx / decoder_joint-model.onnx
+    # Optional local model directory (preferred when provided). Directory must contain
+    # encoder-model.onnx (and encoder-model.onnx.data for FP32), decoder_joint-model.onnx,
+    # vocab.txt, and config.json
     model_dir: str | None = os.getenv("PARAKEET_MODEL_DIR")
 
     # Enforce GPU
