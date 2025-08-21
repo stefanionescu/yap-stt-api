@@ -99,6 +99,7 @@ TensorRT engine and timing caches (Linux GPU with ORT TensorRT-EP builds):
 - `TRT_ENGINE_CACHE` (default: `/models/trt_cache`)
 - `TRT_TIMING_CACHE` (default: `/models/timing.cache`)
 - `PARAKEET_USE_TENSORRT` (default: 1) — enable TensorRT EP if libs present (auto-fallback to CUDA)
+
 ### Enabling TensorRT EP without Docker (optional)
 
 If your pod is Ubuntu 22.04, you can install TensorRT runtime libs in-place:
