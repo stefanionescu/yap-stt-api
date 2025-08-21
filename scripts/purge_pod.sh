@@ -5,6 +5,9 @@ PORT=${PORT:-8000}
 TRT_ENGINE_CACHE=${TRT_ENGINE_CACHE:-/models/trt_cache}
 TRT_TIMING_CACHE=${TRT_TIMING_CACHE:-/models/timing.cache}
 ONNX_ASR_CACHE_DIR=${ONNX_ASR_CACHE_DIR:-"$HOME/.cache/onnx-asr"}
+ONNXRUNTIME_CACHE_DIR=${ONNXRUNTIME_CACHE_DIR:-"$HOME/.cache/onnxruntime"}
+HUGGINGFACE_CACHE_DIR=${HUGGINGFACE_CACHE_DIR:-"$HOME/.cache/huggingface"}
+TORCH_CACHE_DIR=${TORCH_CACHE_DIR:-"$HOME/.cache/torch"}
 PIP_CACHE_DIR=${PIP_CACHE_DIR:-"$HOME/.cache/pip"}
 VENV_DIR=${VENV_DIR:-".venv"}
 MODELS_DIR_HOST=${MODELS_DIR_HOST:-"models"}
@@ -15,6 +18,9 @@ DO_LOGS=1
 DO_ENGINES=1
 DO_MODELS=1
 DO_DEPS=1
+DO_APT_CLEAN=1
+DO_UNINSTALL_SYS_PY=1
+DO_DU_REPORT=1
 SELECTIVE=0
 DO_UNINSTALL_TRT=0
 
@@ -34,7 +40,7 @@ Options (for selective purge):
   --all        Do all of the above (same as no flags)
 
 Additional:
-  --uninstall-trt  Uninstall TensorRT wheels and remove linked libs (requires write perms)
+  --uninstall-trt     Uninstall TensorRT wheels and remove linked libs (requires write perms)
 
 Env:
   PORT (default: 8000)
@@ -135,6 +141,15 @@ if [[ $DO_MODELS -eq 1 ]]; then
   echo "Purging onnx-asr model cache at $ONNX_ASR_CACHE_DIR ..."
   rm -rf "$ONNX_ASR_CACHE_DIR" || true
   mkdir -p "$ONNX_ASR_CACHE_DIR"
+  echo "Purging ONNX Runtime cache at $ONNXRUNTIME_CACHE_DIR ..."
+  rm -rf "$ONNXRUNTIME_CACHE_DIR" || true
+  mkdir -p "$ONNXRUNTIME_CACHE_DIR"
+  echo "Purging Hugging Face cache at $HUGGINGFACE_CACHE_DIR ..."
+  rm -rf "$HUGGINGFACE_CACHE_DIR" || true
+  mkdir -p "$HUGGINGFACE_CACHE_DIR"
+  echo "Purging Torch cache at $TORCH_CACHE_DIR ..."
+  rm -rf "$TORCH_CACHE_DIR" || true
+  mkdir -p "$TORCH_CACHE_DIR"
   echo "Purging host models directory at $MODELS_DIR_HOST ..."
   rm -rf "$MODELS_DIR_HOST" || true
   mkdir -p "$MODELS_DIR_HOST"
@@ -183,5 +198,27 @@ for root in roots:
                 pass
 print("[purge] TRT wheels removed from site-packages (best effort)")
 PY
+fi
+
+if [[ $DO_APT_CLEAN -eq 1 ]]; then
+  echo "Cleaning apt caches..."
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get clean || true
+    rm -rf /var/lib/apt/lists/* /var/cache/apt/* || true
+  fi
+fi
+
+if [[ $DO_UNINSTALL_SYS_PY -eq 1 ]]; then
+  echo "Uninstalling heavy system Python packages (global, not venv)..."
+  if command -v pip3 >/dev/null 2>&1; then
+    pip3 uninstall -y onnxruntime-gpu onnxruntime onnx httpx fastapi uvicorn numpy soundfile soxr huggingface_hub || true
+  fi
+fi
+
+if [[ $DO_DU_REPORT -eq 1 ]]; then
+  echo "Disk usage report (top 10):"
+  du -h -d 1 /workspace 2>/dev/null | sort -hr | head -n 10 || true
+  du -h -d 2 "$HOME/.cache" 2>/dev/null | sort -hr | head -n 10 || true
+  du -h -d 1 /usr/local/lib/python3.11/dist-packages 2>/dev/null | sort -hr | head -n 20 || true
 fi
 
