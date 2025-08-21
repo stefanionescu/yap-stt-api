@@ -15,8 +15,17 @@ fi
 if ! docker info >/dev/null 2>&1; then
   echo "Starting Docker daemon (dockerd) in background..."
   mkdir -p logs
-  nohup dockerd --host=unix:///var/run/docker.sock --storage-driver=overlay2 \
+  # Prefer rootless dockerd if rootlesskit/slirp4netns present; otherwise regular dockerd
+  if command -v rootlesskit >/dev/null 2>&1 && command -v dockerd-rootless-setuptool.sh >/dev/null 2>&1; then
+    echo "Starting rootless Docker..."
+    export XDG_RUNTIME_DIR=/run/user/$(id -u)
+    mkdir -p "$XDG_RUNTIME_DIR"
+    dockerd-rootless-setuptool.sh install || true
+    nohup dockerd-rootless.sh >> logs/dockerd.log 2>&1 & echo $! > logs/dockerd.pid
+  else
+    nohup dockerd --host=unix:///var/run/docker.sock --storage-driver=overlay2 \
     > logs/dockerd.log 2>&1 & echo $! > logs/dockerd.pid
+  fi
   # Wait for daemon to be ready
   for i in {1..20}; do
     if docker info >/dev/null 2>&1; then

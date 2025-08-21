@@ -8,8 +8,16 @@ fi
 # Ensure daemon running
 if ! docker info >/dev/null 2>&1; then
   echo "Starting Docker daemon (dockerd)..." | tee -a logs/server.log
-  nohup dockerd --host=unix:///var/run/docker.sock --storage-driver=overlay2 \
-    >> logs/server.log 2>&1 & echo $! > logs/dockerd.pid
+  if command -v rootlesskit >/dev/null 2>&1 && command -v dockerd-rootless-setuptool.sh >/dev/null 2>&1; then
+    echo "Starting rootless Docker..." | tee -a logs/server.log
+    export XDG_RUNTIME_DIR=/run/user/$(id -u)
+    mkdir -p "$XDG_RUNTIME_DIR"
+    dockerd-rootless-setuptool.sh install || true
+    nohup dockerd-rootless.sh >> logs/server.log 2>&1 & echo $! > logs/dockerd.pid
+  else
+    nohup dockerd --host=unix:///var/run/docker.sock --storage-driver=overlay2 \
+      >> logs/server.log 2>&1 & echo $! > logs/dockerd.pid
+  fi
   for i in {1..20}; do
     if docker info >/dev/null 2>&1; then echo "Daemon ready" | tee -a logs/server.log; break; fi
     sleep 1
