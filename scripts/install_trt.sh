@@ -43,6 +43,18 @@ if [[ -z "${TRT_LIB_DIR}" ]]; then
   exit 1
 fi
 
+# Ensure onnxruntime-gpu present for verification and runtime
+python3 - <<'PY'
+try:
+    import onnxruntime  # noqa: F401
+    print("[TRT] onnxruntime present")
+except Exception:
+    raise SystemExit(1)
+PY
+if [[ $? -ne 0 ]]; then
+  python3 -m pip install "onnxruntime-gpu>=1.22.0"
+fi
+
 # Best-effort linker config (some minimal containers won't have ldconfig)
 echo "${TRT_LIB_DIR}" >/etc/ld.so.conf.d/tensorrt-wheel.conf 2>/dev/null || true
 ldconfig 2>/dev/null || true

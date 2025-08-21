@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source scripts/env.sh || true
 mkdir -p logs logs/metrics
 
 # Wire TRT libs (wheel) for background run
