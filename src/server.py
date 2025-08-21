@@ -30,8 +30,10 @@ _is_ready: bool = False
 async def on_startup() -> None:
     global _model, _scheduler, _is_ready
     logger.info("Loading model: %s", settings.model_id)
-    _model = ParakeetModel.load(settings.model_id)
-    logger.info("Model loaded. Warming up...")
+    # Try alias first, then HF repo fallback
+    _model = ParakeetModel.load_with_fallback(settings.model_id, settings.fallback_model_id)
+    logger.info("Model loaded from: %s", _model.model_id)
+    logger.info("Warming up...")
     _model.warmup(seconds=0.5)
     logger.info("Warmup done.")
 
@@ -135,7 +137,7 @@ async def transcribe(file: UploadFile = File(...)) -> JSONResponse:
             "text": text,
             "duration": decoded.duration_seconds,
             "sample_rate": decoded.sample_rate,
-            "model": settings.model_id,
+            "model": _model.model_id,
         })
 
     except HTTPException as he:

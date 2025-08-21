@@ -28,11 +28,10 @@ Default model uses onnx-asr hub alias `nemo-parakeet-tdt-0.6b-v2`, backed by the
 ```bash
 # Clone, setup, and run
 git clone <your-repo-url> yap-stt-api && cd yap-stt-api
-chmod +x scripts/*.sh
-./scripts/setup.sh
+bash scripts/setup.sh
 source .venv/bin/activate
 export PARAKEET_NUM_LANES=6  # For L40S/A100
-./scripts/start.sh
+bash scripts/start.sh
 
 # Test it
 python3 test/warmup.py
@@ -103,19 +102,19 @@ Stop the service and optionally clear logs/caches:
 
 ```bash
 # Stop service only
-./scripts/purge_pod.sh
+bash scripts/purge_pod.sh
 
 # Clear logs and metrics
-./scripts/purge_pod.sh --logs
+bash scripts/purge_pod.sh --logs
 
 # Clear TensorRT engine/timing caches
-./scripts/purge_pod.sh --engines
+bash scripts/purge_pod.sh --engines
 
 # Clear onnx-asr model cache
-./scripts/purge_pod.sh --models
+bash scripts/purge_pod.sh --models
 
 # Do everything
-./scripts/purge_pod.sh --all
+bash scripts/purge_pod.sh --all
 ```
 
 ### Docker vs bare runtime
