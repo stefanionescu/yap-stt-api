@@ -8,25 +8,33 @@ python3 -m pip install "tensorrt-cu12"
 python3 -m pip install "nvidia-cudnn-cu12>=9.1" || true
 
 TRT_LIB_DIR=$(python3 - <<'PY'
-import os, glob
-try:
-    import tensorrt
-    base = os.path.dirname(tensorrt.__file__)
-    # Try common locations first
-    for sub in ("lib", ".", ".."):  # lib under package, or same dir, or parent
-        cand = os.path.abspath(os.path.join(base, sub))
-        matches = glob.glob(os.path.join(cand, "libnvinfer.so*"))
-        if matches:
-            print(os.path.dirname(matches[0]))
-            raise SystemExit(0)
-    # Fallback: recursive search under package
-    matches = glob.glob(os.path.join(base, "**", "libnvinfer.so*"), recursive=True)
-    if matches:
-        print(os.path.dirname(matches[0]))
-        raise SystemExit(0)
-except Exception:
-    pass
-print("")
+import os, glob, sysconfig
+
+def find_trt_lib_dir():
+    # 1) Scan site-packages roots recursively (handles tensorrt_cu12_libs layout)
+    paths = sysconfig.get_paths()
+    roots = [p for k,p in paths.items() if k in ("purelib","platlib") and p]
+    for root in roots:
+        hits = glob.glob(os.path.join(root, "**", "libnvinfer.so*"), recursive=True)
+        if hits:
+            return os.path.dirname(hits[0])
+    # 2) Try under tensorrt package as a fallback
+    try:
+        import tensorrt
+        base = os.path.dirname(tensorrt.__file__)
+        for sub in ("lib", ".", ".."):
+            cand = os.path.abspath(os.path.join(base, sub))
+            hits = glob.glob(os.path.join(cand, "libnvinfer.so*"))
+            if hits:
+                return os.path.dirname(hits[0])
+        hits = glob.glob(os.path.join(base, "**", "libnvinfer.so*"), recursive=True)
+        if hits:
+            return os.path.dirname(hits[0])
+    except Exception:
+        pass
+    return ""
+
+print(find_trt_lib_dir())
 PY
 )
 
