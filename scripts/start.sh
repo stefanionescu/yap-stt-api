@@ -1,16 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source scripts/env.sh
+source scripts/env.sh || true
 
 mkdir -p logs logs/metrics
 
-if [[ -f .venv/bin/activate ]]; then
-  source .venv/bin/activate
+use_docker=${USE_DOCKER:-1}
+if ! command -v docker >/dev/null 2>&1; then
+  echo "Docker not found. Installing..."
+  bash scripts/install_docker.sh
 fi
-
-if command -v uvicorn >/dev/null 2>&1; then
-  exec uvicorn src.server:app --host "$HOST" --port "$PORT" --loop uvloop --http httptools
-else
-  exec python -m uvicorn src.server:app --host "$HOST" --port "$PORT" --loop uvloop --http httptools
-fi
+docker compose up --build

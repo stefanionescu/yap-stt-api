@@ -1,0 +1,29 @@
+version: "3.9"
+services:
+  yap-stt-api:
+    build: .
+    image: yap-stt-api:trt
+    ports:
+      - "8000:8000"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+      - PARAKEET_MODEL_DIR=/models/parakeet-int8
+      - PARAKEET_USE_DIRECT_ONNX=1
+      - PARAKEET_USE_TENSORRT=1
+      - ORT_INTRA_OP_NUM_THREADS=1
+      - OMP_NUM_THREADS=1
+      - MKL_NUM_THREADS=1
+      - CUDA_MODULE_LOADING=LAZY
+      - AUTO_FETCH_INT8=1
+      - TRT_ENGINE_CACHE=/models/trt_cache
+      - TRT_TIMING_CACHE=/models/timing.cache
+    volumes:
+      - ./models:/models
+      - ./logs:/app/logs
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+

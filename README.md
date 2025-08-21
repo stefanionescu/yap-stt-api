@@ -9,22 +9,18 @@ A single-process FastAPI service that runs NVIDIA Parakeet TDT 0.6b v2 (English)
 
 > GPU-only: requirements are pinned to onnxruntime-gpu and onnx-asr >= 0.7.0. CPU ORT is not supported here.
 
-### Quickstart (3 commands)
+### Quickstart (Docker-only)
 
 ```bash
-# 1) Setup (creates venv, installs deps, fetches INT8, installs TRT if possible)
-bash scripts/setup.sh
-source .venv/bin/activate
-
-# 2) Start the API
+# 1) Start (installs Docker if missing, then builds and runs)
 bash scripts/start.sh
 
-# 3) Test once
+# 2) Test once (from host)
 python3 test/warmup.py --file samples/long.mp3
 ```
 
-Defaults: `PARAKEET_MODEL_DIR=./models/parakeet-int8`, `PARAKEET_USE_DIRECT_ONNX=1`, `AUTO_FETCH_INT8=1`, `INSTALL_TRT=1`, `PARAKEET_USE_TENSORRT=1`.
-If TRT libs are missing or install fails, runtime cleanly falls back to CUDA EP.
+Defaults: `USE_DOCKER=1`, `PARAKEET_MODEL_DIR=./models/parakeet-int8`, `PARAKEET_USE_DIRECT_ONNX=1`, `AUTO_FETCH_INT8=1`, `PARAKEET_USE_TENSORRT=1`.
+Runtime will fall back to CUDA EP automatically if TRT isn’t available.
 
 ### Admission control
 
@@ -49,7 +45,7 @@ bash scripts/fetch_int8.sh               # idempotent
 # FORCE_FETCH_INT8=1 bash scripts/fetch_int8.sh  # to refetch
 ```
 
-### Start/Stop (extras)
+### Start/Stop
 ```bash
 # Foreground
 bash scripts/start.sh
@@ -60,6 +56,8 @@ bash scripts/stop.sh
 ```
 
 If you want to tweak defaults (lanes, paths, queue), edit `scripts/env.sh`.
+
+Non-Docker mode is not supported.
 
 ### API
 
@@ -105,7 +103,7 @@ TensorRT engine and timing caches (Linux GPU with ORT TensorRT-EP builds):
 If your pod is Ubuntu 22.04, you can install TensorRT runtime libs in-place:
 
 ```bash
-# Install TRT runtime (requires sudo inside the pod)
+# Install TRT runtime (requires root or sudo inside the pod)
 INSTALL_TRT=1 bash scripts/setup.sh
 
 # Then enable TRT EP
