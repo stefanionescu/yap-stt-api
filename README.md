@@ -18,11 +18,27 @@ A single-process FastAPI service that runs NVIDIA Parakeet TDT 0.6b v2 (English)
 
 ### Model
 
-Models are downloaded automatically from Hugging Face by onnx-asr on first run.
+Models can be loaded from Hugging Face by onnx-asr (hub ids) or from a local INT8 directory.
 
 - Default model id: `nemo-parakeet-tdt-0.6b-v2`
 - Fallback: `istupakov/parakeet-tdt-0.6b-v2-onnx`  \
-  See: `https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx`
+  See: [istupakov/parakeet-tdt-0.6b-v2-onnx](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx)
+
+INT8 setup (recommended):
+
+```bash
+# Defaults already set: PARAKEET_MODEL_DIR=./models/parakeet-int8 and PARAKEET_USE_DIRECT_ONNX=1
+# You can override these if desired.
+
+# Fetch INT8 artifacts (idempotent; set FORCE_FETCH_INT8=1 to refetch)
+# Requires huggingface_hub (already in requirements) and optional HF_TOKEN
+bash scripts/fetch_int8.sh
+
+# Files will be placed as:
+#   $PARAKEET_MODEL_DIR/encoder-model.onnx
+#   $PARAKEET_MODEL_DIR/decoder_joint-model.onnx
+#   $PARAKEET_MODEL_DIR/vocab.txt
+```
 
 ### Run (venv, GPU only)
 
@@ -69,6 +85,8 @@ python3 -m src.metrics --windows 30m 1h 3h 6h 12h 24h 3d
 
 Defaults live in `scripts/env.sh`. You can override via environment vars before `start.sh`.
 
+- `PARAKEET_MODEL_DIR` (local INT8 dir; if set with `PARAKEET_USE_DIRECT_ONNX=1`, used instead of hub)
+- `PARAKEET_USE_DIRECT_ONNX` (1 to prefer local INT8 dir and explicit providers)
 - `PARAKEET_MODEL_ID` (default: `nemo-parakeet-tdt-0.6b-v2`)
 - `PARAKEET_FALLBACK_MODEL_ID` (default: `istupakov/parakeet-tdt-0.6b-v2-onnx`)
 - `PARAKEET_NUM_LANES` (default: 6)
@@ -81,6 +99,11 @@ TensorRT engine and timing caches (Linux GPU with ORT TensorRT-EP builds):
 
 - `TRT_ENGINE_CACHE` (default: `/models/trt_cache`)
 - `TRT_TIMING_CACHE` (default: `/models/timing.cache`)
+- `PARAKEET_USE_TRT` (default: 1) — enable TensorRT EP if available
+- `ORT_INTRA_OP_NUM_THREADS` (default: 1)
+- `OMP_NUM_THREADS` (default: 1)
+- `MKL_NUM_THREADS` (default: 1)
+- `CUDA_MODULE_LOADING` (default: `LAZY`)
 
 ### Testing
 

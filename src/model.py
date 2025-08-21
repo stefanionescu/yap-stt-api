@@ -10,16 +10,17 @@ import soundfile as sf
 import onnxruntime as ort
 import logging
 
+from .config import settings
+from .runtime import pick_providers
+
 try:
     import onnx_asr
 except Exception as e:  # pragma: no cover
     onnx_asr = None  # type: ignore
 
-
 logger = logging.getLogger("parakeet.model")
 
 CUDA_ONLY = [("CUDAExecutionProvider", {"device_id": 0}), "CPUExecutionProvider"]
-
 
 @dataclass
 class ParakeetModel:
@@ -37,8 +38,38 @@ class ParakeetModel:
     @classmethod
     def _load_internal(cls, source: str, require_gpu: bool) -> "ParakeetModel":
         cls._ensure_gpu_active(require_gpu)
-        # onnx-asr 0.7+ supports providers kwarg; pass CUDA-only preference
-        model = onnx_asr.load_model(source, providers=[p if isinstance(p, str) else p[0] for p in CUDA_ONLY])
+        # Prefer local model directory when provided
+        if settings.model_dir:
+            local_dir = settings.model_dir
+            if not os.path.isdir(local_dir):
+                raise RuntimeError(f"Model dir does not exist: {local_dir}")
+            # Check for expected files and warn about FP32 external data
+            enc = os.path.join(local_dir, "encoder-model.onnx")
+            dec = os.path.join(local_dir, "decoder_joint-model.onnx")
+            if not (os.path.isfile(enc) and os.path.isfile(dec)):
+                raise RuntimeError(
+                    "Model dir missing encoder-model.onnx and/or decoder_joint-model.onnx. "
+                    "If you have INT8 files named *.int8.onnx, rename them accordingly."
+                )
+            ext_data = [p for p in os.listdir(local_dir) if p.endswith(".onnx.data")]
+            if ext_data:
+                logger.warning(
+                    "Found external-data files in model dir (possible FP32): %s", ext_data
+                )
+            source = local_dir
+
+        # Build providers list (names only to maximize compatibility)
+        prov_list = pick_providers(
+            device_id=settings.device_id,
+            use_tensorrt=settings.use_tensorrt,
+            trt_engine_cache=settings.trt_engine_cache,
+            trt_timing_cache=settings.trt_timing_cache,
+            trt_max_workspace_size=settings.trt_max_workspace_size,
+        )
+        prov_names_only = [p if isinstance(p, str) else p[0] for p in prov_list]
+
+        # onnx-asr 0.7+ supports providers kwarg
+        model = onnx_asr.load_model(source, providers=prov_names_only)
         # Best-effort provider check if accessible
         try:
             get_providers = getattr(model, "get_providers", None) or getattr(getattr(model, "asr", None), "get_providers", None)
@@ -46,6 +77,7 @@ class ParakeetModel:
                 active = get_providers()
                 if require_gpu and all(x not in active for x in ("CUDAExecutionProvider", "TensorrtExecutionProvider")):
                     raise RuntimeError(f"Model session not using GPU providers: {active}")
+                logger.info("Active model providers: %s", active)
         except Exception:
             pass
         return cls(model_id=source, _model=model)
@@ -77,9 +109,17 @@ class ParakeetModel:
         raise RuntimeError(f"Failed to load model by id. Primary='{primary_id}', fallback='{fallback_id}'.")
 
     def recognize_waveform(self, waveform: np.ndarray, sample_rate: int) -> str:
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as tmp:
-            sf.write(tmp.name, waveform, sample_rate)
-            text = self._model.recognize(tmp.name)
+        # Prefer direct waveform APIs if available to avoid temp file I/O
+        try:
+            if hasattr(self._model, "recognize_waveform"):
+                text = self._model.recognize_waveform(waveform, sample_rate)  # type: ignore[attr-defined]
+            else:
+                text = self._model.recognize(waveform, sample_rate)  # type: ignore[misc]
+        except TypeError:
+            # Fallback to file path API
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as tmp:
+                sf.write(tmp.name, waveform, sample_rate)
+                text = self._model.recognize(tmp.name)
         if isinstance(text, (list, tuple)):
             return " ".join(map(str, text))
         return str(text)
