@@ -22,6 +22,11 @@ if [[ -n "${CUDNN_LIB_DIR}" ]]; then export LD_LIBRARY_PATH="${CUDNN_LIB_DIR}:${
 
 if [[ -f .venv/bin/activate ]]; then source .venv/bin/activate; fi
 
-nohup python -m uvicorn src.server:app --host "${HOST:-0.0.0.0}" --port "${PORT:-8000}" --loop uvloop --http httptools \
-  > logs/server.log 2>&1 & echo $! > logs/server.pid
+if command -v uvicorn >/dev/null 2>&1; then
+  nohup uvicorn src.server:app --host "${HOST:-0.0.0.0}" --port "${PORT:-8000}" --loop uvloop --http httptools \
+    > logs/server.log 2>&1 & echo $! > logs/server.pid
+else
+  nohup python3 -m uvicorn src.server:app --host "${HOST:-0.0.0.0}" --port "${PORT:-8000}" --loop uvloop --http httptools \
+    > logs/server.log 2>&1 & echo $! > logs/server.pid
+fi
 echo "Started with PID $(cat logs/server.pid). Logs: logs/server.log"

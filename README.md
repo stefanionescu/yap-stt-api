@@ -9,7 +9,7 @@ A single-process FastAPI service that runs NVIDIA Parakeet TDT 0.6b v2 (English)
 
 > GPU-only: requirements are pinned to onnxruntime-gpu and onnx-asr >= 0.7.0. CPU ORT is not supported here.
 
-### Quickstart (Direct in Pod; no Docker)
+### Quickstart
 
 ```bash
 # 1) Install TensorRT wheel (one-time)

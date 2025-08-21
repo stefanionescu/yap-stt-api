@@ -8,10 +8,25 @@ python3 -m pip install "tensorrt-cu12"
 python3 -m pip install "nvidia-cudnn-cu12>=9.1" || true
 
 TRT_LIB_DIR=$(python3 - <<'PY'
-import os, sysconfig
-site = sysconfig.get_paths()['purelib']
-p = os.path.join(site, 'tensorrt', 'lib')
-print(p if os.path.isdir(p) else '')
+import os, glob
+try:
+    import tensorrt
+    base = os.path.dirname(tensorrt.__file__)
+    # Try common locations first
+    for sub in ("lib", ".", ".."):  # lib under package, or same dir, or parent
+        cand = os.path.abspath(os.path.join(base, sub))
+        matches = glob.glob(os.path.join(cand, "libnvinfer.so*"))
+        if matches:
+            print(os.path.dirname(matches[0]))
+            raise SystemExit(0)
+    # Fallback: recursive search under package
+    matches = glob.glob(os.path.join(base, "**", "libnvinfer.so*"), recursive=True)
+    if matches:
+        print(os.path.dirname(matches[0]))
+        raise SystemExit(0)
+except Exception:
+    pass
+print("")
 PY
 )
 
