@@ -24,7 +24,8 @@ bash scripts/fetch_int8.sh
 bash scripts/start_bg.sh && bash scripts/tail_bg_logs.sh
 
 # 4) Test once (from pod)
-python3 test/warmup.py --file samples/long.mp3
+source .venv/bin/activate 2>/dev/null || true
+python3 test/warmup.py --file long.mp3
 ```
 
 Option B (use the hub, no local INT8):
