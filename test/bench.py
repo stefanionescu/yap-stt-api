@@ -54,7 +54,7 @@ def _metrics(audio_duration_s: float, wall_s: float, queue_wait_s: float = 0.0) 
     """Compute transcription metrics."""
     rtf = wall_s / audio_duration_s if audio_duration_s > 0 else float("inf")  # Real-time factor
     xrt = audio_duration_s / wall_s if wall_s > 0 else 0.0  # Times real-time
-    throughput_min_per_min = (audio_duration_s / 60.0) / (wall_s / 60.0) if wall_s > 0 else 0.0  # Minutes of audio per minute
+    throughput_min_per_min = audio_duration_s / wall_s if wall_s > 0 else 0.0  # Minutes of audio per minute of wall time
     return {
         "wall_s": wall_s,
         "audio_s": audio_duration_s,
@@ -218,7 +218,7 @@ def main() -> None:
     if results:
         total_audio = sum(r["audio_s"] for r in results)
         print(f"Total audio processed: {total_audio:.2f}s")
-        print(f"Overall throughput: {total_audio/elapsed/60:.2f} min/min")
+        print(f"Overall throughput: {total_audio/elapsed*60:.2f} sec/min = {total_audio/elapsed:.2f} min/min")
 
 
 if __name__ == "__main__":

@@ -170,7 +170,7 @@ def main() -> None:
         print(f"Total completed: {total_completed}")
         print(f"Rate: {total_completed / elapsed * 60:.1f} transactions/minute")
         print(f"Total audio processed: {total_audio:.2f}s")
-        print(f"Audio throughput: {total_audio / elapsed / 60:.2f} min/min")
+        print(f"Audio throughput: {total_audio / elapsed * 60:.2f} sec/min = {total_audio / elapsed:.2f} min/min")
         print(f"Avg latency: {stats.mean(wall_times):.4f}s")
         print(f"P95 latency: {sorted(wall_times)[int(0.95 * len(wall_times))]:.4f}s")
         print(f"Test duration: {elapsed:.2f}s")
