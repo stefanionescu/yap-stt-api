@@ -38,27 +38,7 @@ class ParakeetModel:
     @classmethod
     def _load_internal(cls, source: str, require_gpu: bool) -> "ParakeetModel":
         cls._ensure_gpu_active(require_gpu)
-        # Prefer local model directory when provided
-        if settings.model_dir:
-            local_dir = settings.model_dir
-            if not os.path.isdir(local_dir):
-                raise RuntimeError(f"Model dir does not exist: {local_dir}")
-            # Check for expected files and warn about FP32 external data
-            enc = os.path.join(local_dir, "encoder-model.onnx")
-            dec = os.path.join(local_dir, "decoder_joint-model.onnx")
-            if not (os.path.isfile(enc) and os.path.isfile(dec)):
-                raise RuntimeError(
-                    "Model dir missing encoder-model.onnx and/or decoder_joint-model.onnx. "
-                    "If you have INT8 files named *.int8.onnx, rename them accordingly."
-                )
-            ext_data = [p for p in os.listdir(local_dir) if p.endswith(".onnx.data")]
-            if ext_data:
-                logger.warning(
-                    "Found external-data files in model dir (possible FP32): %s", ext_data
-                )
-            source = local_dir
-
-        # Build providers list (names only to maximize compatibility)
+        # Build providers list (names only for onnx-asr)
         prov_list = pick_providers(
             device_id=settings.device_id,
             use_tensorrt=settings.use_tensorrt,
@@ -68,8 +48,24 @@ class ParakeetModel:
         )
         prov_names_only = [p if isinstance(p, str) else p[0] for p in prov_list]
 
-        # onnx-asr 0.7+ supports providers kwarg
-        model = onnx_asr.load_model(source, providers=prov_names_only)
+        # If source is a directory, load local with model_name and onnx_dir
+        if os.path.isdir(source):
+            local_dir = source
+            enc = os.path.join(local_dir, "encoder-model.onnx")
+            dec = os.path.join(local_dir, "decoder_joint-model.onnx")
+            if not (os.path.isfile(enc) and os.path.isfile(dec)):
+                raise RuntimeError(
+                    "Model dir missing encoder-model.onnx and/or decoder_joint-model.onnx. "
+                    "If you have INT8 files named *.int8.onnx, rename them accordingly."
+                )
+            ext_data = [p for p in os.listdir(local_dir) if p.endswith(".onnx.data")]
+            if ext_data:
+                logger.warning("Found external-data files in model dir (possible FP32): %s", ext_data)
+            # onnx-asr: pass model name and local dir
+            model = onnx_asr.load_model(settings.model_name, onnx_dir=local_dir, providers=prov_names_only)
+        else:
+            # Remote/hub path
+            model = onnx_asr.load_model(source, providers=prov_names_only)
         # Best-effort provider check if accessible
         try:
             get_providers = getattr(model, "get_providers", None) or getattr(getattr(model, "asr", None), "get_providers", None)

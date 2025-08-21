@@ -30,13 +30,9 @@ async def on_startup() -> None:
     global _model, _scheduler, _is_ready
     logger.info("Available ORT providers: %s", ort.get_available_providers())
     if settings.use_direct_onnx and settings.model_dir:
-        logger.info("Using direct ONNX path with local model dir: %s", settings.model_dir)
-        # Force onnx_asr to load local dir but with explicit provider preference noted in logs
-        _model = ParakeetModel.load_with_fallback(
-            settings.model_dir,
-            None,
-            require_gpu=settings.require_gpu,
-        )
+        logger.info("Using local ONNX: dir=%s name=%s", settings.model_dir, settings.model_name)
+        # Use local loader semantics (onnx_asr.load_model(model_name, onnx_dir=...))
+        _model = ParakeetModel._load_internal(settings.model_dir, settings.require_gpu)
     else:
         logger.info("Loading model via onnx-asr id: %s", settings.model_id)
         _model = ParakeetModel.load_with_fallback(

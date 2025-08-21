@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="PARAKEET_", extra="ignore", protected_namespaces=())
 
     # Model identifiers (onnx-asr hub supports aliases)
+    # Logical model name (used by onnx-asr when loading from local dir)
+    model_name: str = os.getenv("PARAKEET_MODEL_NAME", "nemo-parakeet-tdt-0.6b-v2")
     model_id: str = os.getenv("PARAKEET_MODEL_ID", "nemo-parakeet-tdt-0.6b-v2")
     fallback_model_id: str = os.getenv("PARAKEET_FALLBACK_MODEL_ID", "istupakov/parakeet-tdt-0.6b-v2-onnx")
 
