@@ -17,6 +17,18 @@ bash scripts/start.sh
 
 # 2) Test once (from host)
 python3 test/warmup.py --file samples/long.mp3
+
+# 3) Verify providers (optional)
+docker compose exec yap-stt-api bash -lc 'python - <<PY
+import ctypes, onnxruntime as ort
+print("ORT available:", ort.get_available_providers())
+print("Try TRT libs:")
+for lib in ("libnvinfer.so.10","libnvinfer_plugin.so.10"):
+  try:
+    ctypes.CDLL(lib); print(lib, "OK")
+  except OSError as e:
+    print(lib, "MISSING:", e)
+PY'
 ```
 
 Defaults: `USE_DOCKER=1`, `PARAKEET_MODEL_DIR=./models/parakeet-int8`, `PARAKEET_USE_DIRECT_ONNX=1`, `AUTO_FETCH_INT8=1`, `PARAKEET_USE_TENSORRT=1`.
@@ -43,6 +55,12 @@ Already handled by setup defaults. Manual fetch if needed:
 ```bash
 bash scripts/fetch_int8.sh               # idempotent
 # FORCE_FETCH_INT8=1 bash scripts/fetch_int8.sh  # to refetch
+```
+
+If your Hugging Face downloads require auth, export your token before starting:
+```bash
+export HF_TOKEN=hf_xxx
+bash scripts/start.sh
 ```
 
 ### Start/Stop

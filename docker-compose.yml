@@ -3,6 +3,8 @@ services:
   yap-stt-api:
     build: .
     image: yap-stt-api:trt
+    # Ensure GPU is available to the container (Compose v2+)
+    gpus: all
     ports:
       - "8000:8000"
     environment:
@@ -18,12 +20,9 @@ services:
       - AUTO_FETCH_INT8=1
       - TRT_ENGINE_CACHE=/models/trt_cache
       - TRT_TIMING_CACHE=/models/timing.cache
+      # Optional: pass through your Hugging Face token if needed
+      - HF_TOKEN=${HF_TOKEN:-}
     volumes:
       - ./models:/models
       - ./logs:/app/logs
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - capabilities: [gpu]
 
