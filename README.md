@@ -11,19 +11,40 @@ A single-process FastAPI service that runs NVIDIA Parakeet TDT 0.6b v2 (English)
 
 ### Quickstart
 
+Option A (recommended, local INT8):
 ```bash
 # 1) Install TensorRT wheel (one-time)
 bash scripts/install_trt.sh
 
-# 2) Start the API (wires TRT libs automatically)
+# 2) Fetch INT8 artifacts locally (into PARAKEET_MODEL_DIR)
+source scripts/env.sh
+bash scripts/fetch_int8.sh
+
+# 3) Start the API (wires TRT libs automatically)
 bash scripts/start.sh
 
-# 3) Test once (from pod)
+# 4) Test once (from pod)
 python3 test/warmup.py --file samples/long.mp3
 ```
 
-Defaults: `USE_DOCKER=0`, `PARAKEET_MODEL_DIR=./models/parakeet-int8`, `PARAKEET_USE_DIRECT_ONNX=1`, `AUTO_FETCH_INT8=1`, `PARAKEET_USE_TENSORRT=1`.
-Runtime will fall back to CUDA EP automatically if TRT isn’t available.
+Option B (use the hub, no local INT8):
+```bash
+source .venv/bin/activate 2>/dev/null || true
+export PARAKEET_MODEL_DIR=""
+python -m uvicorn src.server:app --host 0.0.0.0 --port 8000 --loop uvloop --http httptools
+```
+
+One-time setup alternative:
+```bash
+# Creates venv, installs deps, and can auto-fetch INT8 when AUTO_FETCH_INT8=1
+bash scripts/setup.sh
+bash scripts/start.sh
+```
+
+Defaults: `USE_DOCKER=0`, `PARAKEET_MODEL_DIR=./models/parakeet-int8`, `PARAKEET_USE_TENSORRT=1`.
+- Local vs hub is decided solely by `PARAKEET_MODEL_DIR`: if set and contains model files, the service loads local INT8; otherwise it uses the hub id.
+- Note: `PARAKEET_USE_DIRECT_ONNX` is deprecated and ignored by the server.
+- Runtime will fall back to CUDA EP automatically if TRT isn’t available.
 
 ### Admission control
 
@@ -42,8 +63,9 @@ Models can be loaded from Hugging Face by onnx-asr (hub ids) or from a local INT
 
 INT8 setup (recommended):
 
-Already handled by setup defaults. Manual fetch if needed:
+Use the fetch script to populate your local model directory:
 ```bash
+source scripts/env.sh
 bash scripts/fetch_int8.sh               # idempotent
 # FORCE_FETCH_INT8=1 bash scripts/fetch_int8.sh  # to refetch
 ```
@@ -91,8 +113,7 @@ python3 -m src.metrics --windows 30m 1h 3h 6h 12h 24h 3d
 
 Defaults live in `scripts/env.sh`. You can override via environment vars before `start.sh`.
 
-- `PARAKEET_MODEL_DIR` (local INT8 dir; if set with `PARAKEET_USE_DIRECT_ONNX=1`, used instead of hub)
-- `PARAKEET_USE_DIRECT_ONNX` (1 to prefer local INT8 dir and explicit providers)
+- `PARAKEET_MODEL_DIR` (local INT8 dir; if set and contains `encoder-model.onnx`, `decoder_joint-model.onnx`, `vocab.txt`, local loading is used; otherwise the hub is used)
 - `PARAKEET_MODEL_ID` (default: `nemo-parakeet-tdt-0.6b-v2`)
 - `PARAKEET_FALLBACK_MODEL_ID` (default: `istupakov/parakeet-tdt-0.6b-v2-onnx`)
 - `PARAKEET_NUM_LANES` (default: 6)
@@ -100,6 +121,8 @@ Defaults live in `scripts/env.sh`. You can override via environment vars before 
 - `PARAKEET_MAX_QUEUE_WAIT_S` (default: 30)
 - `PARAKEET_MAX_AUDIO_SECONDS` (default: 600)
 - `PARAKEET_MAX_UPLOAD_MB` (default: 64)
+- `PARAKEET_USE_TENSORRT` (default: 1) — enable TensorRT EP if libs present (auto-fallback to CUDA)
+- Deprecated: `PARAKEET_USE_DIRECT_ONNX` (server ignores this; kept for backward compatibility)
 
 TensorRT engine and timing caches (Linux GPU with ORT TensorRT-EP builds):
 
@@ -137,6 +160,20 @@ export INSTALL_TRT=0
 export PARAKEET_USE_TENSORRT=0
 
 bash scripts/start.sh
+```
+
+### Troubleshooting
+
+- "Model dir missing: /path/to/models/parakeet-int8" → You skipped the INT8 fetch. Run:
+```bash
+source scripts/env.sh
+bash scripts/fetch_int8.sh
+bash scripts/start.sh
+```
+- Want to use hub without local files? Clear the var before launching:
+```bash
+export PARAKEET_MODEL_DIR=""
+python -m uvicorn src.server:app --host 0.0.0.0 --port 8000 --loop uvloop --http httptools
 ```
 
 Docs: `https://onnxruntime.ai/docs/execution-providers/TensorRT-ExecutionProvider.html`
