@@ -61,8 +61,9 @@ class ParakeetModel:
             ext_data = [p for p in os.listdir(local_dir) if p.endswith(".onnx.data")]
             if ext_data:
                 logger.warning("Found external-data files in model dir (possible FP32): %s", ext_data)
-            # onnx-asr: pass model name and local dir
-            model = onnx_asr.load_model(settings.model_name, onnx_dir=local_dir, providers=prov_names_only)
+            logger.info("Loading local ONNX: name=%s dir=%s", settings.model_name, local_dir)
+            # onnx-asr 0.7.x expects the local dir as the 2nd positional arg
+            model = onnx_asr.load_model(settings.model_name, local_dir, providers=prov_names_only)
         else:
             # Remote/hub path
             model = onnx_asr.load_model(source, providers=prov_names_only)
