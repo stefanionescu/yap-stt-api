@@ -23,32 +23,30 @@ Default model uses onnx-asr hub alias `nemo-parakeet-tdt-0.6b-v2`, backed by the
 - HF: `istupakov/parakeet-tdt-0.6b-v2-onnx`  
   See: `https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx`
 
-### Run (GPU / Runpod)
+### Run (Best: Docker on GPU)
 
-**Single command setup:**
-
-```bash
-# Clone, setup, and run
-git clone <your-repo-url> yap-stt-api && cd yap-stt-api
-bash scripts/purge_pod.sh --deps || true
-bash scripts/setup.sh
-source .venv/bin/activate
-export PARAKEET_NUM_LANES=6  # For L40S/A100
-bash scripts/start.sh
-
-# Test it
-python3 test/warmup.py
-```
-
-**Alternative: Docker (recommended for production)**
+The image auto-fetches the INT8 artifacts at startup into `/models/parakeet-int8` and starts the server.
 
 ```bash
 docker build -t parakeet-onnx:latest .
 docker run --gpus all -p 8000:8000 \
   -e PARAKEET_NUM_LANES=6 \
+  -e PARAKEET_MODEL_DIR=/models/parakeet-int8 \
   -e TRT_ENGINE_CACHE=/models/trt_cache -e TRT_TIMING_CACHE=/models/timing.cache \
   -v $(pwd)/models:/models \
   parakeet-onnx:latest
+
+# Warmup request (result saved to test/results/warmup.txt)
+python3 test/warmup.py --url http://127.0.0.1:8000
+```
+
+Optional (bare venv on pod; not recommended for production):
+
+```bash
+bash scripts/setup.sh
+source .venv/bin/activate && export PARAKEET_NUM_LANES=6 PARAKEET_MODEL_DIR=/models/parakeet-int8
+bash scripts/fetch_int8_model.sh
+bash scripts/start.sh
 ```
 
 ### API
@@ -75,6 +73,7 @@ python3 -m src.metrics --windows 30m 1h 3h 6h 12h 24h 3d
 Environment variables (prefix `PARAKEET_`):
 
 - `PARAKEET_MODEL_ID` (default: `nemo-parakeet-tdt-0.6b-v2`)
+- `PARAKEET_MODEL_DIR` (default: `/models/parakeet-int8`) — local INT8 folder
 - `PARAKEET_NUM_LANES` (default: 2; set 6 for L40S)
 - `PARAKEET_QUEUE_MAX_FACTOR` (default: 2)
 - `PARAKEET_MAX_QUEUE_WAIT_S` (default: 30)

@@ -7,6 +7,7 @@ from typing import Any, Dict
 
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse
+import onnxruntime as ort
 
 from .audio import decode_and_resample
 from .config import settings
@@ -29,9 +30,14 @@ _is_ready: bool = False
 @app.on_event("startup")
 async def on_startup() -> None:
     global _model, _scheduler, _is_ready
-    logger.info("Loading model: %s", settings.model_id)
-    # Try alias first, then HF repo fallback
-    _model = ParakeetModel.load_with_fallback(settings.model_id, settings.fallback_model_id)
+    logger.info("Available ORT providers: %s", ort.get_available_providers())
+    logger.info("Loading model: %s (dir=%s)", settings.model_id, settings.model_dir or "<hub>")
+    _model = ParakeetModel.load_with_fallback(
+        settings.model_id,
+        settings.fallback_model_id,
+        model_dir=settings.model_dir,
+        require_gpu=settings.require_gpu,
+    )
     logger.info("Model loaded from: %s", _model.model_id)
     logger.info("Warming up...")
     _model.warmup(seconds=0.5)
