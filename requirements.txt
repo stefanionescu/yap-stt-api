@@ -7,8 +7,7 @@ soxr==0.3.7
 httpx==0.27.0
 pydantic==2.8.2
 pydantic-settings==2.4.0
-# Prefer CPU ORT on macOS (for local dev), GPU ORT elsewhere
-onnxruntime==1.18.1; platform_system=="Darwin"
-onnxruntime-gpu==1.18.1; platform_system!="Darwin"
-# onnx-asr gives us the Parakeet ONNX wrapper and greedy decode
-onnx-asr[gpu,hub]==0.4.1
+# GPU-only runtime
+onnxruntime-gpu>=1.22.0
+# onnx-asr adds Parakeet TDT V2/V3 support in 0.7+
+onnx-asr[gpu,hub]>=0.7.0

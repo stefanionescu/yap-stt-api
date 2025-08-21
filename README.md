@@ -7,6 +7,8 @@ A single-process FastAPI service that runs NVIDIA Parakeet TDT 0.6B v2 (English)
 - Metrics: JSONL logs under `logs/metrics/` + an on-pod Python report (no Prometheus)
 - Health: `/healthz`, Readiness: `/readyz`
 
+> GPU-only: requirements are pinned to onnxruntime-gpu and onnx-asr >= 0.7.0. CPU ORT is not supported here.
+
 ### Admission control
 
 - Queue is capped to `PARAKEET_NUM_LANES * PARAKEET_QUEUE_MAX_FACTOR`.
@@ -28,6 +30,7 @@ Default model uses onnx-asr hub alias `nemo-parakeet-tdt-0.6b-v2`, backed by the
 ```bash
 # Clone, setup, and run
 git clone <your-repo-url> yap-stt-api && cd yap-stt-api
+bash scripts/purge_pod.sh --deps || true
 bash scripts/setup.sh
 source .venv/bin/activate
 export PARAKEET_NUM_LANES=6  # For L40S/A100
