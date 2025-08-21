@@ -22,3 +22,8 @@ apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin do
 systemctl enable --now docker || true
 echo "Docker installed. Version: $(docker --version)"
 
+# Ensure a non-root user exists for rootless Docker
+if ! id -u rdocker >/dev/null 2>&1; then
+  useradd -m -s /bin/bash rdocker || true
+fi
+

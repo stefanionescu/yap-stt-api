@@ -17,10 +17,11 @@ DO_MODELS=1
 DO_DEPS=1
 SELECTIVE=0
 DO_UNINSTALL_DOCKER=0
+DO_REMOVE_DOCKER_USER=0
 
 usage() {
   cat <<EOF
-Usage: $0 [--logs] [--engines] [--models] [--deps] [--all] [--keep-docker]
+Usage: $0 [--logs] [--engines] [--models] [--deps] [--all] [--keep-docker] [--remove-docker-user]
 
 Stops the FastAPI service and purges logs, caches, dependencies, and local model files.
 
@@ -35,6 +36,7 @@ Options (for selective purge):
 
 Additional:
   --keep-docker       Keep Docker installed even when using --all
+  --remove-docker-user Remove the non-root Docker user (rdocker) and its home
 
 Env:
   PORT (default: 8000)
@@ -57,6 +59,7 @@ for arg in "$@"; do
     --deps) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=0; DO_MODELS=0; DO_DEPS=1 ;;
     --all) SELECTIVE=0; DO_LOGS=1; DO_ENGINES=1; DO_MODELS=1; DO_DEPS=1; DO_UNINSTALL_DOCKER=1 ;;
     --keep-docker) DO_UNINSTALL_DOCKER=0 ;;
+    --remove-docker-user) DO_REMOVE_DOCKER_USER=1 ;;
     *) echo "Unknown arg: $arg"; usage; exit 2 ;;
   esac
   shift || true
@@ -182,5 +185,15 @@ if [[ -n "${VIRTUAL_ENV:-}" ]]; then
     deactivate 2>/dev/null || true
   else
     echo "NOTE: An active virtualenv was detected. To exit it in your current shell, run: deactivate" >&2
+  fi
+fi
+
+# Optionally remove non-root Docker user
+if [[ $DO_REMOVE_DOCKER_USER -eq 1 ]]; then
+  if id -u rdocker >/dev/null 2>&1; then
+    echo "Removing user 'rdocker' and its home..."
+    userdel -r rdocker || true
+  else
+    echo "User 'rdocker' not found; skipping."
   fi
 fi

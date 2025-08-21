@@ -9,11 +9,11 @@ fi
 if ! docker info >/dev/null 2>&1; then
   echo "Starting Docker daemon (dockerd)..." | tee -a logs/server.log
   if command -v rootlesskit >/dev/null 2>&1 && command -v dockerd-rootless-setuptool.sh >/dev/null 2>&1; then
-    echo "Starting rootless Docker..." | tee -a logs/server.log
-    export XDG_RUNTIME_DIR=/run/user/$(id -u)
-    mkdir -p "$XDG_RUNTIME_DIR"
-    dockerd-rootless-setuptool.sh install || true
-    nohup dockerd-rootless.sh >> logs/server.log 2>&1 & echo $! > logs/dockerd.pid
+    if ! id -u rdocker >/dev/null 2>&1; then
+      useradd -m -s /bin/bash rdocker || true
+    fi
+    echo "Starting rootless Docker as user rdocker..." | tee -a logs/server.log
+    su - rdocker -c 'export XDG_RUNTIME_DIR=/run/user/$(id -u); mkdir -p "$XDG_RUNTIME_DIR"; dockerd-rootless-setuptool.sh install || true; nohup dockerd-rootless.sh >> /workspace/yap-stt-api/logs/server.log 2>&1 & echo $! > /workspace/yap-stt-api/logs/dockerd.pid'
   else
     nohup dockerd --host=unix:///var/run/docker.sock --storage-driver=overlay2 \
       >> logs/server.log 2>&1 & echo $! > logs/dockerd.pid
@@ -22,6 +22,13 @@ if ! docker info >/dev/null 2>&1; then
     if docker info >/dev/null 2>&1; then echo "Daemon ready" | tee -a logs/server.log; break; fi
     sleep 1
   done
+fi
+# Point docker client to rootless socket if present
+if id -u rdocker >/dev/null 2>&1; then
+  RUID=$(id -u rdocker)
+  if [[ -S "/run/user/${RUID}/docker.sock" ]]; then
+    export DOCKER_HOST="unix:///run/user/${RUID}/docker.sock"
+  fi
 fi
 nohup docker compose up --build > logs/server.log 2>&1 & echo $! > logs/server.pid
 echo "Started with PID $(cat logs/server.pid). Logs: logs/server.log"

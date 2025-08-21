@@ -17,11 +17,12 @@ if ! docker info >/dev/null 2>&1; then
   mkdir -p logs
   # Prefer rootless dockerd if rootlesskit/slirp4netns present; otherwise regular dockerd
   if command -v rootlesskit >/dev/null 2>&1 && command -v dockerd-rootless-setuptool.sh >/dev/null 2>&1; then
-    echo "Starting rootless Docker..."
-    export XDG_RUNTIME_DIR=/run/user/$(id -u)
-    mkdir -p "$XDG_RUNTIME_DIR"
-    dockerd-rootless-setuptool.sh install || true
-    nohup dockerd-rootless.sh >> logs/dockerd.log 2>&1 & echo $! > logs/dockerd.pid
+    # Ensure non-root user exists for rootless Docker
+    if ! id -u rdocker >/dev/null 2>&1; then
+      useradd -m -s /bin/bash rdocker || true
+    fi
+    echo "Starting rootless Docker as user rdocker..."
+    su - rdocker -c 'export XDG_RUNTIME_DIR=/run/user/$(id -u); mkdir -p "$XDG_RUNTIME_DIR"; dockerd-rootless-setuptool.sh install || true; nohup dockerd-rootless.sh >> /workspace/yap-stt-api/logs/dockerd.log 2>&1 & echo $! > /workspace/yap-stt-api/logs/dockerd.pid'
   else
     nohup dockerd --host=unix:///var/run/docker.sock --storage-driver=overlay2 \
     > logs/dockerd.log 2>&1 & echo $! > logs/dockerd.pid
@@ -37,6 +38,14 @@ if ! docker info >/dev/null 2>&1; then
   if ! docker info >/dev/null 2>&1; then
     echo "ERROR: Docker daemon failed to start. Check logs/dockerd.log" >&2
     exit 1
+  fi
+fi
+
+# If rootless socket exists, direct docker client to it
+if id -u rdocker >/dev/null 2>&1; then
+  RUID=$(id -u rdocker)
+  if [[ -S "/run/user/${RUID}/docker.sock" ]]; then
+    export DOCKER_HOST="unix:///run/user/${RUID}/docker.sock"
   fi
 fi
 
