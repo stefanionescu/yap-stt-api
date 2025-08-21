@@ -16,10 +16,11 @@ DO_ENGINES=1
 DO_MODELS=1
 DO_DEPS=1
 SELECTIVE=0
+DO_UNINSTALL_TRT=0
 
 usage() {
   cat <<EOF
-Usage: $0 [--logs] [--engines] [--models] [--deps] [--all]
+Usage: $0 [--logs] [--engines] [--models] [--deps] [--all] [--uninstall-trt]
 
 Stops the FastAPI service and purges logs, caches, dependencies, and local model files.
 
@@ -31,6 +32,9 @@ Options (for selective purge):
   --models     Remove onnx-asr model cache (~/.cache/onnx-asr), host ./models, and PARAKEET_MODEL_DIR
   --deps       Remove local Python venv (.venv) and pip cache (~/.cache/pip)
   --all        Do all of the above (same as no flags)
+
+Additional:
+  --uninstall-trt  Uninstall TensorRT wheels and remove linked libs (requires write perms)
 
 Env:
   PORT (default: 8000)
@@ -52,6 +56,7 @@ for arg in "$@"; do
     --models) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=0; DO_MODELS=1; DO_DEPS=0 ;;
     --deps) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=0; DO_MODELS=0; DO_DEPS=1 ;;
     --all) SELECTIVE=0; DO_LOGS=1; DO_ENGINES=1; DO_MODELS=1; DO_DEPS=1 ;;
+    --uninstall-trt) DO_UNINSTALL_TRT=1 ;;
     *) echo "Unknown arg: $arg"; usage; exit 2 ;;
   esac
   shift || true
@@ -153,5 +158,30 @@ if [[ -n "${VIRTUAL_ENV:-}" ]]; then
   else
     echo "NOTE: An active virtualenv was detected. To exit it in your current shell, run: deactivate" >&2
   fi
+fi
+
+if [[ $DO_UNINSTALL_TRT -eq 1 ]]; then
+  echo "Uninstalling TensorRT wheels and removing linker configs..."
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -m pip uninstall -y tensorrt-cu12 tensorrt_cu12_libs tensorrt_cu12_bindings || true
+  fi
+  # Remove ld.so config entries created by scripts/install_trt.sh
+  rm -f /etc/ld.so.conf.d/tensorrt-wheel.conf 2>/dev/null || true
+  ldconfig 2>/dev/null || true
+  # Best-effort removal of cached wheel contents under site-packages
+  python3 - <<'PY'
+import sysconfig, glob, shutil, os
+roots = [p for k,p in sysconfig.get_paths().items() if k in ("purelib","platlib") and p]
+names = ("tensorrt_cu12_libs", "tensorrt_cu12_bindings", "tensorrt")
+for root in roots:
+    for nm in names:
+        for path in glob.glob(os.path.join(root, nm+"*")):
+            try:
+                if os.path.isdir(path): shutil.rmtree(path)
+                elif os.path.isfile(path): os.remove(path)
+            except Exception:
+                pass
+print("[purge] TRT wheels removed from site-packages (best effort)")
+PY
 fi
 
