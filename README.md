@@ -27,7 +27,6 @@ Default model uses onnx-asr hub alias `nemo-parakeet-tdt-0.6b-v2`, backed by the
 
 ```bash
 # 1) Setup (installs deps, loads defaults from scripts/env.sh)
-bash scripts/purge_pod.sh
 bash scripts/setup.sh
 source .venv/bin/activate
 
