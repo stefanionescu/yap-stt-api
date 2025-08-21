@@ -5,8 +5,20 @@ source scripts/env.sh || true
 
 mkdir -p logs logs/metrics
 
+# Ensure venv and deps
+PY=${PY:-python3}
+if [[ ! -f .venv/bin/activate ]]; then
+  ${PY} -m venv .venv
+  source .venv/bin/activate
+  pip install --upgrade pip
+  pip install -r requirements.txt
+else
+  source .venv/bin/activate
+  python -c "import uvicorn" 2>/dev/null || pip install -r requirements.txt
+fi
+
 # Wire the TensorRT and cuDNN wheel lib dirs at runtime so ORT TRT-EP can load
-TRT_LIB_DIR=$(python3 - <<'PY'
+TRT_LIB_DIR=$(python - <<'PY'
 import os, glob
 try:
     import tensorrt
@@ -26,7 +38,7 @@ PY
 )
 if [[ -n "${TRT_LIB_DIR}" ]]; then export LD_LIBRARY_PATH="${TRT_LIB_DIR}:${LD_LIBRARY_PATH:-}"; fi
 
-CUDNN_LIB_DIR=$(python3 - <<'PY'
+CUDNN_LIB_DIR=$(python - <<'PY'
 import os, sysconfig
 site = sysconfig.get_paths().get('purelib') or ''
 p = os.path.join(site, 'nvidia', 'cudnn', 'lib')
@@ -35,12 +47,4 @@ PY
 )
 if [[ -n "${CUDNN_LIB_DIR}" ]]; then export LD_LIBRARY_PATH="${CUDNN_LIB_DIR}:${LD_LIBRARY_PATH}"; fi
 
-if [[ -f .venv/bin/activate ]]; then
-  source .venv/bin/activate
-fi
-
-if command -v uvicorn >/dev/null 2>&1; then
-  exec uvicorn src.server:app --host "${HOST:-0.0.0.0}" --port "${PORT:-8000}" --loop uvloop --http httptools
-else
-  exec python3 -m uvicorn src.server:app --host "${HOST:-0.0.0.0}" --port "${PORT:-8000}" --loop uvloop --http httptools
-fi
+exec python -m uvicorn src.server:app --host "${HOST:-0.0.0.0}" --port "${PORT:-8000}" --loop uvloop --http httptools
