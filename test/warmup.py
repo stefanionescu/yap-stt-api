@@ -74,15 +74,18 @@ def main() -> int:
     duration = data.get("duration", 0.0)
     
     if text:
-        print(f"Text: {text[:50]}")
+        snippet = text[:50]
+        print(f"Text: {snippet}...")
     else:
         print("No speech found")
     
     print(f"Audio duration: {duration:.4f}s")
-    try:
-        print(f"Transcription time: {elapsed_s:.4f}s")
-    except NameError:
-        pass
+    print(f"Transcription time: {elapsed_s:.4f}s")
+    if duration and duration > 0 and elapsed_s > 0:
+        rtf = elapsed_s / float(duration)
+        if rtf > 0:
+            xrt = 1.0 / rtf
+            print(f"RTF: {rtf:.4f}  xRT: {xrt:.2f}x")
 
     # Write result to test/results/warmup.txt (overwrite)
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
