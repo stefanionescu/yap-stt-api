@@ -31,7 +31,7 @@ fi
 mkdir -p "${TARGET_DIR}"
 
 # Idempotent: if target files exist and not forcing, skip
-if [[ "${FORCE}" != "1" ]] && [[ -f "${TARGET_DIR}/encoder-model.onnx" && -f "${TARGET_DIR}/decoder_joint-model.onnx" && -f "${TARGET_DIR}/vocab.txt" ]]; then
+if [[ "${FORCE}" != "1" ]] && [[ -f "${TARGET_DIR}/encoder-model.onnx" && -f "${TARGET_DIR}/decoder_joint-model.onnx" && -f "${TARGET_DIR}/vocab.txt" && -f "${TARGET_DIR}/config.json" ]]; then
   echo "INT8 artifacts already present in ${TARGET_DIR}. Skipping download. (Set FORCE_FETCH_INT8=1 to refetch)"
   exit 0
 fi
@@ -57,6 +57,7 @@ files = [
     ("encoder-model.int8.onnx", "encoder-model.onnx"),
     ("decoder_joint-model.int8.onnx", "decoder_joint-model.onnx"),
     ("vocab.txt", "vocab.txt"),
+    ("config.json", "config.json"),
 ]
 
 token = os.getenv("HF_TOKEN")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 from dataclasses import dataclass
@@ -58,6 +59,19 @@ class ParakeetModel:
                 "Model dir missing encoder-model.onnx and/or decoder_joint-model.onnx. "
                 "If you have INT8 files named *.int8.onnx, rename them accordingly."
             )
+
+        # Check config.json for frontend configuration to ensure mel-spectrogram dimensions match
+        cfg_path = os.path.join(onnx_dir, "config.json")
+        try:
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            expected_mels = int(cfg.get("frontend", {}).get("n_mels", cfg.get("n_mels", 80)))
+            if expected_mels not in (80, 128):
+                logger.warning("Unexpected n_mels in config.json: %s", expected_mels)
+            else:
+                logger.info("Config frontend n_mels=%d (will match encoder input dim)", expected_mels)
+        except Exception:
+            logger.warning("No/invalid config.json; default preprocessing may mis-match model")
 
         prov_list = pick_providers(
             device_id=settings.device_id,

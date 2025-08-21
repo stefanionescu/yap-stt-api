@@ -231,7 +231,11 @@ python3 test/client.py --file mid.wav
 Purges everything by default (logs, TRT caches, model caches, venv, pip cache). No flags needed.
 
 ```bash
+# Standard purge (keeps TRT wheels)
 bash scripts/purge_pod.sh
+
+# Deep purge (removes TRT wheels too)
+bash scripts/purge_pod.sh --uninstall-trt
 ```
 
 ### Sources & docs
