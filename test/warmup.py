@@ -54,10 +54,14 @@ def main() -> int:
 
     # Console print: first 50 characters or fallback message
     text = str((data.get("text") or "")).strip()
+    duration = data.get("duration", 0.0)
+    
     if text:
-        print(text[:50])
+        print(f"Text: {text[:50]}")
     else:
         print("No speech found")
+    
+    print(f"Audio duration: {duration:.4f}s")
 
     # Write result to test/results/warmup.txt (overwrite)
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
