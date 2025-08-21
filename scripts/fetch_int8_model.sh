@@ -4,7 +4,7 @@ set -euo pipefail
 export PARAKEET_MODEL_DIR=${PARAKEET_MODEL_DIR:-/models/parakeet-int8}
 export HF_REPO_ID=${HF_REPO_ID:-"istupakov/parakeet-tdt-0.6b-v2-onnx"}
 export HF_REVISION=${HF_REVISION:-"main"}
-# Optional: export HF_TOKEN for auth; huggingface-cli and curl will pick it up
+# Optional: export HF_TOKEN for auth; hf and curl will pick it up
 
 mkdir -p "$PARAKEET_MODEL_DIR"
 
@@ -24,7 +24,7 @@ fi
 echo "Fetching INT8 artifacts from $HF_REPO_ID@$HF_REVISION into $PARAKEET_MODEL_DIR ..."
 
 have_cli=0
-if command -v huggingface-cli >/dev/null 2>&1; then
+if command -v hf >/dev/null 2>&1; then
   have_cli=1
 fi
 
@@ -47,7 +47,7 @@ if [[ $have_cli -eq 1 ]]; then
   tmpdir=$(mktemp -d)
   trap 'rm -rf "$tmpdir"' EXIT
   set +e
-  huggingface-cli download "$HF_REPO_ID" \
+  hf download "$HF_REPO_ID" \
     --revision "$HF_REVISION" \
     --local-dir "$tmpdir" \
     --local-dir-use-symlinks False \
@@ -58,7 +58,7 @@ if [[ $have_cli -eq 1 ]]; then
   status=$?
   set -e
   if [[ $status -ne 0 ]]; then
-    echo "huggingface-cli download failed with status $status" >&2
+    echo "hf download failed with status $status" >&2
     fallback_curl
   else
     # Move/standardize filenames if present

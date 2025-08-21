@@ -8,12 +8,15 @@ from typing import Optional
 import numpy as np
 import soundfile as sf
 import onnxruntime as ort
+import logging
 
 try:
     import onnx_asr
 except Exception as e:  # pragma: no cover
     onnx_asr = None  # type: ignore
 
+
+logger = logging.getLogger("parakeet.model")
 
 CUDA_ONLY = [("CUDAExecutionProvider", {"device_id": 0}), "CPUExecutionProvider"]
 
@@ -48,19 +51,39 @@ class ParakeetModel:
         return cls(model_id=source, _model=model)
 
     @classmethod
-    def load_with_fallback(cls, primary_id: str, fallback_id: Optional[str] = None, *, model_dir: str = "", require_gpu: bool = True) -> "ParakeetModel":
+    def load_with_fallback(
+        cls,
+        primary_id: str,
+        fallback_id: Optional[str] = None,
+        *,
+        model_dir: str = "",
+        require_gpu: bool = True,
+    ) -> "ParakeetModel":
         if onnx_asr is None:
             raise RuntimeError("onnx-asr is not installed; please install dependencies.")
-        # Prefer an explicit local model directory (e.g., INT8 files)
+
+        # Try explicit local directory first, but fall back if the loader doesn't support paths
         if model_dir:
-            return cls._load_internal(model_dir, require_gpu)
-        # Try primary alias first
+            try:
+                logger.info("Attempting to load model from local dir: %s", model_dir)
+                return cls._load_internal(model_dir, require_gpu)
+            except Exception as e:
+                logger.warning("Local dir load failed (%s). Falling back to hub ids.", e)
+
+        # Try primary alias
         try:
+            logger.info("Attempting to load model by id: %s", primary_id)
             return cls._load_internal(primary_id, require_gpu)
-        except Exception:
-            if fallback_id and fallback_id != primary_id:
-                return cls._load_internal(fallback_id, require_gpu)
-            raise
+        except Exception as e_primary:
+            logger.warning("Primary id load failed (%s).", e_primary)
+
+        # Try fallback repo id
+        if fallback_id and fallback_id != primary_id:
+            logger.info("Attempting to load fallback id: %s", fallback_id)
+            return cls._load_internal(fallback_id, require_gpu)
+
+        # If everything fails, raise the original error
+        raise RuntimeError(f"Failed to load model from local dir/id. Primary='{primary_id}', fallback='{fallback_id}'.")
 
     def recognize_waveform(self, waveform: np.ndarray, sample_rate: int) -> str:
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as tmp:
