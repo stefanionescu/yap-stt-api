@@ -3,10 +3,20 @@ from __future__ import annotations
 import logging
 import os
 from typing import Any, List
+import ctypes
 
 import onnxruntime as ort
 
 logger = logging.getLogger("parakeet.runtime")
+
+
+def _trt_runtime_ok() -> bool:
+    try:
+        ctypes.CDLL("libnvinfer.so.10")
+        ctypes.CDLL("libnvinfer_plugin.so.10")
+        return True
+    except OSError:
+        return False
 
 
 def pick_providers(
@@ -20,7 +30,8 @@ def pick_providers(
     avail = set(ort.get_available_providers())
     providers: List[Any] = []
 
-    if use_tensorrt and "TensorrtExecutionProvider" in avail:
+    want_trt = bool(use_tensorrt) and ("TensorrtExecutionProvider" in avail) and _trt_runtime_ok()
+    if want_trt:
         providers.append(
             (
                 "TensorrtExecutionProvider",

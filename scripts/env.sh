@@ -31,11 +31,14 @@ export TRT_TIMING_CACHE=${TRT_TIMING_CACHE:-/models/timing.cache}
 # Direct ONNX runtime path (own ORT providers; leave off to keep current path)
 export PARAKEET_USE_DIRECT_ONNX=${PARAKEET_USE_DIRECT_ONNX:-1}
 export PARAKEET_DEVICE_ID=${PARAKEET_DEVICE_ID:-0}
-export PARAKEET_USE_TRT=${PARAKEET_USE_TRT:-1}
+# Prefer the more explicit flag name; PARAKEET_USE_TRT remains supported via src/config.py
+export PARAKEET_USE_TENSORRT=${PARAKEET_USE_TENSORRT:-1}
 export ORT_INTRA_OP_NUM_THREADS=${ORT_INTRA_OP_NUM_THREADS:-1}
 
 # Auto-fetch INT8 artifacts during setup (set to 0 to disable)
 export AUTO_FETCH_INT8=${AUTO_FETCH_INT8:-1}
+# Optional: install TRT runtime via apt during setup (Ubuntu 22.04 pods)
+export INSTALL_TRT=${INSTALL_TRT:-1}
 
 # CPU/GPU perf knobs
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}

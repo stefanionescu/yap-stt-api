@@ -23,7 +23,8 @@ class Settings(BaseSettings):
     # Direct ONNX runtime path (bypass onnx_asr high-level pipeline)
     use_direct_onnx: bool = os.getenv("PARAKEET_USE_DIRECT_ONNX", "0") not in ("0", "false", "False")
     device_id: int = int(os.getenv("PARAKEET_DEVICE_ID", "0"))
-    use_tensorrt: bool = os.getenv("PARAKEET_USE_TRT", "1") not in ("0", "false", "False")
+    # Allow either PARAKEET_USE_TENSORRT (preferred) or PARAKEET_USE_TRT
+    use_tensorrt: bool = os.getenv("PARAKEET_USE_TENSORRT", os.getenv("PARAKEET_USE_TRT", "1")) not in ("0", "false", "False")
     ort_intra_op_num_threads: int = int(os.getenv("ORT_INTRA_OP_NUM_THREADS", "1"))
 
     # Concurrency and queuing

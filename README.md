@@ -9,6 +9,23 @@ A single-process FastAPI service that runs NVIDIA Parakeet TDT 0.6b v2 (English)
 
 > GPU-only: requirements are pinned to onnxruntime-gpu and onnx-asr >= 0.7.0. CPU ORT is not supported here.
 
+### Quickstart (3 commands)
+
+```bash
+# 1) Setup (creates venv, installs deps, fetches INT8, installs TRT if possible)
+bash scripts/setup.sh
+source .venv/bin/activate
+
+# 2) Start the API
+bash scripts/start.sh
+
+# 3) Test once
+python3 test/warmup.py --file samples/long.mp3
+```
+
+Defaults: `PARAKEET_MODEL_DIR=./models/parakeet-int8`, `PARAKEET_USE_DIRECT_ONNX=1`, `AUTO_FETCH_INT8=1`, `INSTALL_TRT=1`, `PARAKEET_USE_TENSORRT=1`.
+If TRT libs are missing or install fails, runtime cleanly falls back to CUDA EP.
+
 ### Admission control
 
 - Queue is capped to `PARAKEET_NUM_LANES * PARAKEET_QUEUE_MAX_FACTOR`.
@@ -26,38 +43,20 @@ Models can be loaded from Hugging Face by onnx-asr (hub ids) or from a local INT
 
 INT8 setup (recommended):
 
+Already handled by setup defaults. Manual fetch if needed:
 ```bash
-# Defaults already set: PARAKEET_MODEL_DIR=./models/parakeet-int8 and PARAKEET_USE_DIRECT_ONNX=1
-# You can override these if desired.
-
-# Fetch INT8 artifacts (idempotent; set FORCE_FETCH_INT8=1 to refetch)
-# Requires huggingface_hub (already in requirements) and optional HF_TOKEN
-bash scripts/fetch_int8.sh
-
-# Files will be placed as:
-#   $PARAKEET_MODEL_DIR/encoder-model.onnx
-#   $PARAKEET_MODEL_DIR/decoder_joint-model.onnx
-#   $PARAKEET_MODEL_DIR/vocab.txt
+bash scripts/fetch_int8.sh               # idempotent
+# FORCE_FETCH_INT8=1 bash scripts/fetch_int8.sh  # to refetch
 ```
 
-### Run (venv, GPU only)
-
+### Start/Stop (extras)
 ```bash
-# 1) Setup (installs deps, loads defaults from scripts/env.sh)
-bash scripts/setup.sh
-source .venv/bin/activate
-
-# 2) Verify GPU provider is available
-python -c "import onnxruntime as ort; print(ort.get_available_providers())"  # must include CUDAExecutionProvider
-
-# 3) Start server (foreground)
+# Foreground
 bash scripts/start.sh
-# or start in background and tail logs
-bash scripts/start_bg.sh
-bash scripts/tail_bg_logs.sh
-
-# 4) Warmup test (result saved to test/results/warmup.txt)
-python3 test/warmup.py --file long.mp3
+# Background + tail logs
+bash scripts/start_bg.sh && bash scripts/tail_bg_logs.sh
+# Stop bg
+bash scripts/stop.sh
 ```
 
 If you want to tweak defaults (lanes, paths, queue), edit `scripts/env.sh`.
@@ -99,7 +98,42 @@ TensorRT engine and timing caches (Linux GPU with ORT TensorRT-EP builds):
 
 - `TRT_ENGINE_CACHE` (default: `/models/trt_cache`)
 - `TRT_TIMING_CACHE` (default: `/models/timing.cache`)
-- `PARAKEET_USE_TRT` (default: 1) — enable TensorRT EP if available
+- `PARAKEET_USE_TENSORRT` (default: 1) — enable TensorRT EP if libs present (auto-fallback to CUDA)
+### Enabling TensorRT EP without Docker (optional)
+
+If your pod is Ubuntu 22.04, you can install TensorRT runtime libs in-place:
+
+```bash
+# Install TRT runtime (requires sudo inside the pod)
+INSTALL_TRT=1 bash scripts/setup.sh
+
+# Then enable TRT EP
+export PARAKEET_USE_TENSORRT=1
+bash scripts/start.sh
+```
+
+Or install manually following NVIDIA docs and set:
+
+```bash
+export LD_LIBRARY_PATH=/opt/tensorrt/lib:$LD_LIBRARY_PATH
+export PARAKEET_USE_TENSORRT=1
+```
+
+#### Disabling TensorRT EP
+
+To skip TensorRT entirely and run with CUDA EP only:
+
+```bash
+# Skip installing TRT during setup
+export INSTALL_TRT=0
+
+# Disable TRT EP at runtime (service will use CUDA EP if available)
+export PARAKEET_USE_TENSORRT=0
+
+bash scripts/start.sh
+```
+
+Docs: `https://onnxruntime.ai/docs/execution-providers/TensorRT-ExecutionProvider.html`
 - `ORT_INTRA_OP_NUM_THREADS` (default: 1)
 - `OMP_NUM_THREADS` (default: 1)
 - `MKL_NUM_THREADS` (default: 1)
