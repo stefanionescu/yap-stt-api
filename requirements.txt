@@ -7,6 +7,7 @@ soxr==0.3.7
 httpx==0.27.0
 pydantic==2.8.2
 pydantic-settings==2.4.0
+huggingface_hub>=0.24.0
 # GPU-only runtime
 onnxruntime-gpu>=1.22.0
 # onnx-asr adds Parakeet TDT V2/V3 support in 0.7+

@@ -23,31 +23,28 @@ Default model uses onnx-asr hub alias `nemo-parakeet-tdt-0.6b-v2`, backed by the
 - HF: `istupakov/parakeet-tdt-0.6b-v2-onnx`  
   See: `https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx`
 
-### Run (Best: Docker on GPU)
-
-The image auto-fetches the INT8 artifacts at startup into `/models/parakeet-int8` and starts the server.
+### Run (venv, GPU only)
 
 ```bash
-docker build -t parakeet-onnx:latest .
-docker run --gpus all -p 8000:8000 \
-  -e PARAKEET_NUM_LANES=6 \
-  -e PARAKEET_MODEL_DIR=/models/parakeet-int8 \
-  -e TRT_ENGINE_CACHE=/models/trt_cache -e TRT_TIMING_CACHE=/models/timing.cache \
-  -v $(pwd)/models:/models \
-  parakeet-onnx:latest
+# 1) Setup (installs deps, loads defaults from scripts/env.sh)
+bash scripts/purge_pod.sh
+bash scripts/setup.sh
+source .venv/bin/activate
 
-# Warmup request (result saved to test/results/warmup.txt)
+# 2) Fetch INT8 model from Hugging Face (respects HF_TOKEN if set)
+bash scripts/fetch_int8_model.sh
+
+# 3) Verify GPU provider is available
+python -c "import onnxruntime as ort; print(ort.get_available_providers())"  # must include CUDAExecutionProvider
+
+# 4) Start server
+bash scripts/start.sh
+
+# 5) Warmup test (result saved to test/results/warmup.txt)
 python3 test/warmup.py --url http://127.0.0.1:8000
 ```
 
-Optional (bare venv on pod; not recommended for production):
-
-```bash
-bash scripts/setup.sh
-source .venv/bin/activate && export PARAKEET_NUM_LANES=6 PARAKEET_MODEL_DIR=/models/parakeet-int8
-bash scripts/fetch_int8_model.sh
-bash scripts/start.sh
-```
+If you want to tweak defaults (lanes, paths, queue), edit `scripts/env.sh`.
 
 ### API
 
@@ -70,11 +67,10 @@ python3 -m src.metrics --windows 30m 1h 3h 6h 12h 24h 3d
 
 ### Configuration
 
-Environment variables (prefix `PARAKEET_`):
+Defaults live in `scripts/env.sh`. You can override via environment vars before `start.sh`.
 
-- `PARAKEET_MODEL_ID` (default: `nemo-parakeet-tdt-0.6b-v2`)
 - `PARAKEET_MODEL_DIR` (default: `/models/parakeet-int8`) — local INT8 folder
-- `PARAKEET_NUM_LANES` (default: 2; set 6 for L40S)
+- `PARAKEET_NUM_LANES` (default: 6)
 - `PARAKEET_QUEUE_MAX_FACTOR` (default: 2)
 - `PARAKEET_MAX_QUEUE_WAIT_S` (default: 30)
 - `PARAKEET_MAX_AUDIO_SECONDS` (default: 600)
@@ -84,10 +80,6 @@ TensorRT engine and timing caches (Linux GPU with ORT TensorRT-EP builds):
 
 - `TRT_ENGINE_CACHE` (default: `/models/trt_cache`)
 - `TRT_TIMING_CACHE` (default: `/models/timing.cache`)
-
-### Notes on Precision & EPs
-
-- This v1 uses `onnx-asr` to keep the RNNT decode/simple setup. Next iteration wires explicit ORT sessions with TensorRT EP and I/O binding (INT8/FP16) for maximum throughput.
 
 ### Warmup
 
@@ -100,32 +92,11 @@ python3 test/warmup.py --file samples/your.wav
 
 ### Purging
 
-Stop the service and optionally clear logs/caches and dependencies:
+Purges everything by default (logs, TRT caches, model caches, venv, pip cache). No flags needed.
 
 ```bash
-# Stop service only
 bash scripts/purge_pod.sh
-
-# Clear logs and metrics
-bash scripts/purge_pod.sh --logs
-
-# Clear TensorRT engine/timing caches
-bash scripts/purge_pod.sh --engines
-
-# Clear onnx-asr model cache
-bash scripts/purge_pod.sh --models
-
-# Remove local venv (.venv) and pip cache (~/.cache/pip)
-bash scripts/purge_pod.sh --deps
-
-# Do everything (logs, engines, models, deps)
-bash scripts/purge_pod.sh --all
 ```
-
-### Docker vs bare runtime
-
-- For Runpod, a Docker image is recommended: consistent CUDA/TRT/ORT stack, enables persistent TRT caches via volumes, reproducible deploys.
-- For quick iteration, you can run directly with `uvicorn` on the pod using a Python venv; just ensure the correct ORT GPU build and CUDA/TensorRT libs are present. This repo supports both workflows.
 
 ### Sources & docs
 
@@ -133,4 +104,3 @@ bash scripts/purge_pod.sh --all
 - ONNX Runtime — TensorRT EP: `https://onnxruntime.ai/docs/execution-providers/TensorRT-ExecutionProvider.html`
 - I/O Binding: `https://onnxruntime.ai/docs/performance/tune-performance/iobinding.html`
 - L40S GPU: `https://www.nvidia.com/en-us/data-center/l40s/`
-- Runpod ports: `https://docs.runpod.io/pods/configuration/expose-ports`

@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export HOST=${HOST:-0.0.0.0}
-export PORT=${PORT:-8000}
-export PARAKEET_NUM_LANES=${PARAKEET_NUM_LANES:-2}
+source scripts/env.sh
 
 mkdir -p logs logs/metrics
 

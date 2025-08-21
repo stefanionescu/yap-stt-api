@@ -8,32 +8,27 @@ ONNX_ASR_CACHE_DIR=${ONNX_ASR_CACHE_DIR:-"$HOME/.cache/onnx-asr"}
 PIP_CACHE_DIR=${PIP_CACHE_DIR:-"$HOME/.cache/pip"}
 VENV_DIR=${VENV_DIR:-".venv"}
 MODELS_DIR_HOST=${MODELS_DIR_HOST:-"models"}
-DOCKER_IMAGE=${DOCKER_IMAGE:-"parakeet-onnx:latest"}
-DOCKER_NAME_FILTER=${DOCKER_NAME_FILTER:-"parakeet-onnx"}
 
-# By default purge EVERYTHING (no flags needed)
+# Purge EVERYTHING by default (no flags needed)
 DO_LOGS=1
 DO_ENGINES=1
 DO_MODELS=1
 DO_DEPS=1
-DO_DOCKER=1
-# If any flags are provided, we'll assume selective mode until --all is seen
 SELECTIVE=0
 
 usage() {
   cat <<EOF
-Usage: $0 [--logs] [--engines] [--models] [--deps] [--docker] [--all]
+Usage: $0 [--logs] [--engines] [--models] [--deps] [--all]
 
-Stops the FastAPI service and purges logs, caches, dependencies, and Docker resources.
+Stops the FastAPI service and purges logs, caches, dependencies, and local model files.
 
-Defaults: With no flags, purges EVERYTHING (logs, engines, models, deps, docker).
+Defaults: With no flags, purges EVERYTHING (logs, engines, models, deps).
 
 Options (for selective purge):
   --logs       Remove logs/ and metrics logs (keeps directory)
   --engines    Remove TensorRT engine & timing caches (TRT_ENGINE_CACHE, TRT_TIMING_CACHE)
   --models     Remove onnx-asr model cache (~/.cache/onnx-asr) and host ./models directory
   --deps       Remove local Python venv (.venv) and pip cache (~/.cache/pip)
-  --docker     Stop and remove Docker containers and the parakeet image (DOCKER_IMAGE)
   --all        Do all of the above (same as no flags)
 
 Env:
@@ -44,20 +39,17 @@ Env:
   PIP_CACHE_DIR (default: ~/.cache/pip)
   VENV_DIR (default: .venv)
   MODELS_DIR_HOST (default: ./models)
-  DOCKER_IMAGE (default: parakeet-onnx:latest)
-  DOCKER_NAME_FILTER (default: parakeet-onnx)
 EOF
 }
 
 for arg in "$@"; do
   case "$arg" in
     --help|-h) usage; exit 0 ;;
-    --logs) SELECTIVE=1; DO_LOGS=1; DO_ENGINES=0; DO_MODELS=0; DO_DEPS=0; DO_DOCKER=0 ;;
-    --engines) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=1; DO_MODELS=0; DO_DEPS=0; DO_DOCKER=0 ;;
-    --models) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=0; DO_MODELS=1; DO_DEPS=0; DO_DOCKER=0 ;;
-    --deps) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=0; DO_MODELS=0; DO_DEPS=1; DO_DOCKER=0 ;;
-    --docker) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=0; DO_MODELS=0; DO_DEPS=0; DO_DOCKER=1 ;;
-    --all) SELECTIVE=0; DO_LOGS=1; DO_ENGINES=1; DO_MODELS=1; DO_DEPS=1; DO_DOCKER=1 ;;
+    --logs) SELECTIVE=1; DO_LOGS=1; DO_ENGINES=0; DO_MODELS=0; DO_DEPS=0 ;;
+    --engines) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=1; DO_MODELS=0; DO_DEPS=0 ;;
+    --models) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=0; DO_MODELS=1; DO_DEPS=0 ;;
+    --deps) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=0; DO_MODELS=0; DO_DEPS=1 ;;
+    --all) SELECTIVE=0; DO_LOGS=1; DO_ENGINES=1; DO_MODELS=1; DO_DEPS=1 ;;
     *) echo "Unknown arg: $arg"; usage; exit 2 ;;
   esac
   shift || true
@@ -82,7 +74,6 @@ kill_by_pidfile() {
 }
 
 kill_uvicorn_by_pattern() {
-  # Try to kill uvicorn processes serving src.server:app
   if command -v pgrep >/dev/null 2>&1; then
     local pids
     pids=$(pgrep -f "uvicorn .*src.server:app" || true)
@@ -110,27 +101,6 @@ kill_by_port() {
       done
     fi
   fi
-}
-
-docker_cleanup() {
-  if ! command -v docker >/dev/null 2>&1; then
-    echo "Docker not available; skipping Docker cleanup"
-    return 0
-  fi
-  echo "Stopping and removing Docker containers..."
-  # By image
-  local cids
-  cids=$(docker ps -a --filter "ancestor=$DOCKER_IMAGE" --format '{{.ID}}' || true)
-  # By name filter
-  local cids_by_name
-  cids_by_name=$(docker ps -a --filter "name=$DOCKER_NAME_FILTER" --format '{{.ID}}' || true)
-  local allcids
-  allcids=$(printf "%s\n%s\n" "$cids" "$cids_by_name" | sort -u | tr '\n' ' ')
-  if [[ -n "${allcids// /}" ]]; then
-    docker rm -f $allcids || true
-  fi
-  echo "Removing Docker image $DOCKER_IMAGE (if present)..."
-  docker rmi -f "$DOCKER_IMAGE" 2>/dev/null || true
 }
 
 echo "Stopping service..."
@@ -167,10 +137,6 @@ if [[ $DO_DEPS -eq 1 ]]; then
   echo "Removing virtualenv at $VENV_DIR and pip cache at $PIP_CACHE_DIR ..."
   rm -rf "$VENV_DIR" || true
   rm -rf "$PIP_CACHE_DIR" || true
-fi
-
-if [[ $DO_DOCKER -eq 1 ]]; then
-  docker_cleanup || true
 fi
 
 echo "Done."
