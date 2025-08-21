@@ -71,6 +71,13 @@ def main() -> int:
             r.raise_for_status()
             data = r.json()
 
+    # Console print: first 50 characters or fallback message
+    text = str((data.get("text") or "")).strip()
+    if text:
+        print(text[:50])
+    else:
+        print("No speech found")
+
     # Write result to test/results/warmup.txt (overwrite)
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     with open(RESULTS_FILE, "w", encoding="utf-8") as out:
