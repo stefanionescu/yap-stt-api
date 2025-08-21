@@ -8,6 +8,7 @@ ONNX_ASR_CACHE_DIR=${ONNX_ASR_CACHE_DIR:-"$HOME/.cache/onnx-asr"}
 PIP_CACHE_DIR=${PIP_CACHE_DIR:-"$HOME/.cache/pip"}
 VENV_DIR=${VENV_DIR:-".venv"}
 MODELS_DIR_HOST=${MODELS_DIR_HOST:-"models"}
+PARAKEET_MODEL_DIR=${PARAKEET_MODEL_DIR:-"/models/parakeet-int8"}
 
 # Purge EVERYTHING by default (no flags needed)
 DO_LOGS=1
@@ -27,7 +28,7 @@ Defaults: With no flags, purges EVERYTHING (logs, engines, models, deps).
 Options (for selective purge):
   --logs       Remove logs/ and metrics logs (keeps directory)
   --engines    Remove TensorRT engine & timing caches (TRT_ENGINE_CACHE, TRT_TIMING_CACHE)
-  --models     Remove onnx-asr model cache (~/.cache/onnx-asr) and host ./models directory
+  --models     Remove onnx-asr model cache (~/.cache/onnx-asr), host ./models, and PARAKEET_MODEL_DIR
   --deps       Remove local Python venv (.venv) and pip cache (~/.cache/pip)
   --all        Do all of the above (same as no flags)
 
@@ -39,6 +40,7 @@ Env:
   PIP_CACHE_DIR (default: ~/.cache/pip)
   VENV_DIR (default: .venv)
   MODELS_DIR_HOST (default: ./models)
+  PARAKEET_MODEL_DIR (default: /models/parakeet-int8)
 EOF
 }
 
@@ -131,6 +133,8 @@ if [[ $DO_MODELS -eq 1 ]]; then
   echo "Purging host models directory at $MODELS_DIR_HOST ..."
   rm -rf "$MODELS_DIR_HOST" || true
   mkdir -p "$MODELS_DIR_HOST"
+  echo "Purging downloaded model at $PARAKEET_MODEL_DIR ..."
+  rm -rf "$PARAKEET_MODEL_DIR" || true
 fi
 
 if [[ $DO_DEPS -eq 1 ]]; then
