@@ -4,7 +4,7 @@ A single-process FastAPI service that runs NVIDIA Parakeet TDT 0.6B v2 (English)
 
 - Endpoint: `POST /v1/transcribe` (multipart form: `file`)
 - Concurrency: asyncio lane workers + priority queue
-- Metrics: JSONL logs under `logs/metrics/` + an on-pod Python report (no Prometheus)
+- Metrics: JSONL logs under `logs/metrics/` + an on-pod Python report
 - Health: `/healthz`, Readiness: `/readyz`
 
 > GPU-only: requirements are pinned to onnxruntime-gpu and onnx-asr >= 0.7.0. CPU ORT is not supported here.
