@@ -54,14 +54,14 @@ def _metrics(audio_duration_s: float, wall_s: float, queue_wait_s: float = 0.0) 
     """Compute transcription metrics."""
     rtf = wall_s / audio_duration_s if audio_duration_s > 0 else float("inf")  # Real-time factor
     xrt = audio_duration_s / wall_s if wall_s > 0 else 0.0  # Times real-time
-    throughput_hrs = 3600.0 / wall_s if wall_s > 0 else 0.0  # Hours of audio per wall-clock hour
+    throughput_min_per_min = (audio_duration_s / 60.0) / (wall_s / 60.0) if wall_s > 0 else 0.0  # Minutes of audio per minute
     return {
         "wall_s": wall_s,
         "audio_s": audio_duration_s,
         "queue_wait_s": queue_wait_s,
         "rtf": rtf,
         "xrt": xrt,
-        "throughput_hrs": throughput_hrs,
+        "throughput_min_per_min": throughput_min_per_min,
     }
 
 
@@ -76,7 +76,7 @@ def summarize(title: str, results: List[Dict[str, float]]) -> None:
     queue_wait = [r.get("queue_wait_s", 0.0) for r in results]
     rtf = [r["rtf"] for r in results]
     xrt = [r["xrt"] for r in results]
-    throughput = [r["throughput_hrs"] for r in results]
+    throughput = [r["throughput_min_per_min"] for r in results]
     n = len(results)
     
     def p(v: List[float], q: float) -> float:
@@ -90,7 +90,7 @@ def summarize(title: str, results: List[Dict[str, float]]) -> None:
     print(f"Queue wait s| avg={stats.mean(queue_wait):.4f}  p95={p(queue_wait,0.95):.4f}")
     print(f"RTF         | avg={stats.mean(rtf):.4f}  p50={stats.median(rtf):.4f}  p95={p(rtf,0.95):.4f}")
     print(f"xRT         | avg={stats.mean(xrt):.4f}")
-    print(f"Throughput  | avg={stats.mean(throughput):.2f} hrs/hr")
+    print(f"Throughput  | avg={stats.mean(throughput):.2f} min/min")
 
 
 async def _http_worker(
@@ -99,17 +99,16 @@ async def _http_worker(
     requests_count: int, 
     worker_id: int
 ) -> Dict[str, any]:
-    """HTTP worker that sends requests using random files from the list."""
+    """HTTP worker that sends requests using the specified file."""
     results: List[Dict[str, float]] = []
     rejected = 0
     errors = 0
     
     url = base_url.rstrip("/") + "/v1/transcribe"
+    file_path = file_paths[0]  # Use the single specified file
     
     async with httpx.AsyncClient(timeout=120.0) as client:
         for i in range(requests_count):
-            # Pick a random file for variety
-            file_path = random.choice(file_paths)
             
             t0 = time.time()
             try:
@@ -189,23 +188,20 @@ def main() -> None:
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--n", type=int, default=40, help="Total requests")
     ap.add_argument("--concurrency", type=int, default=1, help="Concurrent workers")
-    ap.add_argument("--file", type=str, default="", help="Specific file from samples/ (default: use all)")
+    ap.add_argument("--file", type=str, default="mid.wav", help="Audio file from samples/ (default: mid.wav)")
     args = ap.parse_args()
 
     base_url = f"http://{args.host}:{args.port}"
     
-    # Determine which files to use
-    if args.file:
-        file_path = find_sample_by_name(args.file)
-        if not file_path:
-            print(f"File '{args.file}' not found in {SAMPLES_DIR}/")
-            return
-        file_paths = [file_path]
-    else:
-        file_paths = find_sample_files()
-        if not file_paths:
-            print(f"No audio files found in {SAMPLES_DIR}/")
-            return
+    # Find the specified file
+    file_path = find_sample_by_name(args.file)
+    if not file_path:
+        print(f"File '{args.file}' not found in {SAMPLES_DIR}/")
+        available = find_sample_files()
+        if available:
+            print(f"Available files: {[os.path.basename(f) for f in available]}")
+        return
+    file_paths = [file_path]
     
     print(f"Benchmark → HTTP | n={args.n} | concurrency={args.concurrency} | host={args.host}:{args.port}")
     print(f"Using {len(file_paths)} file(s): {[os.path.basename(f) for f in file_paths]}")
@@ -222,7 +218,7 @@ def main() -> None:
     if results:
         total_audio = sum(r["audio_s"] for r in results)
         print(f"Total audio processed: {total_audio:.2f}s")
-        print(f"Overall throughput: {total_audio/elapsed:.2f}x real-time")
+        print(f"Overall throughput: {total_audio/elapsed/60:.2f} min/min")
 
 
 if __name__ == "__main__":

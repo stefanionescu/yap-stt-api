@@ -65,9 +65,8 @@ async def _tpm_worker(
     errors = 0
     
     async with httpx.AsyncClient(timeout=120.0) as client:
+        file_path = file_paths[0]  # Use the single specified file
         while time.time() - start_time < duration_s:
-            # Pick random file for variety
-            file_path = random.choice(file_paths)
             
             t0 = time.time()
             try:
@@ -140,23 +139,20 @@ def main() -> None:
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--concurrency", type=int, default=6, help="Concurrent workers")
     ap.add_argument("--duration", type=int, default=60, help="Test duration in seconds")
-    ap.add_argument("--file", type=str, default="", help="Specific file from samples/ (default: use all)")
+    ap.add_argument("--file", type=str, default="mid.wav", help="Audio file from samples/ (default: mid.wav)")
     args = ap.parse_args()
 
     base_url = f"http://{args.host}:{args.port}"
     
-    # Determine which files to use
-    if args.file:
-        file_path = find_sample_by_name(args.file)
-        if not file_path:
-            print(f"File '{args.file}' not found in {SAMPLES_DIR}/")
-            return
-        file_paths = [file_path]
-    else:
-        file_paths = find_sample_files()
-        if not file_paths:
-            print(f"No audio files found in {SAMPLES_DIR}/")
-            return
+    # Find the specified file
+    file_path = find_sample_by_name(args.file)
+    if not file_path:
+        print(f"File '{args.file}' not found in {SAMPLES_DIR}/")
+        available = find_sample_files()
+        if available:
+            print(f"Available files: {[os.path.basename(f) for f in available]}")
+        return
+    file_paths = [file_path]
     
     print(f"TPM Test → HTTP | concurrency={args.concurrency} | duration={args.duration}s | host={args.host}:{args.port}")
     print(f"Using {len(file_paths)} file(s): {[os.path.basename(f) for f in file_paths]}")
@@ -174,7 +170,7 @@ def main() -> None:
         print(f"Total completed: {total_completed}")
         print(f"Rate: {total_completed / elapsed * 60:.1f} transactions/minute")
         print(f"Total audio processed: {total_audio:.2f}s")
-        print(f"Audio throughput: {total_audio / elapsed:.2f}x real-time")
+        print(f"Audio throughput: {total_audio / elapsed / 60:.2f} min/min")
         print(f"Avg latency: {stats.mean(wall_times):.4f}s")
         print(f"P95 latency: {sorted(wall_times)[int(0.95 * len(wall_times))]:.4f}s")
         print(f"Test duration: {elapsed:.2f}s")

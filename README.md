@@ -41,7 +41,7 @@ bash scripts/start_bg.sh
 bash scripts/tail_bg_logs.sh
 
 # 4) Warmup test (result saved to test/results/warmup.txt)
-python3 test/warmup.py --url http://127.0.0.1:8000
+python3 test/warmup.py --file long.mp3
 ```
 
 If you want to tweak defaults (lanes, paths, queue), edit `scripts/env.sh`.
@@ -82,11 +82,9 @@ TensorRT engine and timing caches (Linux GPU with ORT TensorRT-EP builds):
 - `TRT_ENGINE_CACHE` (default: `/models/trt_cache`)
 - `TRT_TIMING_CACHE` (default: `/models/timing.cache`)
 
-### Warmup
+### Testing
 
-- At startup, the service runs a short warmup (0.5s) to initialize runtime and caches.
-- You can also hit a warmup request via `test/warmup.py` using files in `samples/`:
-
+**Warmup (single request)**
 ```bash
 # Default: uses samples/mid.wav
 python3 test/warmup.py
@@ -96,6 +94,36 @@ python3 test/warmup.py --file long.mp3
 
 # View full transcription result
 python3 -c "import json; print(json.load(open('test/results/warmup.txt'))['text'])"
+```
+
+**Benchmark (fixed number of requests)**
+```bash
+# Basic: 40 requests, concurrency 1
+python3 test/bench.py --n 40
+
+# High load: 100 requests, 6 concurrent workers
+python3 test/bench.py --n 100 --concurrency 6
+
+# Specific file stress test
+python3 test/bench.py --n 50 --file long.mp3 --concurrency 4
+```
+
+**TPM (transactions per minute - constant load)**
+```bash
+# Default: 6 workers for 60 seconds
+python3 test/tpm.py --concurrency 6
+
+# High concurrency for 2 minutes
+python3 test/tpm.py --concurrency 12 --duration 120
+
+# Single file sustained load
+python3 test/tpm.py --concurrency 8 --file short-noisy.wav
+```
+
+**TCP client (for RunPod endpoints)**
+```bash
+# Setup .env with RUNPOD_TCP_HOST, RUNPOD_TCP_PORT, RUNPOD_API_KEY
+python3 test/client.py --file mid.wav
 ```
 
 ### Purging
