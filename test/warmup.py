@@ -48,9 +48,23 @@ def main() -> int:
     with open(file_path, "rb") as f:
         files = {"file": (os.path.basename(file_path), f, "application/octet-stream")}
         with httpx.Client(timeout=60) as client:
-            r = client.post(url, files=files)
-            r.raise_for_status()
-            data = r.json()
+            try:
+                r = client.post(url, files=files)
+                r.raise_for_status()
+                data = r.json()
+            except httpx.HTTPStatusError as e:
+                resp = e.response
+                ct = resp.headers.get("content-type", "")
+                body = resp.text
+                print(f"HTTP {resp.status_code} error from server")
+                if "application/json" in ct:
+                    try:
+                        print(resp.json())
+                    except Exception:
+                        print(body[:500])
+                else:
+                    print(body[:500])
+                return 1
 
     # Console print: first 50 characters or fallback message
     text = str((data.get("text") or "")).strip()
