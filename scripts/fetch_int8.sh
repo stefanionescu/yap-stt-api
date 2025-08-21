@@ -14,6 +14,15 @@ REPO=${PARAKEET_INT8_REPO:-istupakov/parakeet-tdt-0.6b-v2-onnx}
 TARGET_DIR=${PARAKEET_MODEL_DIR:-}
 FORCE=${FORCE_FETCH_INT8:-0}
 
+# Prefer project venv Python if present; otherwise use system python3
+if [[ -z "${PY:-}" ]]; then
+  if [[ -x ".venv/bin/python" ]]; then
+    PY=".venv/bin/python"
+  else
+    PY="$(command -v python3 || command -v python)"
+  fi
+fi
+
 if [[ -z "${TARGET_DIR}" ]]; then
   echo "ERROR: PARAKEET_MODEL_DIR is not set" >&2
   exit 1
@@ -29,7 +38,13 @@ fi
 
 echo "Fetching INT8 ONNX artifacts from ${REPO} -> ${TARGET_DIR}"
 
-python3 - "$REPO" "$TARGET_DIR" <<'PY'
+# Ensure huggingface_hub is available for the chosen Python
+if ! "${PY}" -c "import huggingface_hub" >/dev/null 2>&1; then
+  echo "Installing huggingface_hub for ${PY}..."
+  "${PY}" -m pip install --upgrade huggingface_hub >/dev/null
+fi
+
+"${PY}" - "$REPO" "$TARGET_DIR" <<'PY'
 import os, sys, shutil
 from pathlib import Path
 from huggingface_hub import hf_hub_download

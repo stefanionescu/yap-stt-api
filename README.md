@@ -66,7 +66,7 @@ INT8 setup (recommended):
 Use the fetch script to populate your local model directory:
 ```bash
 source scripts/env.sh
-bash scripts/fetch_int8.sh               # idempotent
+bash scripts/fetch_int8.sh
 # FORCE_FETCH_INT8=1 bash scripts/fetch_int8.sh  # to refetch
 ```
 
