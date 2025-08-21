@@ -5,16 +5,19 @@ PORT=${PORT:-8000}
 TRT_ENGINE_CACHE=${TRT_ENGINE_CACHE:-/models/trt_cache}
 TRT_TIMING_CACHE=${TRT_TIMING_CACHE:-/models/timing.cache}
 ONNX_ASR_CACHE_DIR=${ONNX_ASR_CACHE_DIR:-"$HOME/.cache/onnx-asr"}
+PIP_CACHE_DIR=${PIP_CACHE_DIR:-"$HOME/.cache/pip"}
+VENV_DIR=${VENV_DIR:-".venv"}
 
 DO_LOGS=0
 DO_METRICS=1   # metrics are part of logs by default
 DO_ENGINES=0
 DO_MODELS=0
+DO_DEPS=0
 DO_ALL=0
 
 usage() {
   cat <<EOF
-Usage: $0 [--logs] [--engines] [--models] [--all]
+Usage: $0 [--logs] [--engines] [--models] [--deps] [--all]
 
 Stops the FastAPI service and optionally purges logs and caches.
 
@@ -22,6 +25,7 @@ Options:
   --logs       Remove logs/ and metrics logs (keeps directory)
   --engines    Remove TensorRT engine & timing caches (TRT_ENGINE_CACHE, TRT_TIMING_CACHE)
   --models     Remove onnx-asr model cache (~/.cache/onnx-asr)
+  --deps       Remove local Python venv (.venv) and pip cache (~/.cache/pip)
   --all        Do all of the above
 
 Env:
@@ -29,6 +33,8 @@ Env:
   TRT_ENGINE_CACHE (default: /models/trt_cache)
   TRT_TIMING_CACHE (default: /models/timing.cache)
   ONNX_ASR_CACHE_DIR (default: ~/.cache/onnx-asr)
+  PIP_CACHE_DIR (default: ~/.cache/pip)
+  VENV_DIR (default: .venv)
 EOF
 }
 
@@ -38,6 +44,7 @@ for arg in "$@"; do
     --logs) DO_LOGS=1 ;;
     --engines) DO_ENGINES=1 ;;
     --models) DO_MODELS=1 ;;
+    --deps) DO_DEPS=1 ;;
     --all) DO_ALL=1 ;;
     *) echo "Unknown arg: $arg"; usage; exit 2 ;;
   esac
@@ -48,6 +55,7 @@ if [[ $DO_ALL -eq 1 ]]; then
   DO_LOGS=1
   DO_ENGINES=1
   DO_MODELS=1
+  DO_DEPS=1
 fi
 
 kill_by_pidfile() {
@@ -124,6 +132,12 @@ if [[ $DO_MODELS -eq 1 ]]; then
   echo "Purging onnx-asr model cache at $ONNX_ASR_CACHE_DIR ..."
   rm -rf "$ONNX_ASR_CACHE_DIR" || true
   mkdir -p "$ONNX_ASR_CACHE_DIR"
+fi
+
+if [[ $DO_DEPS -eq 1 ]]; then
+  echo "Removing virtualenv at $VENV_DIR and pip cache at $PIP_CACHE_DIR ..."
+  rm -rf "$VENV_DIR" || true
+  rm -rf "$PIP_CACHE_DIR" || true
 fi
 
 echo "Done."

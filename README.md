@@ -98,7 +98,7 @@ python3 test/warmup.py --file samples/your.wav
 
 ### Purging
 
-Stop the service and optionally clear logs/caches:
+Stop the service and optionally clear logs/caches and dependencies:
 
 ```bash
 # Stop service only
@@ -113,7 +113,10 @@ bash scripts/purge_pod.sh --engines
 # Clear onnx-asr model cache
 bash scripts/purge_pod.sh --models
 
-# Do everything
+# Remove local venv (.venv) and pip cache (~/.cache/pip)
+bash scripts/purge_pod.sh --deps
+
+# Do everything (logs, engines, models, deps)
 bash scripts/purge_pod.sh --all
 ```
 

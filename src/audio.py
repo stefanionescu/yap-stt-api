@@ -8,9 +8,7 @@ import numpy as np
 import soundfile as sf
 import soxr
 
-
 TARGET_SR = 16000
-
 
 @dataclass
 class DecodedAudio:
