@@ -13,3 +13,10 @@ if [[ -f logs/server.pid ]]; then
 else
   echo "No PID file found"
 fi
+
+# Stop background dockerd if we started it
+if [[ -f logs/dockerd.pid ]]; then
+  DPID=$(cat logs/dockerd.pid)
+  kill "$DPID" || true
+  rm -f logs/dockerd.pid
+fi

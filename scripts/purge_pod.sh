@@ -16,10 +16,11 @@ DO_ENGINES=1
 DO_MODELS=1
 DO_DEPS=1
 SELECTIVE=0
+DO_UNINSTALL_DOCKER=0
 
 usage() {
   cat <<EOF
-Usage: $0 [--logs] [--engines] [--models] [--deps] [--all]
+Usage: $0 [--logs] [--engines] [--models] [--deps] [--all] [--uninstall-docker]
 
 Stops the FastAPI service and purges logs, caches, dependencies, and local model files.
 
@@ -31,6 +32,9 @@ Options (for selective purge):
   --models     Remove onnx-asr model cache (~/.cache/onnx-asr), host ./models, and PARAKEET_MODEL_DIR
   --deps       Remove local Python venv (.venv) and pip cache (~/.cache/pip)
   --all        Do all of the above (same as no flags)
+
+Additional:
+  --uninstall-docker  Attempt to uninstall Docker Engine and remove Docker data (requires root)
 
 Env:
   PORT (default: 8000)
@@ -52,6 +56,7 @@ for arg in "$@"; do
     --models) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=0; DO_MODELS=1; DO_DEPS=0 ;;
     --deps) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=0; DO_MODELS=0; DO_DEPS=1 ;;
     --all) SELECTIVE=0; DO_LOGS=1; DO_ENGINES=1; DO_MODELS=1; DO_DEPS=1 ;;
+    --uninstall-docker) SELECTIVE=1; DO_UNINSTALL_DOCKER=1 ;;
     *) echo "Unknown arg: $arg"; usage; exit 2 ;;
   esac
   shift || true
@@ -144,3 +149,28 @@ if [[ $DO_DEPS -eq 1 ]]; then
 fi
 
 echo "Done."
+
+if [[ $DO_UNINSTALL_DOCKER -eq 1 ]]; then
+  echo "Attempting to uninstall Docker Engine and remove Docker data..."
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "Docker is not installed or not in PATH. Skipping uninstall."
+    exit 0
+  fi
+  docker compose down || true
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl stop docker || true
+    systemctl stop containerd || true
+  fi
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get purge -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras || true
+    apt-get autoremove -y || true
+    rm -f /etc/apt/sources.list.d/docker.list || true
+    rm -f /etc/apt/keyrings/docker.gpg || true
+    apt-get update -y || true
+  else
+    echo "apt-get not available; skipping package purge."
+  fi
+  rm -rf /var/lib/docker || true
+  rm -rf /var/lib/containerd || true
+  echo "Docker uninstall step completed."
+fi
