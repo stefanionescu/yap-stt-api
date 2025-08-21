@@ -50,8 +50,6 @@ export ORT_INTRA_OP_NUM_THREADS=${ORT_INTRA_OP_NUM_THREADS:-1}
 
 # Auto-fetch INT8 artifacts during setup (set to 0 to disable)
 export AUTO_FETCH_INT8=${AUTO_FETCH_INT8:-1}
-# Docker is not supported inside the pod; build images off-pod if needed.
-export USE_DOCKER=${USE_DOCKER:-0}
 # Optional: install TRT runtime via apt during setup (Ubuntu 22.04 pods). Disabled by default when wheel is present.
 export INSTALL_TRT=${INSTALL_TRT:-0}
 

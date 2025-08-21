@@ -41,7 +41,7 @@ bash scripts/setup.sh
 bash scripts/start.sh
 ```
 
-Defaults: `USE_DOCKER=0`, `PARAKEET_MODEL_DIR=./models/parakeet-int8`, `PARAKEET_USE_TENSORRT=1`.
+Defaults: `PARAKEET_MODEL_DIR=./models/parakeet-int8`, `PARAKEET_USE_TENSORRT=1`.
 - Local vs hub is decided solely by `PARAKEET_MODEL_DIR`: if set and contains model files, the service loads local INT8; otherwise it uses the hub id.
 - Note: `PARAKEET_USE_DIRECT_ONNX` is deprecated and ignored by the server.
 - Runtime will fall back to CUDA EP automatically if TRT isn’t available.
@@ -88,7 +88,7 @@ bash scripts/stop.sh
 
 If you want to tweak defaults (lanes, paths, queue), edit `scripts/env.sh`.
 
-Docker is not supported inside the pod. If you need containers, build/run off-pod. See: [Docker commands](https://docs.runpod.io/tutorials/introduction/containers/docker-commands), [Intro to containers](https://docs.runpod.io/tutorials/introduction/containers).
+
 
 ### API
 
