@@ -10,6 +10,15 @@ set -euo pipefail
 #   PARAKEET_MODEL_DIR  (required)
 #   HF_TOKEN            (optional)
 
+# Try to source default environment to populate PARAKEET_MODEL_DIR and others
+if [[ -z "${PARAKEET_MODEL_DIR:-}" || -z "${PARAKEET_FP32_REPO:-}" ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [[ -f "${SCRIPT_DIR}/env.sh" ]]; then
+    # shellcheck disable=SC1090
+    source "${SCRIPT_DIR}/env.sh"
+  fi
+fi
+
 REPO=${PARAKEET_FP32_REPO:-istupakov/parakeet-tdt-0.6b-v2-onnx}
 TARGET_DIR=${PARAKEET_MODEL_DIR:-}
 FORCE=${FORCE_FETCH_FP32:-0}
