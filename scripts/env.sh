@@ -18,11 +18,13 @@ export PARAKEET_MAX_UPLOAD_MB=${PARAKEET_MAX_UPLOAD_MB:-64}
 # Ensure absolute path to avoid runtime cwd issues
 _DEFAULT_MODEL_DIR="./models/parakeet-fp32"
 if [[ -z "${PARAKEET_MODEL_DIR:-}" ]]; then
+  # Create the directory if it doesn't exist to ensure path resolution works
+  mkdir -p "${_DEFAULT_MODEL_DIR}"
   if command -v readlink >/dev/null 2>&1; then
     export PARAKEET_MODEL_DIR="$(readlink -f "${_DEFAULT_MODEL_DIR}")"
   else
     # macOS: emulate readlink -f
-    export PARAKEET_MODEL_DIR="$(cd "${_DEFAULT_MODEL_DIR}" 2>/dev/null && pwd || echo "${_DEFAULT_MODEL_DIR}")"
+    export PARAKEET_MODEL_DIR="$(cd "${_DEFAULT_MODEL_DIR}" && pwd)"
   fi
 fi
 export PARAKEET_MODEL_NAME=${PARAKEET_MODEL_NAME:-nemo-parakeet-tdt-0.6b-v2}
