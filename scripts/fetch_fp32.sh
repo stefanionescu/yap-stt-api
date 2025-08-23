@@ -1,15 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Try to source default environment to populate PARAKEET_MODEL_DIR and others
-if [[ -z "${PARAKEET_MODEL_DIR:-}" || -z "${PARAKEET_FP32_REPO:-}" ]]; then
-  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  if [[ -f "${SCRIPT_DIR}/env.sh" ]]; then
-    # shellcheck disable=SC1090
-    source "${SCRIPT_DIR}/env.sh"
-  fi
-fi
-
 # Downloads Parakeet TDT 0.6B v2 FP32 ONNX artifacts (with external data)
 # into PARAKEET_MODEL_DIR. Keeps filenames as encoder-model.onnx (+ .data),
 # decoder_joint-model.onnx, vocab.txt, and config.json.
@@ -18,6 +9,15 @@ fi
 #   PARAKEET_FP32_REPO  (default: istupakov/parakeet-tdt-0.6b-v2-onnx)
 #   PARAKEET_MODEL_DIR  (required)
 #   HF_TOKEN            (optional)
+
+# Try to source default environment to populate PARAKEET_MODEL_DIR and others
+if [[ -z "${PARAKEET_MODEL_DIR:-}" || -z "${PARAKEET_FP32_REPO:-}" ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [[ -f "${SCRIPT_DIR}/env.sh" ]]; then
+    # shellcheck disable=SC1090
+    source "${SCRIPT_DIR}/env.sh"
+  fi
+fi
 
 REPO=${PARAKEET_FP32_REPO:-istupakov/parakeet-tdt-0.6b-v2-onnx}
 TARGET_DIR=${PARAKEET_MODEL_DIR:-}

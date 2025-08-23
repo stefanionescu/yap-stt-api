@@ -28,20 +28,6 @@ source .venv/bin/activate 2>/dev/null || true
 python3 test/warmup.py --file long.mp3
 ```
 
-Option B (use the hub, no local dir):
-```bash
-source .venv/bin/activate 2>/dev/null || true
-export PARAKEET_MODEL_DIR=""
-python -m uvicorn src.server:app --host 0.0.0.0 --port 8000 --loop uvloop --http httptools
-```
-
-One-time setup alternative:
-```bash
-# Creates venv, installs deps, and can auto-fetch FP32 when AUTO_FETCH_FP32=1
-bash scripts/setup.sh
-bash scripts/start.sh
-```
-
 Defaults: `PARAKEET_MODEL_DIR=./models/parakeet-fp32`, `PARAKEET_USE_TENSORRT=1`.
 - Local vs hub is decided solely by `PARAKEET_MODEL_DIR`: if set and contains model files, the service loads the local directory; otherwise it uses the hub id.
 - Note: `PARAKEET_USE_DIRECT_ONNX` is deprecated and ignored by the server.
@@ -61,35 +47,6 @@ Models can be loaded from Hugging Face by onnx-asr (hub ids) or from a local FP3
 - Default model id: `nemo-parakeet-tdt-0.6b-v2`
 - Fallback: `istupakov/parakeet-tdt-0.6b-v2-onnx`  \
   See: [istupakov/parakeet-tdt-0.6b-v2-onnx](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx)
-
-FP32 setup:
-
-Use the fetch script to populate your local model directory:
-```bash
-source scripts/env.sh
-bash scripts/fetch_fp32.sh
-# FORCE_FETCH_FP32=1 bash scripts/fetch_fp32.sh  # to refetch
-```
-
-If your Hugging Face downloads require auth, export your token before starting:
-```bash
-export HF_TOKEN=hf_xxx
-bash scripts/start.sh
-```
-
-### Start/Stop
-```bash
-# Foreground
-bash scripts/start.sh
-# Background + tail logs
-bash scripts/start_bg.sh && bash scripts/tail_bg_logs.sh
-# Stop bg
-bash scripts/stop.sh
-```
-
-If you want to tweak defaults (lanes, paths, queue), edit `scripts/env.sh`.
-
-
 
 ### API
 
@@ -130,38 +87,6 @@ TensorRT engine and timing caches (Linux GPU with ORT TensorRT-EP builds):
 - `TRT_ENGINE_CACHE` (default: `/models/trt_cache`)
 - `TRT_TIMING_CACHE` (default: `/models/timing.cache`)
 - `PARAKEET_USE_TENSORRT` (default: 1) — enable TensorRT EP if libs present (auto-fallback to CUDA)
-
-### Enabling TensorRT EP (wheel method)
-
-If your pod is Ubuntu 22.04, you can install TensorRT runtime libs in-place:
-
-```bash
-# Install TRT wheel
-bash scripts/install_trt.sh
-export PARAKEET_USE_TENSORRT=1
-bash scripts/start.sh
-```
-
-Or install manually following NVIDIA docs and set:
-
-```bash
-export LD_LIBRARY_PATH=/opt/tensorrt/lib:$LD_LIBRARY_PATH
-export PARAKEET_USE_TENSORRT=1
-```
-
-#### Disabling TensorRT EP
-
-To skip TensorRT entirely and run with CUDA EP only:
-
-```bash
-# Skip installing TRT during setup
-export INSTALL_TRT=0
-
-# Disable TRT EP at runtime (service will use CUDA EP if available)
-export PARAKEET_USE_TENSORRT=0
-
-bash scripts/start.sh
-```
 
 ### Troubleshooting
 
