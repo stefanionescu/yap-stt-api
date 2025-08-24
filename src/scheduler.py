@@ -83,7 +83,8 @@ class MicroBatchScheduler:
             waveforms = [wi.waveform for wi in batch_items]
             sample_rates = [wi.sample_rate for wi in batch_items]
             try:
-                texts = self._run_batch_fn(waveforms, sample_rates)
+                # Offload the potentially heavy batch run off the event loop
+                texts = await asyncio.to_thread(self._run_batch_fn, waveforms, sample_rates)
             except Exception as e:
                 # set exception on all futures
                 for wi in batch_items:

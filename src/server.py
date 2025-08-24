@@ -180,9 +180,21 @@ async def openai_transcribe(
 
 @app.websocket("/v1/realtime")
 async def ws_realtime(ws: WebSocket) -> None:
-    await ws.accept()
+    # Echo OpenAI Realtime subprotocol if requested by client
+    subprotocol: str | None = None
+    try:
+        requested = (ws.headers.get("sec-websocket-protocol") or "").split(",")
+        requested = [p.strip() for p in requested if p.strip()]
+        for proto in ("openai-realtime", "realtime"):
+            if proto in requested:
+                subprotocol = proto
+                break
+    except Exception:
+        subprotocol = None
+
+    await ws.accept(subprotocol=subprotocol)
     if _scheduler is None or _model is None or not _is_ready:
-        await ws.send_json({"type": "error", "error": "model_not_ready"})
+        await ws.send_json({"type": "error", "error": {"type": "model_not_ready", "message": "Model not initialized"}})
         await ws.close(code=1013)
         return
 
@@ -190,6 +202,8 @@ async def ws_realtime(ws: WebSocket) -> None:
     await ws.send_json({"type": "session.created", "id": str(uuid.uuid4())})
 
     audio_buf = bytearray()
+    current_future: asyncio.Future | None = None
+    current_task: asyncio.Task | None = None
     # Cap streaming buffer to first N seconds (PCM16 mono 16k)
     target_sr = 16000
     max_bytes_ws = int(settings.max_audio_seconds * target_sr * PCM16_BYTES_PER_SAMPLE)
@@ -207,7 +221,7 @@ async def ws_realtime(ws: WebSocket) -> None:
                 # Expect base64-encoded PCM16 mono 16 kHz
                 b64 = msg.get("audio") or msg.get("audio_base64")
                 if not isinstance(b64, str):
-                    await ws.send_json({"type": "error", "error": "missing_audio_base64"})
+                    await ws.send_json({"type": "error", "error": {"type": "missing_audio_base64", "message": "audio_base64 string is required"}})
                     continue
                 try:
                     chunk = base64.b64decode(b64)
@@ -231,7 +245,7 @@ async def ws_realtime(ws: WebSocket) -> None:
                             })
                             limit_reached = True
                 except Exception:
-                    await ws.send_json({"type": "error", "error": "invalid_base64"})
+                    await ws.send_json({"type": "error", "error": {"type": "invalid_base64", "message": "Invalid base64 audio chunk"}})
 
             elif mtype == "input_audio_buffer.clear":
                 audio_buf.clear()
@@ -241,43 +255,63 @@ async def ws_realtime(ws: WebSocket) -> None:
             elif mtype == "input_audio_buffer.commit":
                 await ws.send_json({"type": "input_audio_buffer.committed"})
 
+            elif mtype == "response.cancel":
+                # Cancel in-flight inference if any
+                if current_future is not None and not current_future.done():
+                    current_future.cancel()
+                if current_task is not None and not current_task.done():
+                    current_task.cancel()
+                current_future = None
+                current_task = None
+                await ws.send_json({"type": "response.cancelled"})
+
             elif mtype == "response.create":
                 # Transcribe accumulated buffer
                 if not audio_buf:
-                    await ws.send_json({"type": "error", "error": "no_audio"})
+                    await ws.send_json({"type": "error", "error": {"type": "no_audio", "message": "No audio in buffer"}})
                     continue
                 # Admission control — immediate backpressure for realtime
-                if _scheduler.queue.full():
-                    await ws.send_json({"type": "error", "error": "busy"})
+                if _scheduler.queue.full() or (current_task is not None and not current_task.done()):
+                    await ws.send_json({"type": "error", "error": {"type": "busy", "message": "Too many requests or response in progress"}})
                     continue
                 pcm = np.frombuffer(bytes(audio_buf), dtype=np.int16).astype(np.float32) / 32768.0
                 # Trim to max duration
                 max_samps = int(settings.max_audio_seconds * 16000)
                 if len(pcm) > max_samps:
                     pcm = pcm[:max_samps]
-                
-                fut = _scheduler.submit(pcm, 16000)
-                
-                # Duration-aware inference timeout budget
-                # Calculate seconds from PCM @16kHz mono
-                secs = len(pcm) / 16000.0
-                exp_infer = (secs / settings.expected_xrt_min) * settings.infer_timeout_safety
-                exp_infer = min(exp_infer, settings.infer_timeout_cap_s)
-                total_timeout = settings.max_queue_wait_s + exp_infer
-                
-                try:
-                    text, _inf, _q = await asyncio.wait_for(fut, timeout=total_timeout)
-                except asyncio.TimeoutError:
-                    await ws.send_json({"type": "error", "error": "inference_timeout"})
-                    continue
 
-                await ws.send_json({"type": "response.output_text.delta", "delta": text})
-                await ws.send_json({"type": "response.completed"})
-                # reset buffer for next turn
-                audio_buf.clear()
+                fut = _scheduler.submit(pcm, 16000)
+                current_future = fut
+
+                async def _await_and_send() -> None:
+                    nonlocal current_future, current_task, audio_buf
+                    # Duration-aware inference timeout budget
+                    secs = len(pcm) / 16000.0
+                    exp_infer = (secs / settings.expected_xrt_min) * settings.infer_timeout_safety
+                    exp_infer = min(exp_infer, settings.infer_timeout_cap_s)
+                    total_timeout = settings.max_queue_wait_s + exp_infer
+                    try:
+                        text, _inf, _q = await asyncio.wait_for(fut, timeout=total_timeout)
+                    except asyncio.TimeoutError:
+                        await ws.send_json({"type": "error", "error": {"type": "inference_timeout", "message": "Inference timed out"}})
+                    except asyncio.CancelledError:
+                        # Cancellation is acknowledged separately via response.cancelled
+                        pass
+                    except Exception as e:
+                        await ws.send_json({"type": "error", "error": {"type": "inference_error", "message": str(e)}})
+                    else:
+                        await ws.send_json({"type": "response.output_text.delta", "delta": text})
+                        await ws.send_json({"type": "response.completed"})
+                    finally:
+                        current_future = None
+                        current_task = None
+                        # reset buffer for next turn
+                        audio_buf.clear()
+
+                current_task = asyncio.create_task(_await_and_send())
 
             else:
-                await ws.send_json({"type": "error", "error": "unsupported_type"})
+                await ws.send_json({"type": "error", "error": {"type": "unsupported_type", "message": "Unsupported event type"}})
 
     except WebSocketDisconnect:
         pass
