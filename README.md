@@ -1,8 +1,10 @@
 ## Parakeet 0.6B v2 ONNX FastAPI (ORT + TensorRT-EP)
 
-A single-process FastAPI service that runs NVIDIA Parakeet TDT 0.6b v2 (English) converted to ONNX, exposing a one-shot transcription endpoint.
+A single-process FastAPI service that runs NVIDIA Parakeet TDT 0.6b v2 (English) converted to ONNX, exposing OpenAI-compatible audio endpoints and a streaming WebSocket endpoint.
 
-- Endpoint: `POST /v1/transcribe` (multipart form: `file`)
+- Endpoints:
+  - `POST /v1/audio/transcriptions` — OpenAI-compatible transcription (multipart form: `file`)
+  - `WS /v1/realtime` — OpenAI Realtime-compatible transcription over WebSocket
 - Concurrency: asyncio lane workers + priority queue
 - Metrics: JSONL logs under `logs/metrics/` + an on-pod Python report
 - Health: `/healthz`, Readiness: `/readyz`
@@ -30,12 +32,11 @@ python3 test/warmup.py --file long.mp3
 
 Defaults: `PARAKEET_MODEL_DIR=./models/parakeet-fp32`, `PARAKEET_USE_TENSORRT=1`.
 - Local vs hub is decided solely by `PARAKEET_MODEL_DIR`: if set and contains model files, the service loads the local directory; otherwise it uses the hub id.
-- Note: `PARAKEET_USE_DIRECT_ONNX` is deprecated and ignored by the server.
 - Runtime will fall back to CUDA EP automatically if TRT isn’t available.
 
 ### Admission control
 
-- Queue is capped to `PARAKEET_NUM_LANES * PARAKEET_QUEUE_MAX_FACTOR`.
+- Queue is capped to `PARAKEET_QUEUE_MAX_FACTOR * PARAKEET_MICROBATCH_MAX_BATCH`.
 - If the queue is full, the API returns `429` with `Retry-After: PARAKEET_MAX_QUEUE_WAIT_S`.
 - Each request has a queue TTL; if it waits longer than `PARAKEET_MAX_QUEUE_WAIT_S`, it is canceled with `503`.
 - Upload size capped via `PARAKEET_MAX_UPLOAD_MB` (default 64 MB).
@@ -50,9 +51,13 @@ Models can be loaded from Hugging Face by onnx-asr (hub ids) or from a local FP3
 
 ### API
 
-- `POST /v1/transcribe`
-  - form-data: `file` = audio file (wav/flac/ogg/mp3). Service resamples to 16 kHz mono.
-  - response JSON: `{ "text": str, "duration": float, "sample_rate": 16000, "model": str }`
+- `POST /v1/audio/transcriptions`
+  - form-data: `file` (required) — audio file (wav/flac/ogg/mp3). Resampled to 16 kHz mono.
+  - response JSON: `{ "text": str }`
+
+- `WS /v1/realtime`
+  - OpenAI Realtime-style events: send `input_audio_buffer.append` with base64 PCM16 (mono, 16 kHz),
+    then `response.create` to trigger transcription. Responses emit `response.output_text.delta` and `response.completed`.
 
 - `GET /healthz`: basic health check.
 - `GET /readyz`: returns `{ ready: true|false }` once model is loaded and scheduler started.
@@ -74,13 +79,13 @@ Defaults live in `scripts/env.sh`. You can override via environment vars before 
 - `PARAKEET_MODEL_DIR` (local FP32 dir; if set and contains `encoder-model.onnx`, `encoder-model.onnx.data`, `decoder_joint-model.onnx`, `vocab.txt`, `config.json`, local loading is used; otherwise the hub is used)
 - `PARAKEET_MODEL_ID` (default: `nemo-parakeet-tdt-0.6b-v2`)
 - `PARAKEET_FALLBACK_MODEL_ID` (default: `istupakov/parakeet-tdt-0.6b-v2-onnx`)
-- `PARAKEET_NUM_LANES` (default: 3)
 - `PARAKEET_QUEUE_MAX_FACTOR` (default: 2)
 - `PARAKEET_MAX_QUEUE_WAIT_S` (default: 30)
+- `PARAKEET_MICROBATCH_WINDOW_MS` (default: 10)
+- `PARAKEET_MICROBATCH_MAX_BATCH` (default: 8)
 - `PARAKEET_MAX_AUDIO_SECONDS` (default: 600)
 - `PARAKEET_MAX_UPLOAD_MB` (default: 64)
 - `PARAKEET_USE_TENSORRT` (default: 1) — enable TensorRT EP if libs present (auto-fallback to CUDA)
-- Deprecated: `PARAKEET_USE_DIRECT_ONNX` (server ignores this; kept for backward compatibility)
 
 TensorRT engine and timing caches (Linux GPU with ORT TensorRT-EP builds):
 
@@ -110,47 +115,7 @@ Docs: `https://onnxruntime.ai/docs/execution-providers/TensorRT-ExecutionProvide
 
 ### Testing
 
-**Warmup (single request)**
-```bash
-# Default: uses samples/mid.wav
-python3 test/warmup.py
-
-# Custom file from samples/
-python3 test/warmup.py --file long.mp3
-
-# View full transcription result
-python3 -c "import json; print(json.load(open('test/results/warmup.txt'))['text'])"
-```
-
-**Benchmark (fixed number of requests)**
-```bash
-# Basic: 40 requests, concurrency 1
-python3 test/bench.py --n 40
-
-# High load: 100 requests, 6 concurrent workers
-python3 test/bench.py --n 100 --concurrency 6
-
-# Specific file stress test
-python3 test/bench.py --n 50 --file long.mp3 --concurrency 4
-```
-
-**TPM (transactions per minute - constant load)**
-```bash
-# Default: 6 workers for 60 seconds
-python3 test/tpm.py --concurrency 6
-
-# High concurrency for 2 minutes
-python3 test/tpm.py --concurrency 12 --duration 120
-
-# Single file sustained load
-python3 test/tpm.py --concurrency 8 --file short-noisy.wav
-```
-
-**TCP client (for RunPod endpoints)**
-```bash
-# Setup .env with RUNPOD_TCP_HOST, RUNPOD_TCP_PORT, RUNPOD_API_KEY
-python3 test/client.py --file mid.wav
-```
+Basic test scripts remain under `test/` for warmup, benchmarks, and TPM. See comments in those files.
 
 ### Purging
 

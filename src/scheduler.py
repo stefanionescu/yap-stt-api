@@ -4,7 +4,7 @@ import asyncio
 import itertools
 import time
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Callable, Optional, List
 
 import numpy as np
 
@@ -19,62 +19,85 @@ class WorkItem:
     enqueued_ts: float
 
 
-class Scheduler:
-    def __init__(self, num_lanes: int, maxsize: int, run_fn: Callable[[np.ndarray, int], str]):
-        self.num_lanes = num_lanes
-        # store (priority, seq, WorkItem) so heap ordering is well-defined
-        self.queue: "asyncio.PriorityQueue[tuple[int, int, WorkItem]]" = asyncio.PriorityQueue(maxsize=maxsize)
-        self._run_fn = run_fn
+class MicroBatchScheduler:
+    """
+    Micro-batching scheduler that aggregates items for a short window or up to max batch size,
+    then invokes a batch run function. Intended to improve GPU utilization.
+    """
+
+    def __init__(
+        self,
+        *,
+        maxsize: int,
+        run_batch_fn: Callable[[List[np.ndarray], List[int]], List[str]],
+        window_ms: float = 15.0,
+        max_batch: int = 4,
+    ):
+        # FIFO queue of work items
+        self.queue: "asyncio.Queue[WorkItem]" = asyncio.Queue(maxsize=maxsize)
         self._seq = itertools.count()
-        self._lane_tasks: list[asyncio.Task] = []
+        self._run_batch_fn = run_batch_fn
+        self._window_ms = max(0.0, float(window_ms))
+        self._max_batch = max(1, int(max_batch))
+        self._aggregator_task: Optional[asyncio.Task] = None
 
     def start(self) -> None:
-        for lane_id in range(self.num_lanes):
-            task = asyncio.create_task(self._lane_worker(lane_id), name=f"lane-{lane_id}")
-            self._lane_tasks.append(task)
+        self._aggregator_task = asyncio.create_task(self._aggregator(), name="microbatch-aggregator")
 
     async def stop(self) -> None:
-        for task in self._lane_tasks:
-            task.cancel()
-        await asyncio.gather(*self._lane_tasks, return_exceptions=True)
+        if self._aggregator_task is not None:
+            self._aggregator_task.cancel()
+            await asyncio.gather(self._aggregator_task, return_exceptions=True)
 
-    def submit(self, waveform: np.ndarray, sample_rate: int, priority: int) -> asyncio.Future:
+    def submit(self, waveform: np.ndarray, sample_rate: int) -> asyncio.Future:
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
         item = WorkItem(
-            priority=priority,
+            priority=0,
             seq=next(self._seq),
             waveform=waveform,
             sample_rate=sample_rate,
             future=fut,
             enqueued_ts=time.time(),
         )
-        self.queue.put_nowait((item.priority, item.seq, item))
+        self.queue.put_nowait(item)
         return fut
 
-    async def _lane_worker(self, lane_id: int) -> None:
+    async def _aggregator(self) -> None:
         while True:
-            _priority, _seq, item = await self.queue.get()
+            # block for the first item
+            first = await self.queue.get()
+            batch_items: List[WorkItem] = [first]
+
+            # compute deadline
+            deadline = time.monotonic() + (self._window_ms / 1000.0)
+            while len(batch_items) < self._max_batch:
+                timeout = deadline - time.monotonic()
+                if timeout <= 0:
+                    break
+                try:
+                    nxt = await asyncio.wait_for(self.queue.get(), timeout)
+                    batch_items.append(nxt)
+                except asyncio.TimeoutError:
+                    break
+
+            waveforms = [wi.waveform for wi in batch_items]
+            sample_rates = [wi.sample_rate for wi in batch_items]
             try:
-                start_ts = time.time()
-                result_text = self._run_fn(item.waveform, item.sample_rate)
-                inference_dt = time.time() - start_ts
-                queue_wait = start_ts - item.enqueued_ts
-                item.future.set_result((result_text, inference_dt, queue_wait))
+                texts = self._run_batch_fn(waveforms, sample_rates)
             except Exception as e:
-                if not item.future.done():
-                    item.future.set_exception(e)
-            finally:
+                # set exception on all futures
+                for wi in batch_items:
+                    if not wi.future.done():
+                        wi.future.set_exception(e)
+                for _ in batch_items:
+                    self.queue.task_done()
+                continue
+
+            # deliver results
+            now = time.time()
+            for wi, text in zip(batch_items, texts):
+                inference_dt = max(0.0, now - wi.enqueued_ts)  # coarse estimate
+                queue_wait = 0.0  # not exact here; main server tracks
+                if not wi.future.done():
+                    wi.future.set_result((text, inference_dt, queue_wait))
                 self.queue.task_done()
-
-
-def bucket_priority(num_samples: int, sr: int = 16000) -> int:
-    seconds = num_samples / max(1, sr)
-    if seconds <= 10:
-        return 0
-    if seconds <= 30:
-        return 1
-    if seconds <= 60:
-        return 2
-    if seconds <= 180:
-        return 3
-    return 4

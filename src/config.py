@@ -21,17 +21,18 @@ class Settings(BaseSettings):
     # Enforce GPU
     require_gpu: bool = os.getenv("PARAKEET_REQUIRE_GPU", "1") not in ("0", "false", "False")
 
-    # Deprecated: direct ORT path toggle (no longer needed; keep for compat)
-    use_direct_onnx: bool = os.getenv("PARAKEET_USE_DIRECT_ONNX", "0") not in ("0", "false", "False")
     device_id: int = int(os.getenv("PARAKEET_DEVICE_ID", "0"))
     # Allow either PARAKEET_USE_TENSORRT (preferred) or PARAKEET_USE_TRT
     use_tensorrt: bool = os.getenv("PARAKEET_USE_TENSORRT", os.getenv("PARAKEET_USE_TRT", "1")) not in ("0", "false", "False")
     ort_intra_op_num_threads: int = int(os.getenv("ORT_INTRA_OP_NUM_THREADS", "1"))
 
-    # Concurrency and queuing
-    num_lanes: int = int(os.getenv("PARAKEET_NUM_LANES", "2"))
+    # Concurrency and queuing (micro-batching only)
     queue_max_factor: int = int(os.getenv("PARAKEET_QUEUE_MAX_FACTOR", "2"))
     max_queue_wait_s: float = float(os.getenv("PARAKEET_MAX_QUEUE_WAIT_S", "30"))
+
+    # Micro-batching (server-level)
+    microbatch_window_ms: float = float(os.getenv("PARAKEET_MICROBATCH_WINDOW_MS", "10"))
+    microbatch_max_batch: int = int(os.getenv("PARAKEET_MICROBATCH_MAX_BATCH", "8"))
 
     # Admission control
     max_audio_seconds: float = float(os.getenv("PARAKEET_MAX_AUDIO_SECONDS", "600"))  # 10 minutes

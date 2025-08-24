@@ -4,7 +4,7 @@ import json
 import os
 import tempfile
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, List
 
 import numpy as np
 import soundfile as sf
@@ -210,6 +210,34 @@ class ParakeetModel:
         if isinstance(text, (list, tuple)):
             return " ".join(map(str, text))
         return str(text)
+
+    def recognize_waveforms(self, waveforms: List[np.ndarray], sample_rates: List[int]) -> List[str]:
+        """Batch inference when backend supports it; otherwise map over single-call.
+
+        Falls back to per-item inference if the underlying model lacks a batch API.
+        """
+        # Try batched APIs common in onnx_asr wrappers
+        try:
+            if hasattr(self._model, "recognize_waveforms"):
+                texts = self._model.recognize_waveforms(waveforms, sample_rates)  # type: ignore[attr-defined]
+            else:
+                # Some expose recognize(list) with uniform sample_rate
+                if len(set(sample_rates)) == 1 and hasattr(self._model, "recognize"):
+                    texts = self._model.recognize(waveforms, sample_rates[0])  # type: ignore[misc]
+                else:
+                    raise AttributeError
+        except Exception:
+            # Fallback: per-item
+            texts = [self.recognize_waveform(w, sr) for w, sr in zip(waveforms, sample_rates)]
+
+        # Ensure strings
+        out: List[str] = []
+        for t in texts:
+            if isinstance(t, (list, tuple)):
+                out.append(" ".join(map(str, t)))
+            else:
+                out.append(str(t))
+        return out
 
     def warmup(self, seconds: float = 1.0, sample_rate: int = 16000) -> None:
         samples = int(seconds * sample_rate)
