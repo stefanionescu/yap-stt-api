@@ -20,6 +20,7 @@ import random
 import statistics as stats
 import time
 from pathlib import Path
+from datetime import datetime
 from typing import Dict, List
 
 import httpx
@@ -31,6 +32,9 @@ sys.path.append(str(Path(__file__).resolve().parent))
 SAMPLES_DIR = "samples"
 EXTS = {".wav", ".flac", ".ogg", ".mp3"}
 from utils import build_http_multipart, file_to_pcm16_mono_16k, ws_realtime_transcribe, file_duration_seconds
+
+RESULTS_DIR = Path("test/results")
+ERRORS_FILE = RESULTS_DIR / "bench_errors.txt"
 
 
 def find_sample_files() -> List[str]:
@@ -104,7 +108,8 @@ async def _http_worker(
     worker_id: int,
     use_pcm: bool,
     raw: bool,
-    timestamps: bool
+    timestamps: bool,
+    error_lock: asyncio.Lock
 ) -> Dict[str, any]:
     """HTTP worker that sends requests using the specified file."""
     results: List[Dict[str, float]] = []
@@ -133,10 +138,26 @@ async def _http_worker(
                 if response.status_code == 429:
                     rejected += 1
                     print(f"    Worker {worker_id}: Request {i+1} rejected (429)")
+                    # Not an error; skip logging to errors file
                     continue
                 elif response.status_code != 200:
                     errors += 1
                     print(f"    Worker {worker_id}: Request {i+1} error ({response.status_code})")
+                    # Log details to bench_errors.txt
+                    try:
+                        msg = response.text
+                    except Exception:
+                        msg = "<no body>"
+                    line = (
+                        f"[{datetime.utcnow().isoformat()}Z] worker={worker_id} req={i+1} "
+                        f"HTTP {response.status_code} body={msg[:300].replace('\n',' ')}"
+                    )
+                    async with error_lock:
+                        try:
+                            with open(ERRORS_FILE, "a", encoding="utf-8") as ef:
+                                ef.write(line + "\n")
+                        except Exception:
+                            pass
                     continue
                 
                 data = response.json()
@@ -157,6 +178,17 @@ async def _http_worker(
             except Exception as e:
                 errors += 1
                 print(f"    Worker {worker_id}: Request {i+1} exception: {e}")
+                # Log exception to bench_errors.txt
+                line = (
+                    f"[{datetime.utcnow().isoformat()}Z] worker={worker_id} req={i+1} "
+                    f"EXC {type(e).__name__}: {str(e)[:300].replace('\n',' ')}"
+                )
+                async with error_lock:
+                    try:
+                        with open(ERRORS_FILE, "a", encoding="utf-8") as ef:
+                            ef.write(line + "\n")
+                    except Exception:
+                        pass
     
     return {"results": results, "rejected": rejected, "errors": errors}
 
@@ -174,9 +206,18 @@ async def bench_http(base_url: str, file_paths: List[str], total_reqs: int, conc
     counts = _split_counts(total_reqs, workers)
     
     print(f"Starting {workers} workers with counts: {counts}")
-    
+    # Prepare error log
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        with open(ERRORS_FILE, "w", encoding="utf-8") as ef:
+            ef.write("")
+    except Exception:
+        pass
+
+    error_lock: asyncio.Lock = asyncio.Lock()
+
     tasks = [
-        asyncio.create_task(_http_worker(base_url, file_paths, counts[i], i+1, use_pcm, raw, timestamps)) 
+        asyncio.create_task(_http_worker(base_url, file_paths, counts[i], i+1, use_pcm, raw, timestamps, error_lock)) 
         for i in range(workers)
     ]
     
