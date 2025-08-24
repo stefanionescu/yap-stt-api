@@ -193,7 +193,6 @@ async def ws_realtime_transcribe_with_ttfw(url: str, pcm16_bytes: bytes, frame_m
         url,
         max_size=None,
         subprotocols=["openai-realtime","realtime"],
-        headers=headers,
         ping_interval=20,
         ping_timeout=20,
     ) as ws:
