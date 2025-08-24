@@ -62,7 +62,7 @@ def find_sample_by_name(filename: str) -> str | None:
     return None
 
 
-def _metrics(audio_duration_s: float, wall_s: float, ttfw_s: float = 0.0) -> Dict[str, float]:
+def _metrics(audio_duration_s: float, wall_s: float, ttfw_s: float | None = None) -> Dict[str, float]:
     """Compute transcription metrics (queue wait not tracked by API)."""
     rtf = wall_s / audio_duration_s if audio_duration_s > 0 else float("inf")  # Real-time factor
     xrt = audio_duration_s / wall_s if wall_s > 0 else 0.0  # Times real-time
@@ -73,7 +73,8 @@ def _metrics(audio_duration_s: float, wall_s: float, ttfw_s: float = 0.0) -> Dic
         "rtf": rtf,
         "xrt": xrt,
         "throughput_min_per_min": throughput_min_per_min,
-        "ttfw_s": ttfw_s,  # Time to first word/response
+        # ttfw_s included only for WS runs
+        **({"ttfw_s": float(ttfw_s)} if ttfw_s is not None else {}),
     }
 
 
@@ -88,7 +89,7 @@ def summarize(title: str, results: List[Dict[str, float]]) -> None:
     rtf = [r["rtf"] for r in results]
     xrt = [r["xrt"] for r in results]
     throughput = [r["throughput_min_per_min"] for r in results]
-    ttfw = [r.get("ttfw_s", 0.0) for r in results]
+    ttfw_vals = [r["ttfw_s"] for r in results if "ttfw_s" in r]
     n = len(results)
     
     def p(v: List[float], q: float) -> float:
@@ -98,7 +99,8 @@ def summarize(title: str, results: List[Dict[str, float]]) -> None:
     print(f"\n== {title} ==")
     print(f"n={n}")
     print(f"Wall s      | avg={stats.mean(wall):.4f}  p50={stats.median(wall):.4f}  p95={p(wall,0.95):.4f}")
-    print(f"TTFW s      | avg={stats.mean(ttfw):.4f}  p50={stats.median(ttfw):.4f}  p95={p(ttfw,0.95):.4f}")
+    if ttfw_vals:
+        print(f"TTFW s      | avg={stats.mean(ttfw_vals):.4f}  p50={stats.median(ttfw_vals):.4f}  p95={p(ttfw_vals,0.95):.4f}")
     print(f"Audio s     | avg={stats.mean(audio):.4f}")
     print(f"RTF         | avg={stats.mean(rtf):.4f}  p50={stats.median(rtf):.4f}  p95={p(rtf,0.95):.4f}")
     print(f"xRT         | avg={stats.mean(xrt):.4f}")
@@ -174,7 +176,7 @@ async def bench_http(base_url: str, file_paths: List[str], total_reqs: int, conc
                 t0 = time.time()
                 if verbose:
                     print(f"Starting request {req_idx+1}/{total_reqs}")
-                ttfw_s = 0.0  # Time to first word
+                # TTFW only applies to WS; omit for HTTP
                 try:
                     fname, content, ctype = build_http_multipart(file_path, use_pcm)
                     
@@ -187,10 +189,7 @@ async def bench_http(base_url: str, file_paths: List[str], total_reqs: int, conc
                         stream_request = client.stream("POST", url + ("?timestamps=1" if timestamps else ""), files=files)
                     
                     async with stream_request as response:
-                        # Record time to first response byte
-                        ttfw_s = time.time() - t0
-                        
-                        # Read the full response
+                        # Read the full response (HTTP is single-shot)
                         response_content = await response.aread()
 
                     t_end = time.time()
@@ -223,7 +222,7 @@ async def bench_http(base_url: str, file_paths: List[str], total_reqs: int, conc
                         audio_duration = 0.0
                     if not audio_duration or audio_duration <= 0:
                         audio_duration = file_duration_seconds(file_path)
-                    results.append(_metrics(audio_duration, wall_s, ttfw_s))
+                    results.append(_metrics(audio_duration, wall_s))
                     
                     # Track successful completion  
                     completed_requests += 1

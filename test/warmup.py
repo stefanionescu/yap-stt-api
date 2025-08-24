@@ -76,22 +76,19 @@ def main() -> int:
                 # Optionally request words+timestamps in the same transaction
                 q = "?timestamps=1" if args.timestamps else ""
                 
-                # Use streaming to detect time to first response byte
+                # HTTP returns only when done; read full response
                 if args.raw:
                     headers = {"content-type": ctype}
                     with client.stream("POST", url + q, content=content, headers=headers) as r:
-                        ttfw_s = time.perf_counter() - t0  # Record time to first response byte
                         response_content = r.read()
                 else:
                     files = {"file": (fname, content, ctype)}
                     with client.stream("POST", url + q, files=files) as r:
-                        ttfw_s = time.perf_counter() - t0  # Record time to first response byte
                         response_content = r.read()
                 
                 r.raise_for_status()
                 try:
                     data = json.loads(response_content.decode('utf-8'))
-                    data["ttfw_s"] = ttfw_s  # Add TTFW to response data
                 except Exception as e:
                     print(f"JSON decode error: {e}")
                     return 1
@@ -130,9 +127,9 @@ def main() -> int:
     print(f"Audio duration: {duration:.4f}s")
     print(f"Transcription time: {elapsed_s:.4f}s")
     
-    # Print time to first word if available
+    # Print time to first word only for WS
     ttfw = data.get("ttfw_s", 0.0)
-    if ttfw > 0:
+    if args.ws and ttfw > 0:
         print(f"Time to first word: {ttfw:.4f}s")
     
     if duration and duration > 0 and elapsed_s > 0:
