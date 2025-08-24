@@ -133,13 +133,11 @@ async def bench_http(base_url: str, file_paths: List[str], total_reqs: int, conc
 
     # Configure transport based on debugging options
     retries = 0 if disable_retries else 3
+    # Use public httpx API only; avoid private attributes
     transport = httpx.AsyncHTTPTransport(
         retries=retries,
-        http2=False,  # HTTP/2 can cause issues under high load
-        keepalive_expiry=60.0,  # Keep connections alive longer for long audio
-        socket_options=httpx._config.DEFAULT_SOCKET_OPTIONS,  # Use defaults
-        local_address=None,  # Let the OS choose
-        uds=None
+        http2=False,
+        keepalive_expiry=60.0,
     )
     
     if verbose:

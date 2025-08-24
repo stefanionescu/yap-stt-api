@@ -7,14 +7,15 @@ export PORT=${PORT:-8000}
 
 # GPU + scheduling (optimized for high concurrency + mixed short/long audio)
 export PARAKEET_QUEUE_MAX_FACTOR=${PARAKEET_QUEUE_MAX_FACTOR:-64}
-export PARAKEET_MAX_QUEUE_WAIT_S=${PARAKEET_MAX_QUEUE_WAIT_S:-10}
+export PARAKEET_MAX_QUEUE_WAIT_S=${PARAKEET_MAX_QUEUE_WAIT_S:-2}
 export PARAKEET_MICROBATCH_WINDOW_MS=${PARAKEET_MICROBATCH_WINDOW_MS:-15}
 export PARAKEET_MICROBATCH_MAX_BATCH=${PARAKEET_MICROBATCH_MAX_BATCH:-64}
 
-# Duration-aware inference timeout system (for long audio at high concurrency)
+# Duration-aware inference timeout system (210s max audio, 1.3x worst-case xRT)
+# Base infer = 210/1.3 = 161.5s; safety 1.5x => 242.3s; +2s queue => ~244s
 export PARAKEET_EXPECTED_XRT_MIN=${PARAKEET_EXPECTED_XRT_MIN:-1.3}
-export PARAKEET_INFER_TIMEOUT_SAFETY=${PARAKEET_INFER_TIMEOUT_SAFETY:-1.7}
-export PARAKEET_INFER_TIMEOUT_CAP_S=${PARAKEET_INFER_TIMEOUT_CAP_S:-360}
+export PARAKEET_INFER_TIMEOUT_SAFETY=${PARAKEET_INFER_TIMEOUT_SAFETY:-1.5}
+export PARAKEET_INFER_TIMEOUT_CAP_S=${PARAKEET_INFER_TIMEOUT_CAP_S:-250}
 
 # Limits
 # Max single-audio duration (seconds). Extra audio is ignored (trimmed).

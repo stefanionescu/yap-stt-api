@@ -90,7 +90,6 @@ def main() -> int:
                 
                 r.raise_for_status()
                 try:
-                    import json
                     data = json.loads(response_content.decode('utf-8'))
                     data["ttfw_s"] = ttfw_s  # Add TTFW to response data
                 except Exception as e:
