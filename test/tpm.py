@@ -80,8 +80,9 @@ async def _tpm_worker(
             t0 = time.time()
             try:
                 if use_ws:
+                    # Independent WS connection per transaction
                     try:
-                        txt = await ws_realtime_transcribe(ws_url, pcm)
+                        _ = await ws_realtime_transcribe(ws_url, pcm)
                         t_end = time.time()
                         wall_s = t_end - t0
                         audio_duration = len(pcm) / 2 / 16000

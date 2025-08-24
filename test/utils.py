@@ -51,13 +51,31 @@ def file_to_pcm16_mono_16k(file_path: str) -> bytes:
 
 
 def file_duration_seconds(file_path: str) -> float:
-    """Return audio duration in seconds by reading the file header/frames."""
-    data, sr = sf.read(file_path, dtype="float32", always_2d=False)
-    if data.ndim == 2:
-        n = data.shape[0]
-    else:
-        n = data.shape[0]
-    return float(n) / float(sr if sr else TARGET_SR)
+    """Return audio duration in seconds, preferring ffprobe to avoid decoder noise."""
+    ffprobe = shutil.which("ffprobe")
+    if ffprobe:
+        try:
+            proc = subprocess.run(
+                [
+                    ffprobe,
+                    "-v", "error",
+                    "-show_entries", "format=duration",
+                    "-of", "default=noprint_wrappers=1:nokey=1",
+                    file_path,
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                check=True,
+            )
+            s = proc.stdout.decode("utf-8", "ignore").strip()
+            return float(s)
+        except Exception:
+            pass
+    # Fallback: soundfile
+    with sf.SoundFile(file_path) as snd:
+        frames = len(snd)
+        sr = snd.samplerate or TARGET_SR
+        return float(frames) / float(sr)
 
 
 def build_http_multipart(file_path: str, use_pcm: bool = True) -> Tuple[str, bytes, str]:

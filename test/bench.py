@@ -222,27 +222,31 @@ def main() -> None:
 
     t0 = time.time()
     if args.ws:
-        # WS benchmark: send one stream per request with realistic frames
+        # WS benchmark: create independent WS connections per request, distributed across workers
         async def _ws_bench() -> tuple[List[Dict[str, float]], int, int]:
             import asyncio, time
             ws_url = base_url.rstrip("/") + "/v1/realtime"
             pcm = file_to_pcm16_mono_16k(file_paths[0])
             workers = min(args.concurrency, args.n)
-            counts = [1] * workers
+            counts = _split_counts(args.n, workers)
             results: List[Dict[str, float]] = []
             rejected = 0
             errors = 0
-            async def _do(i: int):
+
+            async def _worker(i: int, cnt: int):
                 nonlocal rejected, errors
-                t0 = time.time()
-                try:
-                    txt = await ws_realtime_transcribe(ws_url, pcm)
-                    wall = time.time() - t0
-                    results.append(_metrics(len(pcm)/2/16000, wall))
-                except Exception:
-                    errors += 1
-            await asyncio.gather(*[asyncio.create_task(_do(i)) for i in range(workers)])
+                for j in range(cnt):
+                    t0 = time.time()
+                    try:
+                        _ = await ws_realtime_transcribe(ws_url, pcm)
+                        wall = time.time() - t0
+                        results.append(_metrics(len(pcm)/2/16000, wall))
+                    except Exception:
+                        errors += 1
+
+            await asyncio.gather(*[asyncio.create_task(_worker(i, counts[i])) for i in range(workers)])
             return results, rejected, errors
+
         results, rejected, errors = asyncio.run(_ws_bench())
     else:
         results, rejected, errors = asyncio.run(bench_http(base_url, file_paths, args.n, args.concurrency, not args.no_pcm, args.raw))
