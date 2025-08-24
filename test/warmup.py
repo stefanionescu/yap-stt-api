@@ -44,6 +44,7 @@ def main() -> int:
     parser.add_argument("--ws", action="store_true", help="Use WebSocket /v1/realtime instead of HTTP")
     parser.add_argument("--no-pcm", action="store_true", help="Send original file (disable PCM mode) for HTTP")
     parser.add_argument("--raw", action="store_true", help="HTTP: send raw body (single-shot) instead of multipart")
+    parser.add_argument("--timestamps", action="store_true", help="Request word timestamps in the same transaction (HTTP only)")
     args = parser.parse_args()
 
     file_path = find_sample_file(SAMPLES_DIR, args.file)
@@ -71,12 +72,14 @@ def main() -> int:
         with httpx.Client(timeout=60) as client:
             try:
                 t0 = time.perf_counter()
+                # Optionally request words+timestamps in the same transaction
+                q = "?timestamps=1" if args.timestamps else ""
                 if args.raw:
                     headers = {"content-type": ctype}
-                    r = client.post(url, content=content, headers=headers)
+                    r = client.post(url + q, content=content, headers=headers)
                 else:
                     files = {"file": (fname, content, ctype)}
-                    r = client.post(url, files=files)
+                    r = client.post(url + q, files=files)
                 r.raise_for_status()
                 data = r.json()
                 elapsed_s = time.perf_counter() - t0
@@ -118,6 +121,8 @@ def main() -> int:
         if rtf > 0:
             xrt = 1.0 / rtf
             print(f"RTF: {rtf:.4f}  xRT: {xrt:.2f}x")
+
+    # Single-transaction result already contains words if available (HTTP path)
 
     # Write result to test/results/warmup.txt (overwrite)
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)

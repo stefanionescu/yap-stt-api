@@ -102,6 +102,73 @@ class ParakeetModel:
             texts.append(self._extract_text(cand))
         return texts
 
+    def _extract_words(self, hyp: Any) -> List[dict]:
+        words: List[dict] = []
+        try:
+            # Common RNNT/Nemo structures
+            if hasattr(hyp, "words") and isinstance(getattr(hyp, "words"), (list, tuple)):
+                for w in getattr(hyp, "words"):
+                    wdict = getattr(w, "__dict__", None) or {}
+                    word = wdict.get("word") or getattr(w, "word", None)
+                    start = wdict.get("start_time") or getattr(w, "start_time", None)
+                    end = wdict.get("end_time") or getattr(w, "end_time", None)
+                    if word is not None and start is not None and end is not None:
+                        words.append({"word": str(word), "start": float(start), "end": float(end)})
+            elif hasattr(hyp, "word_timestamps") and isinstance(getattr(hyp, "word_timestamps"), (list, tuple)):
+                for w in getattr(hyp, "word_timestamps"):
+                    wdict = getattr(w, "__dict__", None) or {}
+                    word = wdict.get("word") or getattr(w, "word", None)
+                    start = wdict.get("start_time") or getattr(w, "start_time", None)
+                    end = wdict.get("end_time") or getattr(w, "end_time", None)
+                    if word is not None and start is not None and end is not None:
+                        words.append({"word": str(word), "start": float(start), "end": float(end)})
+        except Exception:
+            pass
+        return words
+
+    def _transcribe_paths_with_timestamps(self, paths: List[str]) -> List[dict]:
+        # Best-effort enable timestamps on RNNT
+        try:
+            if hasattr(self._model, "change_decoding_strategy"):
+                self._model.change_decoding_strategy(decoding_cfg={"compute_timestamps": True})  # type: ignore[arg-type]
+        except Exception:
+            pass
+
+        autocast_dtype = torch.float16 if settings.autocast_dtype.lower() == "float16" else (
+            torch.bfloat16 if settings.autocast_dtype.lower() == "bfloat16" else torch.float16
+        )
+        with torch.inference_mode():
+            try:
+                if settings.use_autocast and torch.cuda.is_available():
+                    with torch.autocast(device_type="cuda", dtype=autocast_dtype):
+                        outs = self._model.transcribe(paths, return_hypotheses=True, batch_size=min(len(paths), settings.asr_batch_size), num_workers=settings.asr_num_workers, verbose=False)  # type: ignore[call-arg]
+                else:
+                    outs = self._model.transcribe(paths, return_hypotheses=True, batch_size=min(len(paths), settings.asr_batch_size), num_workers=settings.asr_num_workers, verbose=False)  # type: ignore[call-arg]
+            except TypeError:
+                outs = self._model.transcribe(paths)  # type: ignore[call-arg]
+
+        results: List[dict] = []
+        for out in outs:
+            hyp = out[0] if isinstance(out, (list, tuple)) and len(out) > 0 else out
+            text = self._extract_text(hyp)
+            words = self._extract_words(hyp)
+            results.append({"text": text, "words": words})
+
+        # Restore default decoding if possible (no timestamps)
+        try:
+            if hasattr(self._model, "change_decoding_strategy"):
+                self._model.change_decoding_strategy(decoding_cfg={})  # type: ignore[arg-type]
+        except Exception:
+            pass
+
+        return results
+
+    def recognize_waveform_with_timestamps(self, waveform: np.ndarray, sample_rate: int) -> dict:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as tmp:
+            sf.write(tmp.name, waveform, sample_rate)
+            out = self._transcribe_paths_with_timestamps([tmp.name])[0]
+        return out
+
     def _transcribe_paths(self, paths: List[str]) -> List[str]:
         autocast_dtype = torch.float16 if settings.autocast_dtype.lower() == "float16" else (
             torch.bfloat16 if settings.autocast_dtype.lower() == "bfloat16" else torch.float16

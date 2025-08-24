@@ -103,7 +103,8 @@ async def _http_worker(
     requests_count: int, 
     worker_id: int,
     use_pcm: bool,
-    raw: bool
+    raw: bool,
+    timestamps: bool
 ) -> Dict[str, any]:
     """HTTP worker that sends requests using the specified file."""
     results: List[Dict[str, float]] = []
@@ -121,10 +122,10 @@ async def _http_worker(
                 fname, content, ctype = build_http_multipart(file_path, use_pcm)
                 if raw:
                     headers = {"content-type": ctype}
-                    response = await client.post(url, content=content, headers=headers)
+                    response = await client.post(url + ("?timestamps=1" if timestamps else ""), content=content, headers=headers)
                 else:
                     files = {"file": (fname, content, ctype)}
-                    response = await client.post(url, files=files)
+                    response = await client.post(url + ("?timestamps=1" if timestamps else ""), files=files)
                 
                 t_end = time.time()
                 wall_s = t_end - t0
@@ -167,7 +168,7 @@ def _split_counts(total: int, workers: int) -> List[int]:
     return [base + (1 if i < rem else 0) for i in range(workers)]
 
 
-async def bench_http(base_url: str, file_paths: List[str], total_reqs: int, concurrency: int, use_pcm: bool, raw: bool) -> tuple[List[Dict[str, float]], int, int]:
+async def bench_http(base_url: str, file_paths: List[str], total_reqs: int, concurrency: int, use_pcm: bool, raw: bool, timestamps: bool) -> tuple[List[Dict[str, float]], int, int]:
     """Run HTTP benchmark with configurable concurrency."""
     workers = min(concurrency, total_reqs)
     counts = _split_counts(total_reqs, workers)
@@ -175,7 +176,7 @@ async def bench_http(base_url: str, file_paths: List[str], total_reqs: int, conc
     print(f"Starting {workers} workers with counts: {counts}")
     
     tasks = [
-        asyncio.create_task(_http_worker(base_url, file_paths, counts[i], i+1, use_pcm, raw)) 
+        asyncio.create_task(_http_worker(base_url, file_paths, counts[i], i+1, use_pcm, raw, timestamps)) 
         for i in range(workers)
     ]
     
@@ -207,6 +208,7 @@ def main() -> None:
     ap.add_argument("--no-pcm", action="store_true", help="Send original file (disable PCM mode) for HTTP")
     ap.add_argument("--ws", action="store_true", help="Use WebSocket realtime instead of HTTP")
     ap.add_argument("--raw", action="store_true", help="HTTP: send raw body (single-shot) instead of multipart")
+    ap.add_argument("--timestamps", action="store_true", help="Request word timestamps in the same transaction (HTTP only)")
     args = ap.parse_args()
 
     base_url = f"http://{args.host}:{args.port}"
@@ -248,13 +250,14 @@ def main() -> None:
                         results.append(_metrics(len(pcm)/2/16000, wall))
                     except Exception:
                         errors += 1
+                        continue
 
             await asyncio.gather(*[asyncio.create_task(_worker(i, counts[i])) for i in range(workers)])
             return results, rejected, errors
 
         results, rejected, errors = asyncio.run(_ws_bench())
     else:
-        results, rejected, errors = asyncio.run(bench_http(base_url, file_paths, args.n, args.concurrency, not args.no_pcm, args.raw))
+        results, rejected, errors = asyncio.run(bench_http(base_url, file_paths, args.n, args.concurrency, not args.no_pcm, args.raw, args.timestamps))
     elapsed = time.time() - t0
     
     summarize("HTTP Transcription", results)

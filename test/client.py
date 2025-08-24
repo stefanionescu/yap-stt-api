@@ -79,7 +79,7 @@ def _is_runpod_proxy_host(host: str) -> bool:
     return ("proxy.runpod.net" in h) or h.endswith("runpod.net")
 
 
-async def transcribe_file(host: str, port: int, file_path: str, use_https: bool = False) -> dict:
+async def transcribe_file(host: str, port: int, file_path: str, use_https: bool = False, timestamps: bool = False) -> dict:
     """Send file to transcription API and return response."""
     # Build URL
     scheme = "https" if use_https else "http"
@@ -108,7 +108,8 @@ async def transcribe_file(host: str, port: int, file_path: str, use_https: bool 
     async with httpx.AsyncClient(timeout=120.0, headers=headers) as client:
         with open(file_path, "rb") as f:
             files = {"file": (os.path.basename(file_path), f, "application/octet-stream")}
-            response = await client.post(url, files=files)
+            q = "?timestamps=1" if timestamps else ""
+            response = await client.post(url + q, files=files)
         
         elapsed = time.time() - t0
         
@@ -152,6 +153,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true", 
         help="Use HTTPS (auto-detected for RunPod proxy)"
     )
+    parser.add_argument(
+        "--timestamps",
+        action="store_true",
+        help="Request word timestamps in the same transaction (HTTP)",
+    )
     return parser.parse_args()
 
 
@@ -180,7 +186,7 @@ def main() -> None:
     use_https = args.https or use_https_from_scheme or _is_runpod_proxy_host(clean_host)
     
     try:
-        result = asyncio.run(transcribe_file(clean_host, args.port, file_path, use_https))
+        result = asyncio.run(transcribe_file(clean_host, args.port, file_path, use_https, args.timestamps))
         if not result:
             sys.exit(1)
     except KeyboardInterrupt:

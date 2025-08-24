@@ -62,7 +62,8 @@ async def _tpm_worker(
     stats_lock: asyncio.Lock,
     use_pcm: bool,
     use_ws: bool,
-    raw: bool
+    raw: bool,
+    timestamps: bool
 ) -> None:
     """Worker that continuously sends requests for duration_s seconds."""
     http_url = base_url.rstrip("/") + "/v1/audio/transcriptions"
@@ -93,10 +94,10 @@ async def _tpm_worker(
                     fname, content, ctype = build_http_multipart(file_path, use_pcm)
                     if raw:
                         headers = {"content-type": ctype}
-                        response = await client.post(http_url, content=content, headers=headers)
+                        response = await client.post(http_url + ("?timestamps=1" if timestamps else ""), content=content, headers=headers)
                     else:
                         files = {"file": (fname, content, ctype)}
-                        response = await client.post(http_url, files=files)
+                        response = await client.post(http_url + ("?timestamps=1" if timestamps else ""), files=files)
                     t_end = time.time()
                     wall_s = t_end - t0
                     if response.status_code == 429:
@@ -130,7 +131,7 @@ async def _tpm_worker(
     print(f"Worker {worker_id} final: {completed} completed, {rate:.1f}/min, {rejected} rejected, {errors} errors")
 
 
-async def run_tpm_test(base_url: str, file_paths: List[str], concurrency: int, duration_s: float, use_pcm: bool, use_ws: bool, raw: bool) -> List[Dict[str, any]]:
+async def run_tpm_test(base_url: str, file_paths: List[str], concurrency: int, duration_s: float, use_pcm: bool, use_ws: bool, raw: bool, timestamps: bool) -> List[Dict[str, any]]:
     """Run TPM test with constant concurrency for duration_s seconds."""
     results: List[Dict[str, any]] = []
     stats_lock = asyncio.Lock()
@@ -139,7 +140,7 @@ async def run_tpm_test(base_url: str, file_paths: List[str], concurrency: int, d
     
     # Start all workers
     tasks = [
-        asyncio.create_task(_tpm_worker(i+1, base_url, file_paths, duration_s, results, stats_lock, use_pcm, use_ws, raw))
+        asyncio.create_task(_tpm_worker(i+1, base_url, file_paths, duration_s, results, stats_lock, use_pcm, use_ws, raw, timestamps))
         for i in range(concurrency)
     ]
     
@@ -159,6 +160,7 @@ def main() -> None:
     ap.add_argument("--no-pcm", action="store_true", help="Send original file (disable PCM mode) for HTTP")
     ap.add_argument("--ws", action="store_true", help="Use WebSocket realtime instead of HTTP")
     ap.add_argument("--raw", action="store_true", help="HTTP: send raw body (single-shot) instead of multipart")
+    ap.add_argument("--timestamps", action="store_true", help="Request word timestamps in the same transaction (HTTP only)")
     args = ap.parse_args()
 
     base_url = f"http://{args.host}:{args.port}"
@@ -178,7 +180,7 @@ def main() -> None:
     print(f"Using {len(file_paths)} file(s): {[os.path.basename(f) for f in file_paths]}")
 
     t0 = time.time()
-    results = asyncio.run(run_tpm_test(base_url, file_paths, args.concurrency, args.duration, not args.no_pcm, args.ws, args.raw))
+    results = asyncio.run(run_tpm_test(base_url, file_paths, args.concurrency, args.duration, not args.no_pcm, args.ws, args.raw, args.timestamps))
     elapsed = time.time() - t0
     
     if results:

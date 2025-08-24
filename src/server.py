@@ -7,7 +7,7 @@ import base64
 import uuid
 
 import numpy as np
-from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect, Form, Request
+from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect, Form, Request, Query
 from pydantic import BaseModel
 
 from .audio import decode_and_resample, DecodedAudio
@@ -27,8 +27,15 @@ _scheduler: MicroBatchScheduler | None = None
 _is_ready: bool = False
 
 
+class WordTimestamp(BaseModel):
+    word: str
+    start: float
+    end: float
+
+
 class TranscriptionResponse(BaseModel):
     text: str
+    words: list[WordTimestamp] | None = None
 
 
 @app.on_event("startup")
@@ -79,6 +86,7 @@ async def readyz() -> Dict[str, Any]:
 async def openai_transcribe(
     request: Request,
     file: UploadFile | None = File(None),
+    timestamps: bool = Query(False),
 ) -> TranscriptionResponse:
     global _scheduler, _model
     if _scheduler is None or _model is None or not _is_ready:
@@ -136,6 +144,15 @@ async def openai_transcribe(
         raise HTTPException(status_code=413, detail="Audio too long")
 
     # Queue submit
+    # If timestamps requested, bypass scheduler and run single inference with timestamps for this request
+    if timestamps:
+        try:
+            text_words = _model.recognize_waveform_with_timestamps(decoded.waveform, decoded.sample_rate)  # type: ignore[union-attr]
+            words = text_words.get("words") or None
+            return TranscriptionResponse(text=str(text_words.get("text", "")), words=words)
+        except Exception as e:
+            logger.warning("timestamps path failed, falling back: %s", e)
+
     fut = _scheduler.submit(decoded.waveform, decoded.sample_rate)
     try:
         text, _inference_dt, _queue_wait_s = await asyncio.wait_for(
