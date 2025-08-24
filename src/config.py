@@ -9,7 +9,7 @@ class Settings(BaseSettings):
 
     # NeMo model identifier
     # Use NVIDIA Parakeet CTC 0.6B by default
-    model_id: str = os.getenv("PARAKEET_MODEL_ID", "nvidia/parakeet-ctc-0.6b")
+    model_id: str = os.getenv("PARAKEET_MODEL_ID", "nvidia/parakeet-tdt-0.6b-v2")
 
     # Long-form inference knobs (see NVIDIA blog)
     # Enable limited context attention with 128 tokens left/right
@@ -17,10 +17,6 @@ class Settings(BaseSettings):
     local_attention_context: int = int(os.getenv("PARAKEET_LOCAL_ATTENTION_CONTEXT", "128"))
     # Chunking factor for subsampling conv (1 = auto select)
     subsampling_chunking_factor: int = int(os.getenv("PARAKEET_SUBSAMPLING_CHUNKING_FACTOR", "1"))
-
-    # Optional post-processing with NeMo punctuation + capitalization model
-    enable_punct_capit: bool = os.getenv("PARAKEET_ENABLE_PUNCT_CAPIT", "0") not in ("0", "false", "False")
-    punct_capit_model_id: str = os.getenv("PARAKEET_PUNCT_CAPIT_MODEL_ID", "nvidia/punctuate_capitalize_english_v1.0")
 
     # Concurrency and queuing (micro-batching only)
     queue_max_factor: int = int(os.getenv("PARAKEET_QUEUE_MAX_FACTOR", "2"))
