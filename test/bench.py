@@ -23,10 +23,14 @@ from pathlib import Path
 from typing import Dict, List
 
 import httpx
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parent))
 
 
 SAMPLES_DIR = "samples"
 EXTS = {".wav", ".flac", ".ogg", ".mp3"}
+from utils import build_http_multipart, file_to_pcm16_mono_16k, ws_realtime_transcribe
 
 
 def find_sample_files() -> List[str]:
@@ -97,14 +101,16 @@ async def _http_worker(
     base_url: str, 
     file_paths: List[str], 
     requests_count: int, 
-    worker_id: int
+    worker_id: int,
+    use_pcm: bool,
+    raw: bool
 ) -> Dict[str, any]:
     """HTTP worker that sends requests using the specified file."""
     results: List[Dict[str, float]] = []
     rejected = 0
     errors = 0
     
-    url = base_url.rstrip("/") + "/v1/transcribe"
+    url = base_url.rstrip("/") + "/v1/audio/transcriptions"
     file_path = file_paths[0]  # Use the single specified file
     
     async with httpx.AsyncClient(timeout=120.0) as client:
@@ -112,8 +118,12 @@ async def _http_worker(
             
             t0 = time.time()
             try:
-                with open(file_path, "rb") as f:
-                    files = {"file": (os.path.basename(file_path), f, "application/octet-stream")}
+                fname, content, ctype = build_http_multipart(file_path, use_pcm)
+                if raw:
+                    headers = {"content-type": ctype}
+                    response = await client.post(url, content=content, headers=headers)
+                else:
+                    files = {"file": (fname, content, ctype)}
                     response = await client.post(url, files=files)
                 
                 t_end = time.time()
@@ -152,7 +162,7 @@ def _split_counts(total: int, workers: int) -> List[int]:
     return [base + (1 if i < rem else 0) for i in range(workers)]
 
 
-async def bench_http(base_url: str, file_paths: List[str], total_reqs: int, concurrency: int) -> tuple[List[Dict[str, float]], int, int]:
+async def bench_http(base_url: str, file_paths: List[str], total_reqs: int, concurrency: int, use_pcm: bool, raw: bool) -> tuple[List[Dict[str, float]], int, int]:
     """Run HTTP benchmark with configurable concurrency."""
     workers = min(concurrency, total_reqs)
     counts = _split_counts(total_reqs, workers)
@@ -160,7 +170,7 @@ async def bench_http(base_url: str, file_paths: List[str], total_reqs: int, conc
     print(f"Starting {workers} workers with counts: {counts}")
     
     tasks = [
-        asyncio.create_task(_http_worker(base_url, file_paths, counts[i], i+1)) 
+        asyncio.create_task(_http_worker(base_url, file_paths, counts[i], i+1, use_pcm, raw)) 
         for i in range(workers)
     ]
     
@@ -189,6 +199,9 @@ def main() -> None:
     ap.add_argument("--n", type=int, default=40, help="Total requests")
     ap.add_argument("--concurrency", type=int, default=1, help="Concurrent workers")
     ap.add_argument("--file", type=str, default="mid.wav", help="Audio file from samples/ (default: mid.wav)")
+    ap.add_argument("--no-pcm", action="store_true", help="Send original file (disable PCM mode) for HTTP")
+    ap.add_argument("--ws", action="store_true", help="Use WebSocket realtime instead of HTTP")
+    ap.add_argument("--raw", action="store_true", help="HTTP: send raw body (single-shot) instead of multipart")
     args = ap.parse_args()
 
     base_url = f"http://{args.host}:{args.port}"
@@ -203,11 +216,36 @@ def main() -> None:
         return
     file_paths = [file_path]
     
-    print(f"Benchmark → HTTP | n={args.n} | concurrency={args.concurrency} | host={args.host}:{args.port}")
+    mode = "WS" if args.ws else "HTTP"
+    print(f"Benchmark → {mode} | n={args.n} | concurrency={args.concurrency} | host={args.host}:{args.port}")
     print(f"Using {len(file_paths)} file(s): {[os.path.basename(f) for f in file_paths]}")
 
     t0 = time.time()
-    results, rejected, errors = asyncio.run(bench_http(base_url, file_paths, args.n, args.concurrency))
+    if args.ws:
+        # WS benchmark: send one stream per request with realistic frames
+        async def _ws_bench() -> tuple[List[Dict[str, float]], int, int]:
+            import asyncio, time
+            ws_url = base_url.rstrip("/") + "/v1/realtime"
+            pcm = file_to_pcm16_mono_16k(file_paths[0])
+            workers = min(args.concurrency, args.n)
+            counts = [1] * workers
+            results: List[Dict[str, float]] = []
+            rejected = 0
+            errors = 0
+            async def _do(i: int):
+                nonlocal rejected, errors
+                t0 = time.time()
+                try:
+                    txt = await ws_realtime_transcribe(ws_url, pcm)
+                    wall = time.time() - t0
+                    results.append(_metrics(len(pcm)/2/16000, wall))
+                except Exception:
+                    errors += 1
+            await asyncio.gather(*[asyncio.create_task(_do(i)) for i in range(workers)])
+            return results, rejected, errors
+        results, rejected, errors = asyncio.run(_ws_bench())
+    else:
+        results, rejected, errors = asyncio.run(bench_http(base_url, file_paths, args.n, args.concurrency, not args.no_pcm, args.raw))
     elapsed = time.time() - t0
     
     summarize("HTTP Transcription", results)

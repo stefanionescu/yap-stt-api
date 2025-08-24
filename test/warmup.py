@@ -6,6 +6,9 @@ import os
 from pathlib import Path
 
 import httpx
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parent))
 import time
 
 SAMPLES_DIR = "samples"
@@ -38,6 +41,9 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--file", type=str, default="mid.wav", help="Filename in samples/ directory (e.g., mid.wav, long.mp3)")
     parser.add_argument("--url", type=str, default="http://127.0.0.1:8000")
+    parser.add_argument("--ws", action="store_true", help="Use WebSocket /v1/realtime instead of HTTP")
+    parser.add_argument("--no-pcm", action="store_true", help="Send original file (disable PCM mode) for HTTP")
+    parser.add_argument("--raw", action="store_true", help="HTTP: send raw body (single-shot) instead of multipart")
     args = parser.parse_args()
 
     file_path = find_sample_file(SAMPLES_DIR, args.file)
@@ -45,13 +51,32 @@ def main() -> int:
         print(f"Audio file '{args.file}' not found in {SAMPLES_DIR}/")
         return 2
 
-    url = args.url.rstrip("/") + "/v1/transcribe"
-    with open(file_path, "rb") as f:
-        files = {"file": (os.path.basename(file_path), f, "application/octet-stream")}
+    if args.ws:
+        # WS realtime using utils
+        from utils import file_to_pcm16_mono_16k
+        import asyncio
+        pcm = file_to_pcm16_mono_16k(file_path)
+        ws_url = args.url.rstrip("/") + "/v1/realtime"
+        from utils import ws_realtime_transcribe
+        t0 = time.perf_counter()
+        text = asyncio.run(ws_realtime_transcribe(ws_url, pcm))
+        elapsed_s = time.perf_counter() - t0
+        data = {"text": text, "duration": 0.0, "sample_rate": 16000, "model": ""}
+    else:
+        # HTTP multipart; optionally send audio/pcm
+        url = args.url.rstrip("/") + "/v1/audio/transcriptions"
+        from utils import build_http_multipart
+        use_pcm = not args.no_pcm
+        fname, content, ctype = build_http_multipart(file_path, use_pcm)
         with httpx.Client(timeout=60) as client:
             try:
                 t0 = time.perf_counter()
-                r = client.post(url, files=files)
+                if args.raw:
+                    headers = {"content-type": ctype}
+                    r = client.post(url, content=content, headers=headers)
+                else:
+                    files = {"file": (fname, content, ctype)}
+                    r = client.post(url, files=files)
                 r.raise_for_status()
                 data = r.json()
                 elapsed_s = time.perf_counter() - t0

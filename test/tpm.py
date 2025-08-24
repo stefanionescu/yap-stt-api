@@ -22,10 +22,14 @@ from pathlib import Path
 from typing import Dict, List
 
 import httpx
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parent))
 
 
 SAMPLES_DIR = "samples"
 EXTS = {".wav", ".flac", ".ogg", ".mp3"}
+from utils import build_http_multipart, file_to_pcm16_mono_16k, ws_realtime_transcribe
 
 
 def find_sample_files() -> List[str]:
@@ -55,38 +59,54 @@ async def _tpm_worker(
     file_paths: List[str],
     duration_s: float,
     results: List[Dict[str, any]],
-    stats_lock: asyncio.Lock
+    stats_lock: asyncio.Lock,
+    use_pcm: bool,
+    use_ws: bool,
+    raw: bool
 ) -> None:
     """Worker that continuously sends requests for duration_s seconds."""
-    url = base_url.rstrip("/") + "/v1/transcribe"
+    http_url = base_url.rstrip("/") + "/v1/audio/transcriptions"
+    ws_url = base_url.rstrip("/") + "/v1/realtime"
     start_time = time.time()
     completed = 0
     rejected = 0
     errors = 0
     
+    file_path = file_paths[0]  # Use the single specified file
+    if use_ws:
+        pcm = file_to_pcm16_mono_16k(file_path)
     async with httpx.AsyncClient(timeout=120.0) as client:
-        file_path = file_paths[0]  # Use the single specified file
         while time.time() - start_time < duration_s:
-            
             t0 = time.time()
             try:
-                with open(file_path, "rb") as f:
-                    files = {"file": (os.path.basename(file_path), f, "application/octet-stream")}
-                    response = await client.post(url, files=files)
-                
-                t_end = time.time()
-                wall_s = t_end - t0
-                
-                if response.status_code == 429:
-                    rejected += 1
-                    continue
-                elif response.status_code != 200:
-                    errors += 1
-                    continue
-                
-                data = response.json()
-                audio_duration = data.get("duration", 0.0)
-                
+                if use_ws:
+                    try:
+                        txt = await ws_realtime_transcribe(ws_url, pcm)
+                        t_end = time.time()
+                        wall_s = t_end - t0
+                        audio_duration = len(pcm) / 2 / 16000
+                    except Exception:
+                        errors += 1
+                        continue
+                else:
+                    fname, content, ctype = build_http_multipart(file_path, use_pcm)
+                    if raw:
+                        headers = {"content-type": ctype}
+                        response = await client.post(http_url, content=content, headers=headers)
+                    else:
+                        files = {"file": (fname, content, ctype)}
+                        response = await client.post(http_url, files=files)
+                    t_end = time.time()
+                    wall_s = t_end - t0
+                    if response.status_code == 429:
+                        rejected += 1
+                        continue
+                    elif response.status_code != 200:
+                        errors += 1
+                        continue
+                    data = response.json()
+                    audio_duration = data.get("duration", 0.0)
+
                 async with stats_lock:
                     results.append({
                         "worker_id": worker_id,
@@ -95,18 +115,13 @@ async def _tpm_worker(
                         "file": os.path.basename(file_path),
                         "timestamp": t_end,
                     })
-                
                 completed += 1
-                
-                # Brief status every 10 completions
                 if completed % 10 == 0:
                     elapsed = time.time() - start_time
                     rate = completed / elapsed * 60  # per minute
                     print(f"    Worker {worker_id}: {completed} done, {rate:.1f}/min, {rejected} rejected, {errors} errors")
-                    
-            except Exception as e:
+            except Exception:
                 errors += 1
-                # Don't spam on errors, just continue
                 continue
     
     elapsed = time.time() - start_time
@@ -114,7 +129,7 @@ async def _tpm_worker(
     print(f"Worker {worker_id} final: {completed} completed, {rate:.1f}/min, {rejected} rejected, {errors} errors")
 
 
-async def run_tpm_test(base_url: str, file_paths: List[str], concurrency: int, duration_s: float) -> List[Dict[str, any]]:
+async def run_tpm_test(base_url: str, file_paths: List[str], concurrency: int, duration_s: float, use_pcm: bool, use_ws: bool, raw: bool) -> List[Dict[str, any]]:
     """Run TPM test with constant concurrency for duration_s seconds."""
     results: List[Dict[str, any]] = []
     stats_lock = asyncio.Lock()
@@ -123,7 +138,7 @@ async def run_tpm_test(base_url: str, file_paths: List[str], concurrency: int, d
     
     # Start all workers
     tasks = [
-        asyncio.create_task(_tpm_worker(i+1, base_url, file_paths, duration_s, results, stats_lock))
+        asyncio.create_task(_tpm_worker(i+1, base_url, file_paths, duration_s, results, stats_lock, use_pcm, use_ws, raw))
         for i in range(concurrency)
     ]
     
@@ -140,6 +155,9 @@ def main() -> None:
     ap.add_argument("--concurrency", type=int, default=6, help="Concurrent workers")
     ap.add_argument("--duration", type=int, default=60, help="Test duration in seconds")
     ap.add_argument("--file", type=str, default="mid.wav", help="Audio file from samples/ (default: mid.wav)")
+    ap.add_argument("--no-pcm", action="store_true", help="Send original file (disable PCM mode) for HTTP")
+    ap.add_argument("--ws", action="store_true", help="Use WebSocket realtime instead of HTTP")
+    ap.add_argument("--raw", action="store_true", help="HTTP: send raw body (single-shot) instead of multipart")
     args = ap.parse_args()
 
     base_url = f"http://{args.host}:{args.port}"
@@ -154,11 +172,12 @@ def main() -> None:
         return
     file_paths = [file_path]
     
-    print(f"TPM Test → HTTP | concurrency={args.concurrency} | duration={args.duration}s | host={args.host}:{args.port}")
+    mode = "WS" if args.ws else "HTTP"
+    print(f"TPM Test → {mode} | concurrency={args.concurrency} | duration={args.duration}s | host={args.host}:{args.port}")
     print(f"Using {len(file_paths)} file(s): {[os.path.basename(f) for f in file_paths]}")
 
     t0 = time.time()
-    results = asyncio.run(run_tpm_test(base_url, file_paths, args.concurrency, args.duration))
+    results = asyncio.run(run_tpm_test(base_url, file_paths, args.concurrency, args.duration, not args.no_pcm, args.ws, args.raw))
     elapsed = time.time() - t0
     
     if results:

@@ -2,18 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from typing import Any, Dict, Optional
 import base64
 import uuid
 
 import numpy as np
-from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect, Form
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect, Form, Request
 from pydantic import BaseModel
 import onnxruntime as ort
 
-from .audio import decode_and_resample
+from .audio import decode_and_resample, DecodedAudio
 from .config import settings
 from .logging_config import configure_logging
 from .metrics import Timer, RequestMetrics, log_request
@@ -99,15 +97,23 @@ async def readyz() -> Dict[str, Any]:
 
 @app.post("/v1/audio/transcriptions", response_model=TranscriptionResponse)
 async def openai_transcribe(
-    file: UploadFile = File(...),
-    model: Optional[str] = Form(None),
+    request: Request,
+    file: UploadFile | None = File(None),
 ) -> TranscriptionResponse:
     global _scheduler, _model
     if _scheduler is None or _model is None or not _is_ready:
         raise HTTPException(status_code=503, detail="Model not initialized")
 
     # Input size validation
-    content_length = file.size if hasattr(file, "size") else None
+    # Support multipart (UploadFile) or raw body (Content-Type: audio/pcm or application/octet-stream)
+    content_length = None
+    if file is not None and hasattr(file, "size"):
+        content_length = file.size  # type: ignore[attr-defined]
+    else:
+        try:
+            content_length = int(request.headers.get("content-length", "0")) or None
+        except Exception:
+            content_length = None
     if content_length is not None:
         max_bytes = int(settings.max_upload_mb * 1024 * 1024)
         if content_length > max_bytes:
@@ -118,13 +124,34 @@ async def openai_transcribe(
         headers = {"Retry-After": str(int(settings.max_queue_wait_s))}
         raise HTTPException(status_code=429, detail="Busy, try again later", headers=headers)
 
-    raw = await file.read()
-    if content_length is None:
-        max_bytes = int(settings.max_upload_mb * 1024 * 1024)
-        if len(raw) > max_bytes:
-            raise HTTPException(status_code=413, detail="Upload too large")
+    if file is not None:
+        raw = await file.read()
+        if content_length is None:
+            max_bytes = int(settings.max_upload_mb * 1024 * 1024)
+            if len(raw) > max_bytes:
+                raise HTTPException(status_code=413, detail="Upload too large")
 
-    decoded = decode_and_resample(raw)
+        filename = (file.filename or "").lower()
+        content_type = (file.content_type or "").lower()
+    else:
+        raw = await request.body()
+        if content_length is None:
+            max_bytes = int(settings.max_upload_mb * 1024 * 1024)
+            if len(raw) > max_bytes:
+                raise HTTPException(status_code=413, detail="Upload too large")
+        filename = ""
+        content_type = (request.headers.get("content-type") or "").lower()
+
+    # Accept containerized audio (mp3/ogg/wav/flac/...) and also raw PCM16 mono 16kHz (filename .pcm/.raw or audio/pcm)
+    if filename.endswith((".pcm", ".raw")) or content_type in ("audio/pcm", "audio/l16"):
+        try:
+            pcm = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+            sr = 16000
+            decoded = DecodedAudio(waveform=pcm, sample_rate=sr, duration_seconds=float(len(pcm) / sr))
+        except Exception as e:
+            raise HTTPException(status_code=415, detail=f"Invalid PCM payload: {e}")
+    else:
+        decoded = decode_and_resample(raw)
     if decoded.duration_seconds > settings.max_audio_seconds:
         raise HTTPException(status_code=413, detail="Audio too long")
 
