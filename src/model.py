@@ -1,248 +1,94 @@
 from __future__ import annotations
 
-import json
-import os
 import tempfile
 from dataclasses import dataclass
-from typing import Optional, List
+from typing import List
 
 import numpy as np
 import soundfile as sf
-import onnxruntime as ort
 import logging
+import torch
+
+import nemo.collections.asr as nemo_asr
 
 from .config import settings
-from .runtime import pick_providers
-
-try:
-    import onnx_asr
-except Exception as e:  # pragma: no cover
-    onnx_asr = None  # type: ignore
 
 logger = logging.getLogger("parakeet.model")
 
-CUDA_ONLY = [("CUDAExecutionProvider", {"device_id": 0}), "CPUExecutionProvider"]
 
 @dataclass
 class ParakeetModel:
     model_id: str
-    _model: object
-
-    @staticmethod
-    def _ensure_gpu_active(require_gpu: bool) -> None:
-        providers = ort.get_available_providers()
-        if require_gpu and "CUDAExecutionProvider" not in providers and "TensorrtExecutionProvider" not in providers:
-            raise RuntimeError(
-                f"GPU provider not available. Available providers: {providers}. Ensure CUDA/cuDNN (and TensorRT if desired) are installed."
-            )
+    _model: nemo_asr.models.ASRModel
 
     @classmethod
-    def load_local(
-        cls,
-        model_name: str,
-        model_dir: str,
-        *,
-        require_gpu: bool = True,
-    ) -> "ParakeetModel":
-        if onnx_asr is None:
-            raise RuntimeError("onnx-asr is not installed; please install dependencies.")
-        cls._ensure_gpu_active(require_gpu)
-
-        onnx_dir = os.path.abspath(model_dir)
-        if not os.path.isdir(onnx_dir):
-            raise RuntimeError(f"model_dir does not exist: {onnx_dir}")
-
-        enc = os.path.join(onnx_dir, "encoder-model.onnx")
-        dec = os.path.join(onnx_dir, "decoder_joint-model.onnx")
-        if not (os.path.isfile(enc) and os.path.isfile(dec)):
-            raise RuntimeError(
-                "Model dir missing encoder-model.onnx and/or decoder_joint-model.onnx."
-            )
-
-        # Check config.json for frontend configuration to ensure mel-spectrogram dimensions match
-        cfg_path = os.path.join(onnx_dir, "config.json")
-        try:
-            with open(cfg_path, "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-            expected_mels = int(cfg.get("frontend", {}).get("n_mels", cfg.get("n_mels", 80)))
-            if expected_mels not in (80, 128):
-                logger.warning("Unexpected n_mels in config.json: %s", expected_mels)
-            else:
-                logger.info("Config frontend n_mels=%d (will match encoder input dim)", expected_mels)
-        except Exception:
-            logger.warning("No/invalid config.json; default preprocessing may mis-match model")
-
-        prov_list = pick_providers(
-            device_id=settings.device_id,
-            use_tensorrt=settings.use_tensorrt,
-            trt_engine_cache=settings.trt_engine_cache,
-            trt_timing_cache=settings.trt_timing_cache,
-            trt_max_workspace_size=settings.trt_max_workspace_size,
-        )
-        # Pass provider options through so TRT settings (e.g., FP16) take effect
-        logger.info("Loading local ONNX via onnx_asr: name=%s dir=%s", model_name, onnx_dir)
-        model = onnx_asr.load_model(model_name, onnx_dir, providers=prov_list)
-
-        try:
-            get_providers = getattr(model, "get_providers", None) or getattr(getattr(model, "asr", None), "get_providers", None)
-            if callable(get_providers):
-                active = get_providers()
-                if require_gpu and all(x not in active for x in ("CUDAExecutionProvider", "TensorrtExecutionProvider")):
-                    raise RuntimeError(f"Model session not using GPU providers: {active}")
-                logger.info("Active model providers: %s", active)
-        except Exception:
-            pass
-
-        return cls(model_id=f"{model_name}@{onnx_dir}", _model=model)
-
-    @classmethod
-    def load_remote(
-        cls,
-        repo_id: str,
-        *,
-        require_gpu: bool = True,
-    ) -> "ParakeetModel":
-        if onnx_asr is None:
-            raise RuntimeError("onnx-asr is not installed; please install dependencies.")
-        cls._ensure_gpu_active(require_gpu)
-
-        prov_list = pick_providers(
-            device_id=settings.device_id,
-            use_tensorrt=settings.use_tensorrt,
-            trt_engine_cache=settings.trt_engine_cache,
-            trt_timing_cache=settings.trt_timing_cache,
-            trt_max_workspace_size=settings.trt_max_workspace_size,
-        )
-        logger.info("Loading remote ONNX from hub: %s", repo_id)
-        model = onnx_asr.load_model(repo_id, providers=prov_list)
-
-        try:
-            get_providers = getattr(model, "get_providers", None) or getattr(getattr(model, "asr", None), "get_providers", None)
-            if callable(get_providers):
-                active = get_providers()
-                if require_gpu and all(x not in active for x in ("CUDAExecutionProvider", "TensorrtExecutionProvider")):
-                    raise RuntimeError(f"Model session not using GPU providers: {active}")
-                logger.info("Active model providers: %s", active)
-        except Exception:
-            pass
-
-        return cls(model_id=repo_id, _model=model)
-
-    @classmethod
-    def _load_internal(cls, source: str, require_gpu: bool) -> "ParakeetModel":
-        cls._ensure_gpu_active(require_gpu)
-        # Build providers list (names only for onnx-asr)
-        prov_list = pick_providers(
-            device_id=settings.device_id,
-            use_tensorrt=settings.use_tensorrt,
-            trt_engine_cache=settings.trt_engine_cache,
-            trt_timing_cache=settings.trt_timing_cache,
-            trt_max_workspace_size=settings.trt_max_workspace_size,
-        )
-        # If source is a directory, load local with model_name and onnx_dir
-        if os.path.isdir(source):
-            local_dir = source
-            enc = os.path.join(local_dir, "encoder-model.onnx")
-            dec = os.path.join(local_dir, "decoder_joint-model.onnx")
-            if not (os.path.isfile(enc) and os.path.isfile(dec)):
-                raise RuntimeError(
-                    "Model dir missing encoder-model.onnx and/or decoder_joint-model.onnx."
+    def load(cls) -> "ParakeetModel":
+        logger.info("Loading NeMo ASR model: %s", settings.model_id)
+        asr_model = nemo_asr.models.ASRModel.from_pretrained(model_name=settings.model_id)
+        # Enable local attention and chunking for long-form inference if configured
+        if settings.use_local_attention:
+            try:
+                asr_model.change_attention_model("rel_pos_local_attn", [settings.local_attention_context, settings.local_attention_context])
+                asr_model.change_subsampling_conv_chunking_factor(settings.subsampling_chunking_factor)
+                logger.info(
+                    "Configured local attention with context=%d and chunking_factor=%d",
+                    settings.local_attention_context,
+                    settings.subsampling_chunking_factor,
                 )
-            ext_data = [p for p in os.listdir(local_dir) if p.endswith(".onnx.data")]
-            if ext_data:
-                logger.warning("Found external-data files in model dir (possible FP32): %s", ext_data)
-            logger.info("Loading local ONNX: name=%s dir=%s", settings.model_name, local_dir)
-            # onnx-asr 0.7.x expects the local dir as the 2nd positional arg
-            model = onnx_asr.load_model(settings.model_name, local_dir, providers=prov_list)
-        else:
-            # Remote/hub path
-            model = onnx_asr.load_model(source, providers=prov_list)
-        # Best-effort provider check if accessible
+            except Exception as e:
+                logger.warning("Failed to configure local attention/chunking: %s", e)
+
+        # Prefer GPU when available
         try:
-            get_providers = getattr(model, "get_providers", None) or getattr(getattr(model, "asr", None), "get_providers", None)
-            if callable(get_providers):
-                active = get_providers()
-                if require_gpu and all(x not in active for x in ("CUDAExecutionProvider", "TensorrtExecutionProvider")):
-                    raise RuntimeError(f"Model session not using GPU providers: {active}")
-                logger.info("Active model providers: %s", active)
+            if torch.cuda.is_available():
+                asr_model = asr_model.to(torch.device("cuda"))  # type: ignore[assignment]
+                logger.info("ASR model moved to CUDA")
+        except Exception as e:
+            logger.warning("Could not move model to CUDA: %s", e)
+
+        try:
+            asr_model.eval()
+            for p in asr_model.parameters():
+                p.requires_grad_(False)
         except Exception:
             pass
-        return cls(model_id=source, _model=model)
 
-    @classmethod
-    def load_with_fallback(
-        cls,
-        primary_id: str,
-        fallback_id: Optional[str] = None,
-        *,
-        require_gpu: bool = True,
-    ) -> "ParakeetModel":
-        if onnx_asr is None:
-            raise RuntimeError("onnx-asr is not installed; please install dependencies.")
+        return cls(model_id=settings.model_id, _model=asr_model)
 
-        # Try primary alias
+    def _transcribe_paths(self, paths: List[str]) -> List[str]:
         try:
-            logger.info("Attempting to load model by id: %s", primary_id)
-            return cls._load_internal(primary_id, require_gpu)
-        except Exception as e_primary:
-            logger.warning("Primary id load failed (%s).", e_primary)
-
-        # Try fallback repo id
-        if fallback_id and fallback_id != primary_id:
-            logger.info("Attempting to load fallback id: %s", fallback_id)
-            return cls._load_internal(fallback_id, require_gpu)
-
-        # If everything fails, raise the original error
-        raise RuntimeError(f"Failed to load model by id. Primary='{primary_id}', fallback='{fallback_id}'.")
+            texts = self._model.transcribe(paths)
+        except TypeError:
+            # Some NeMo versions use keyword paths2audio_files
+            texts = self._model.transcribe(paths2audio_files=paths)  # type: ignore[call-arg]
+        # Ensure list[str]
+        return [str(t) for t in texts]
 
     def recognize_waveform(self, waveform: np.ndarray, sample_rate: int) -> str:
-        # Prefer direct waveform APIs if available to avoid temp file I/O
-        try:
-            if hasattr(self._model, "recognize_waveform"):
-                text = self._model.recognize_waveform(waveform, sample_rate)  # type: ignore[attr-defined]
-            else:
-                text = self._model.recognize(waveform, sample_rate)  # type: ignore[misc]
-        except TypeError:
-            # Fallback to file path API
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as tmp:
-                sf.write(tmp.name, waveform, sample_rate)
-                text = self._model.recognize(tmp.name)
-        if isinstance(text, (list, tuple)):
-            return " ".join(map(str, text))
-        return str(text)
-
-    def recognize_waveforms(self, waveforms: List[np.ndarray], sample_rates: List[int]) -> List[str]:
-        """Batch inference when backend supports it; otherwise map over single-call.
-
-        Falls back to per-item inference if the underlying model lacks a batch API.
-        """
-        # Try batched APIs common in onnx_asr wrappers
-        try:
-            if hasattr(self._model, "recognize_waveforms"):
-                texts = self._model.recognize_waveforms(waveforms, sample_rates)  # type: ignore[attr-defined]
-            else:
-                # Some expose recognize(list) with uniform sample_rate
-                if len(set(sample_rates)) == 1 and hasattr(self._model, "recognize"):
-                    texts = self._model.recognize(waveforms, sample_rates[0])  # type: ignore[misc]
-                else:
-                    raise AttributeError
-        except Exception:
-            # Fallback: per-item
-            texts = [self.recognize_waveform(w, sr) for w, sr in zip(waveforms, sample_rates)]
-
-        # Ensure strings
-        out: List[str] = []
-        for t in texts:
-            if isinstance(t, (list, tuple)):
-                out.append(" ".join(map(str, t)))
-            else:
-                out.append(str(t))
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as tmp:
+            sf.write(tmp.name, waveform, sample_rate)
+            out = self._transcribe_paths([tmp.name])[0]
         return out
 
+    def recognize_waveforms(self, waveforms: List[np.ndarray], sample_rates: List[int]) -> List[str]:
+        tmp_files: List[tempfile.NamedTemporaryFile] = []
+        paths: List[str] = []
+        try:
+            for wav, sr in zip(waveforms, sample_rates):
+                tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+                sf.write(tmp.name, wav, sr)
+                tmp_files.append(tmp)
+                paths.append(tmp.name)
+            return self._transcribe_paths(paths)
+        finally:
+            for tmp in tmp_files:
+                try:
+                    tmp.close()
+                except Exception:
+                    pass
+
     def warmup(self, seconds: float = 1.0, sample_rate: int = 16000) -> None:
-        samples = int(seconds * sample_rate)
-        if samples <= 0:
-            samples = sample_rate // 2
+        samples = int(seconds * sample_rate) or sample_rate // 2
         silence = np.zeros(samples, dtype=np.float32)
         try:
             _ = self.recognize_waveform(silence, sample_rate)

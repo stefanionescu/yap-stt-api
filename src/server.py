@@ -9,7 +9,6 @@ import uuid
 import numpy as np
 from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect, Form, Request
 from pydantic import BaseModel
-import onnxruntime as ort
 
 from .audio import decode_and_resample, DecodedAudio
 from .config import settings
@@ -20,7 +19,7 @@ from .scheduler import MicroBatchScheduler
 
 logger = logging.getLogger("parakeet.server")
 configure_logging()
-app = FastAPI(title="Parakeet ASR (ONNX)")
+app = FastAPI(title="Parakeet ASR (NeMo)")
 
 # Global runtime state
 _model: ParakeetModel | None = None
@@ -35,27 +34,8 @@ class TranscriptionResponse(BaseModel):
 @app.on_event("startup")
 async def on_startup() -> None:
     global _model, _scheduler, _is_ready
-    logger.info("Available ORT providers: %s", ort.get_available_providers())
-    if settings.model_dir:
-        try:
-            import os
-            abs_dir = os.path.abspath(settings.model_dir)
-        except Exception:
-            abs_dir = settings.model_dir  # best-effort
-        logger.info("Using local ONNX: dir=%s name=%s", abs_dir, settings.model_name)
-        _model = ParakeetModel.load_local(
-            settings.model_name,
-            settings.model_dir,
-            require_gpu=settings.require_gpu,
-        )
-    else:
-        logger.info("Using hub id: %s (fallback=%s)", settings.model_id, settings.fallback_model_id)
-        _model = ParakeetModel.load_with_fallback(
-            settings.model_id,
-            settings.fallback_model_id,
-            require_gpu=settings.require_gpu,
-        )
-    logger.info("Model loaded from: %s", _model.model_id)
+    _model = ParakeetModel.load()
+    logger.info("Model loaded: %s", _model.model_id)
     logger.info("Warming up...")
     _model.warmup(seconds=0.5)
     logger.info("Warmup done.")

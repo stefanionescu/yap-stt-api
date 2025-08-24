@@ -11,7 +11,8 @@ TORCH_CACHE_DIR=${TORCH_CACHE_DIR:-"$HOME/.cache/torch"}
 PIP_CACHE_DIR=${PIP_CACHE_DIR:-"$HOME/.cache/pip"}
 VENV_DIR=${VENV_DIR:-".venv"}
 MODELS_DIR_HOST=${MODELS_DIR_HOST:-"models"}
-PARAKEET_MODEL_DIR=${PARAKEET_MODEL_DIR:-"/models/parakeet-fp32"}
+# Legacy var; no longer used
+PARAKEET_MODEL_DIR=${PARAKEET_MODEL_DIR:-""}
 
 # Purge core artifacts by default (no flags needed).
 DO_LOGS=1
@@ -26,31 +27,25 @@ DO_UNINSTALL_TRT=0
 
 usage() {
   cat <<EOF
-Usage: $0 [--logs] [--engines] [--models] [--deps] [--all] [--uninstall-trt]
+Usage: $0 [--logs] [--models] [--deps] [--all]
 
 Stops the FastAPI service and purges logs, caches, dependencies, and local model files.
 
-Defaults: With no flags, purges core artifacts (logs, engines, models, deps).
+Defaults: With no flags, purges core artifacts (logs, models, deps).
 
 Options (for selective purge):
   --logs       Remove logs/ and metrics logs (keeps directory)
-  --engines    Remove TensorRT engine & timing caches (TRT_ENGINE_CACHE, TRT_TIMING_CACHE)
-  --models     Remove onnx-asr model cache (~/.cache/onnx-asr), host ./models, and PARAKEET_MODEL_DIR
+  --models     Remove NeMo/Hugging Face caches (~/.cache) and host ./models
   --deps       Remove local Python venv (.venv) and pip cache (~/.cache/pip)
   --all        Do all of the above (same as no flags)
 
-Additional:
-  --uninstall-trt     Uninstall TensorRT wheels and remove linked libs (requires write perms)
-
 Env:
   PORT (default: 8000)
-  TRT_ENGINE_CACHE (default: /models/trt_cache)
-  TRT_TIMING_CACHE (default: /models/timing.cache)
-  ONNX_ASR_CACHE_DIR (default: ~/.cache/onnx-asr)
+  ONNX_ASR_CACHE_DIR (deprecated)
   PIP_CACHE_DIR (default: ~/.cache/pip)
   VENV_DIR (default: .venv)
   MODELS_DIR_HOST (default: ./models)
-  PARAKEET_MODEL_DIR (default: /models/parakeet-fp32)
+  PARAKEET_MODEL_DIR (deprecated)
 EOF
 }
 
@@ -58,11 +53,9 @@ for arg in "$@"; do
   case "$arg" in
     --help|-h) usage; exit 0 ;;
     --logs) SELECTIVE=1; DO_LOGS=1; DO_ENGINES=0; DO_MODELS=0; DO_DEPS=0 ;;
-    --engines) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=1; DO_MODELS=0; DO_DEPS=0 ;;
     --models) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=0; DO_MODELS=1; DO_DEPS=0 ;;
     --deps) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=0; DO_MODELS=0; DO_DEPS=1 ;;
-    --all) SELECTIVE=0; DO_LOGS=1; DO_ENGINES=1; DO_MODELS=1; DO_DEPS=1 ;;
-    --uninstall-trt) DO_UNINSTALL_TRT=1 ;;
+    --all) SELECTIVE=0; DO_LOGS=1; DO_ENGINES=0; DO_MODELS=1; DO_DEPS=1 ;;
     *) echo "Unknown arg: $arg"; usage; exit 2 ;;
   esac
   shift || true
@@ -130,20 +123,11 @@ if [[ $DO_LOGS -eq 1 ]]; then
   rm -f logs/metrics/*.log* || true
 fi
 
-if [[ $DO_ENGINES -eq 1 ]]; then
-  echo "Purging TensorRT caches..."
-  rm -rf "$TRT_ENGINE_CACHE" || true
-  mkdir -p "$TRT_ENGINE_CACHE"
-  rm -f "$TRT_TIMING_CACHE" || true
-fi
-
 if [[ $DO_MODELS -eq 1 ]]; then
-  echo "Purging onnx-asr model cache at $ONNX_ASR_CACHE_DIR ..."
+  echo "Purging old onnx-asr cache at $ONNX_ASR_CACHE_DIR (if any) ..."
   rm -rf "$ONNX_ASR_CACHE_DIR" || true
-  mkdir -p "$ONNX_ASR_CACHE_DIR"
-  echo "Purging ONNX Runtime cache at $ONNXRUNTIME_CACHE_DIR ..."
+  echo "Purging old ONNX Runtime cache at $ONNXRUNTIME_CACHE_DIR (if any) ..."
   rm -rf "$ONNXRUNTIME_CACHE_DIR" || true
-  mkdir -p "$ONNXRUNTIME_CACHE_DIR"
   echo "Purging Hugging Face cache at $HUGGINGFACE_CACHE_DIR ..."
   rm -rf "$HUGGINGFACE_CACHE_DIR" || true
   mkdir -p "$HUGGINGFACE_CACHE_DIR"
@@ -153,8 +137,7 @@ if [[ $DO_MODELS -eq 1 ]]; then
   echo "Purging host models directory at $MODELS_DIR_HOST ..."
   rm -rf "$MODELS_DIR_HOST" || true
   mkdir -p "$MODELS_DIR_HOST"
-  echo "Purging downloaded model at $PARAKEET_MODEL_DIR ..."
-  rm -rf "$PARAKEET_MODEL_DIR" || true
+  # NeMo downloads checkpoints into Hugging Face cache; no local model dir to purge
 fi
 
 if [[ $DO_DEPS -eq 1 ]]; then
@@ -173,31 +156,6 @@ if [[ -n "${VIRTUAL_ENV:-}" ]]; then
   else
     echo "NOTE: An active virtualenv was detected. To exit it in your current shell, run: deactivate" >&2
   fi
-fi
-
-if [[ $DO_UNINSTALL_TRT -eq 1 ]]; then
-  echo "Uninstalling TensorRT wheels and removing linker configs..."
-  if command -v python3 >/dev/null 2>&1; then
-    python3 -m pip uninstall -y tensorrt-cu12 tensorrt_cu12_libs tensorrt_cu12_bindings || true
-  fi
-  # Remove ld.so config entries created by scripts/install_trt.sh
-  rm -f /etc/ld.so.conf.d/tensorrt-wheel.conf 2>/dev/null || true
-  ldconfig 2>/dev/null || true
-  # Best-effort removal of cached wheel contents under site-packages
-  python3 - <<'PY'
-import sysconfig, glob, shutil, os
-roots = [p for k,p in sysconfig.get_paths().items() if k in ("purelib","platlib") and p]
-names = ("tensorrt_cu12_libs", "tensorrt_cu12_bindings", "tensorrt")
-for root in roots:
-    for nm in names:
-        for path in glob.glob(os.path.join(root, nm+"*")):
-            try:
-                if os.path.isdir(path): shutil.rmtree(path)
-                elif os.path.isfile(path): os.remove(path)
-            except Exception:
-                pass
-print("[purge] TRT wheels removed from site-packages (best effort)")
-PY
 fi
 
 if [[ $DO_APT_CLEAN -eq 1 ]]; then
