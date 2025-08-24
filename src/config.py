@@ -20,7 +20,7 @@ class Settings(BaseSettings):
 
     # Optional post-processing with NeMo punctuation + capitalization model
     enable_punct_capit: bool = os.getenv("PARAKEET_ENABLE_PUNCT_CAPIT", "0") not in ("0", "false", "False")
-    punct_capit_model_id: str = os.getenv("PARAKEET_PUNCT_CAPIT_MODEL_ID", "nvidia/ punctuate_capitalize_english_v1.0")
+    punct_capit_model_id: str = os.getenv("PARAKEET_PUNCT_CAPIT_MODEL_ID", "nvidia/punctuate_capitalize_english_v1.0")
 
     # Concurrency and queuing (micro-batching only)
     queue_max_factor: int = int(os.getenv("PARAKEET_QUEUE_MAX_FACTOR", "2"))

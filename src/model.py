@@ -120,23 +120,25 @@ class ParakeetModel:
             if isinstance(out, (list, tuple)) and len(out) > 0:
                 cand = out[0]
             texts.append(self._extract_text(cand))
-        # Optional punctuation + capitalization
-        if settings.enable_punct_capit:
-            self._maybe_load_punct_model()
-            if self._punct_model is not None and texts:
-                try:
+        # Optional punctuation + capitalization (best-effort; fall back to raw text on any error)
+        if settings.enable_punct_capit and texts:
+            try:
+                self._maybe_load_punct_model()
+                if self._punct_model is not None:
                     with torch.inference_mode():
                         puncted = self._punct_model.add_punctuation_capitalization(texts)  # type: ignore[attr-defined]
-                    # Model returns list[{'punct_pred': text, ...}] or list[str] depending on version
                     processed: List[str] = []
                     for p in puncted:
-                        if isinstance(p, dict) and "punct_pred" in p:
-                            processed.append(str(p["punct_pred"]))
+                        if isinstance(p, dict):
+                            val = p.get("punct_pred") or p.get("text") or ""
+                            processed.append(str(val))
                         else:
                             processed.append(str(p))
-                    return processed
-                except Exception as e:
-                    logger.warning("Punctuation/capitalization failed: %s", e)
+                    # Ensure non-empty; otherwise fall back
+                    if all(isinstance(s, str) and s.strip() for s in processed):
+                        return processed
+            except Exception as e:
+                logger.warning("Punctuation/capitalization failed: %s", e)
         return texts
 
     def _transcribe_paths(self, paths: List[str]) -> List[str]:
