@@ -31,8 +31,10 @@ SAMPLES_DIR = "samples"
 EXTS = {".wav", ".flac", ".ogg", ".mp3"}
 from utils import build_http_multipart, file_to_pcm16_mono_16k, ws_realtime_transcribe, file_duration_seconds
 
-RESULTS_DIR = Path("test/results")
-ERRORS_FILE = RESULTS_DIR / "bench_errors.txt"
+# Anchor results directory relative to this script so it always resolves correctly
+_THIS_DIR = Path(__file__).resolve().parent
+RESULTS_DIR = (_THIS_DIR / "results").resolve()
+ERRORS_FILE = (RESULTS_DIR / "bench_errors.txt").resolve()
 
 
 def find_sample_files() -> List[str]:
@@ -103,7 +105,19 @@ def _split_counts(total: int, workers: int) -> List[int]:
     return [base + (1 if i < rem else 0) for i in range(workers)]
 
 
-async def bench_http(base_url: str, file_paths: List[str], total_reqs: int, concurrency: int, use_pcm: bool, raw: bool, timestamps: bool, read_timeout_s: float) -> tuple[List[Dict[str, float]], int, int]:
+async def bench_http(
+    base_url: str,
+    file_paths: List[str],
+    total_reqs: int,
+    concurrency: int,
+    use_pcm: bool,
+    raw: bool,
+    timestamps: bool,
+    read_timeout_s: float,
+    keepalive_conns: int | None = None,
+    max_conns: int | None = None,
+    http2: bool = True,
+) -> tuple[List[Dict[str, float]], int, int]:
     """Run HTTP benchmark limiting in-flight requests to `concurrency` without worker sharding."""
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     try:
@@ -122,9 +136,15 @@ async def bench_http(base_url: str, file_paths: List[str], total_reqs: int, conc
     file_path = file_paths[0]
 
     transport = httpx.AsyncHTTPTransport(retries=3)
-    limits = httpx.Limits(max_keepalive_connections=max(256, concurrency*2), max_connections=max(512, concurrency*4))
+    computed_keepalive = max(256, concurrency * 2)
+    computed_max = max(512, concurrency * 4)
+    if keepalive_conns is not None:
+        computed_keepalive = keepalive_conns
+    if max_conns is not None:
+        computed_max = max_conns
+    limits = httpx.Limits(max_keepalive_connections=computed_keepalive, max_connections=computed_max)
     timeout = httpx.Timeout(connect=30.0, read=read_timeout_s, write=60.0)
-    async with httpx.AsyncClient(timeout=timeout, transport=transport, limits=limits, http2=True) as client:
+    async with httpx.AsyncClient(timeout=timeout, transport=transport, limits=limits, http2=http2) as client:
         async def one_request(req_idx: int) -> None:
             nonlocal rejected_total, errors_total
             async with sem:
@@ -201,6 +221,9 @@ def main() -> None:
     ap.add_argument("--raw", action="store_true", help="HTTP: send raw body (single-shot) instead of multipart")
     ap.add_argument("--timestamps", action="store_true", help="Request word timestamps in the same transaction (HTTP only)")
     ap.add_argument("--read-timeout", type=float, default=300.0, help="httpx read timeout seconds (increase for long audio)")
+    ap.add_argument("--keepalive", type=int, default=None, help="Override httpx max_keepalive_connections (default scales with concurrency)")
+    ap.add_argument("--max-conns", type=int, default=None, help="Override httpx max_connections (default scales with concurrency)")
+    ap.add_argument("--no-http2", action="store_true", help="Disable HTTP/2 for client (httpx)")
     args = ap.parse_args()
 
     base_url = f"http://{args.host}:{args.port}"
@@ -249,13 +272,39 @@ def main() -> None:
 
         results, rejected, errors = asyncio.run(_ws_bench())
     else:
-        results, rejected, errors = asyncio.run(bench_http(base_url, file_paths, args.n, args.concurrency, not args.no_pcm, args.raw, args.timestamps, args.read_timeout))
+        results, rejected, errors = asyncio.run(
+            bench_http(
+                base_url,
+                file_paths,
+                args.n,
+                args.concurrency,
+                not args.no_pcm,
+                args.raw,
+                args.timestamps,
+                args.read_timeout,
+                keepalive_conns=args.keepalive,
+                max_conns=args.max_conns,
+                http2=not args.no_http2,
+            )
+        )
     elapsed = time.time() - t0
     
     summarize("HTTP Transcription", results)
     print(f"Rejected: {rejected}")
     print(f"Errors: {errors}")
     print(f"Total elapsed: {elapsed:.4f}s")
+    # Surface absolute errors file path and preview last few lines
+    print(f"Errors file: {ERRORS_FILE}")
+    try:
+        if ERRORS_FILE.exists():
+            with open(ERRORS_FILE, "r", encoding="utf-8") as ef:
+                lines = ef.readlines()[-5:]
+            if lines:
+                print("Last errors:")
+                for ln in lines:
+                    print("  " + ln.rstrip())
+    except Exception:
+        pass
     
     if results:
         total_audio = sum(r["audio_s"] for r in results)
