@@ -38,6 +38,23 @@ class ParakeetModel:
             except Exception as e:
                 logger.warning("Failed to configure local attention/chunking: %s", e)
 
+        # Prefer greedy_batch decoding for CTC (same output, faster than greedy)
+        try:
+            # Primary API
+            if hasattr(asr_model, "change_decoding_strategy"):
+                asr_model.change_decoding_strategy(decoding_cfg={"strategy": "greedy_batch"})  # type: ignore[arg-type]
+                logger.info("CTC decoding strategy set to greedy_batch")
+            else:
+                # Fallback: try to tweak cfg and refresh
+                cfg = getattr(asr_model, "cfg", None) or getattr(asr_model, "_cfg", None)
+                if cfg is not None and getattr(cfg, "decoding", None) is not None:
+                    cfg.decoding.strategy = "greedy_batch"  # type: ignore[attr-defined]
+                    if hasattr(asr_model, "change_decoding_strategy"):
+                        asr_model.change_decoding_strategy(cfg.decoding)  # type: ignore[arg-type]
+                    logger.info("CTC decoding strategy set to greedy_batch via cfg")
+        except Exception as e:
+            logger.warning("Could not set decoding strategy to greedy_batch: %s", e)
+
         # Prefer GPU when available
         try:
             if torch.cuda.is_available():

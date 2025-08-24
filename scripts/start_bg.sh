@@ -11,6 +11,14 @@ if [[ ! -f .venv/bin/activate ]]; then
   pip install --upgrade pip
   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121 || true
   pip install -r requirements.txt
+  # Ensure ffmpeg is present on Ubuntu containers (for pydub/ffmpeg decoding)
+  if ! command -v ffmpeg >/dev/null 2>&1; then
+    if command -v apt-get >/dev/null 2>&1; then
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update -y || true
+      apt-get install -y ffmpeg || true
+    fi
+  fi
 else
   source .venv/bin/activate
   python -c "import uvicorn" 2>/dev/null || pip install -r requirements.txt

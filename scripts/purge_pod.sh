@@ -2,10 +2,6 @@
 set -euo pipefail
 
 PORT=${PORT:-8000}
-TRT_ENGINE_CACHE=${TRT_ENGINE_CACHE:-/models/trt_cache}
-TRT_TIMING_CACHE=${TRT_TIMING_CACHE:-/models/timing.cache}
-ONNX_ASR_CACHE_DIR=${ONNX_ASR_CACHE_DIR:-"$HOME/.cache/onnx-asr"}
-ONNXRUNTIME_CACHE_DIR=${ONNXRUNTIME_CACHE_DIR:-"$HOME/.cache/onnxruntime"}
 HUGGINGFACE_CACHE_DIR=${HUGGINGFACE_CACHE_DIR:-"$HOME/.cache/huggingface"}
 TORCH_CACHE_DIR=${TORCH_CACHE_DIR:-"$HOME/.cache/torch"}
 PIP_CACHE_DIR=${PIP_CACHE_DIR:-"$HOME/.cache/pip"}
@@ -13,7 +9,7 @@ VENV_DIR=${VENV_DIR:-".venv"}
 MODELS_DIR_HOST=${MODELS_DIR_HOST:-"models"}
 # Legacy var; no longer used
 PARAKEET_MODEL_DIR=${PARAKEET_MODEL_DIR:-""}
-
+ 
 # Purge core artifacts by default (no flags needed).
 DO_LOGS=1
 DO_ENGINES=1
@@ -41,11 +37,11 @@ Options (for selective purge):
 
 Env:
   PORT (default: 8000)
-  ONNX_ASR_CACHE_DIR (deprecated)
+ 
   PIP_CACHE_DIR (default: ~/.cache/pip)
   VENV_DIR (default: .venv)
   MODELS_DIR_HOST (default: ./models)
-  PARAKEET_MODEL_DIR (deprecated)
+  
 EOF
 }
 
@@ -124,10 +120,6 @@ if [[ $DO_LOGS -eq 1 ]]; then
 fi
 
 if [[ $DO_MODELS -eq 1 ]]; then
-  echo "Purging old onnx-asr cache at $ONNX_ASR_CACHE_DIR (if any) ..."
-  rm -rf "$ONNX_ASR_CACHE_DIR" || true
-  echo "Purging old ONNX Runtime cache at $ONNXRUNTIME_CACHE_DIR (if any) ..."
-  rm -rf "$ONNXRUNTIME_CACHE_DIR" || true
   echo "Purging Hugging Face cache at $HUGGINGFACE_CACHE_DIR ..."
   rm -rf "$HUGGINGFACE_CACHE_DIR" || true
   mkdir -p "$HUGGINGFACE_CACHE_DIR"
@@ -169,7 +161,7 @@ fi
 if [[ $DO_UNINSTALL_SYS_PY -eq 1 ]]; then
   echo "Uninstalling heavy system Python packages (global, not venv)..."
   if command -v pip3 >/dev/null 2>&1; then
-    pip3 uninstall -y onnxruntime-gpu onnxruntime onnx httpx fastapi uvicorn numpy soundfile soxr huggingface_hub || true
+    pip3 uninstall -y httpx fastapi uvicorn numpy soundfile soxr huggingface_hub || true
   fi
 fi
 
