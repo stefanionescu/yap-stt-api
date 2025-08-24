@@ -16,6 +16,7 @@ from .logging_config import configure_logging
 from .metrics import Timer, RequestMetrics, log_request
 from .model import ParakeetModel
 from .scheduler import MicroBatchScheduler
+from .constants import PCM16_BYTES_PER_SAMPLE, PCM_CONTENT_TYPES, WS_EVENT_LIMIT_REACHED
 
 logger = logging.getLogger("parakeet.server")
 configure_logging()
@@ -128,7 +129,7 @@ async def openai_transcribe(
         content_type = (request.headers.get("content-type") or "").lower()
 
     # Accept containerized audio (mp3/ogg/wav/flac/...) and also raw PCM16 mono 16kHz (filename .pcm/.raw or audio/pcm)
-    if filename.endswith((".pcm", ".raw")) or content_type in ("audio/pcm", "audio/l16"):
+    if filename.endswith((".pcm", ".raw")) or content_type in PCM_CONTENT_TYPES:
         try:
             pcm = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
             sr = 16000
@@ -137,8 +138,16 @@ async def openai_transcribe(
             raise HTTPException(status_code=415, detail=f"Invalid PCM payload: {e}")
     else:
         decoded = decode_and_resample(raw)
+    # Trim to max duration instead of rejecting
     if decoded.duration_seconds > settings.max_audio_seconds:
-        raise HTTPException(status_code=413, detail="Audio too long")
+        max_samps = int(settings.max_audio_seconds * decoded.sample_rate)
+        trimmed = decoded.waveform[:max_samps]
+        decoded = DecodedAudio(
+            waveform=trimmed,
+            sample_rate=decoded.sample_rate,
+            duration_seconds=float(len(trimmed) / float(decoded.sample_rate)),
+        )
+        logger.info("Input audio exceeded max duration; trimmed to %.2fs", settings.max_audio_seconds)
 
     # Queue submit
     # If timestamps requested, bypass scheduler and run single inference with timestamps for this request
@@ -175,6 +184,10 @@ async def ws_realtime(ws: WebSocket) -> None:
     await ws.send_json({"type": "session.created", "id": str(uuid.uuid4())})
 
     audio_buf = bytearray()
+    # Cap streaming buffer to first N seconds (PCM16 mono 16k)
+    target_sr = 16000
+    max_bytes_ws = int(settings.max_audio_seconds * target_sr * PCM16_BYTES_PER_SAMPLE)
+    limit_reached = False
 
     try:
         while True:
@@ -191,12 +204,32 @@ async def ws_realtime(ws: WebSocket) -> None:
                     await ws.send_json({"type": "error", "error": "missing_audio_base64"})
                     continue
                 try:
-                    audio_buf.extend(base64.b64decode(b64))
+                    chunk = base64.b64decode(b64)
+                    if len(audio_buf) < max_bytes_ws:
+                        cap = max_bytes_ws - len(audio_buf)
+                        if len(chunk) > cap:
+                            audio_buf.extend(chunk[:cap])
+                            if not limit_reached:
+                                await ws.send_json({
+                                    "type": WS_EVENT_LIMIT_REACHED,
+                                    "max_seconds": float(settings.max_audio_seconds),
+                                })
+                                limit_reached = True
+                        else:
+                            audio_buf.extend(chunk)
+                    else:
+                        if not limit_reached:
+                            await ws.send_json({
+                                "type": WS_EVENT_LIMIT_REACHED,
+                                "max_seconds": float(settings.max_audio_seconds),
+                            })
+                            limit_reached = True
                 except Exception:
                     await ws.send_json({"type": "error", "error": "invalid_base64"})
 
             elif mtype == "input_audio_buffer.clear":
                 audio_buf.clear()
+                limit_reached = False
                 await ws.send_json({"type": "input_audio_buffer.cleared"})
 
             elif mtype == "input_audio_buffer.commit":
@@ -212,6 +245,10 @@ async def ws_realtime(ws: WebSocket) -> None:
                     await ws.send_json({"type": "error", "error": "busy"})
                     continue
                 pcm = np.frombuffer(bytes(audio_buf), dtype=np.int16).astype(np.float32) / 32768.0
+                # Trim to max duration
+                max_samps = int(settings.max_audio_seconds * 16000)
+                if len(pcm) > max_samps:
+                    pcm = pcm[:max_samps]
                 fut = _scheduler.submit(pcm, 16000)
                 try:
                     text, _inf, _q = await asyncio.wait_for(fut, timeout=settings.max_queue_wait_s)

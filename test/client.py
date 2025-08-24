@@ -79,7 +79,7 @@ def _is_runpod_proxy_host(host: str) -> bool:
     return ("proxy.runpod.net" in h) or h.endswith("runpod.net")
 
 
-async def transcribe_file(host: str, port: int, file_path: str, use_https: bool = False, timestamps: bool = False) -> dict:
+async def transcribe_file(host: str, port: int, file_path: str, use_https: bool = False, timestamps: bool = False, max_seconds: float = 180.0) -> dict:
     """Send file to transcription API and return response."""
     # Build URL
     scheme = "https" if use_https else "http"
@@ -122,6 +122,13 @@ async def transcribe_file(host: str, port: int, file_path: str, use_https: bool 
         print(f"\n=== Transcription Result ===")
         print(f"Text: {data.get('text', '')}")
         print(f"Audio duration: {data.get('duration', 0.0):.4f}s")
+        try:
+            dur = float(data.get("duration", 0.0))
+        except Exception:
+            dur = 0.0
+        if dur > max_seconds:
+            print(f"Refusing: duration {dur:.2f}s > max {max_seconds}s")
+            return {}
         print(f"Processing time: {elapsed:.4f}s")
         print(f"Real-time factor: {elapsed / data.get('duration', 1.0):.4f}")
         print(f"Model: {data.get('model', 'unknown')}")
@@ -135,6 +142,12 @@ def parse_args() -> argparse.Namespace:
         "--host",
         default=os.getenv("RUNPOD_TCP_HOST", "localhost"),
         help="API host (defaults to RUNPOD_TCP_HOST or localhost)",
+    )
+    parser.add_argument(
+        "--max-seconds",
+        type=float,
+        default=180.0,
+        help="Reject if duration exceeds this many seconds",
     )
     parser.add_argument(
         "--port",
@@ -186,7 +199,7 @@ def main() -> None:
     use_https = args.https or use_https_from_scheme or _is_runpod_proxy_host(clean_host)
     
     try:
-        result = asyncio.run(transcribe_file(clean_host, args.port, file_path, use_https, args.timestamps))
+        result = asyncio.run(transcribe_file(clean_host, args.port, file_path, use_https, args.timestamps, args.max_seconds))
         if not result:
             sys.exit(1)
     except KeyboardInterrupt:

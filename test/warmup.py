@@ -40,6 +40,7 @@ def find_sample_file(samples_dir: str, filename: str = "") -> str | None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--file", type=str, default="mid.wav", help="Filename in samples/ directory (e.g., mid.wav, long.mp3)")
+    parser.add_argument("--max-seconds", type=float, default=180.0, help="Reject if duration exceeds this many seconds")
     parser.add_argument("--url", type=str, default="http://127.0.0.1:8000")
     parser.add_argument("--ws", action="store_true", help="Use WebSocket /v1/realtime instead of HTTP")
     parser.add_argument("--no-pcm", action="store_true", help="Send original file (disable PCM mode) for HTTP")
@@ -122,7 +123,10 @@ def main() -> int:
             xrt = 1.0 / rtf
             print(f"RTF: {rtf:.4f}  xRT: {xrt:.2f}x")
 
-    # Single-transaction result already contains words if available (HTTP path)
+    # Enforce max duration on client side as well
+    if duration > args.max_seconds:
+        print(f"Refusing to save result: audio longer than {args.max_seconds}s")
+        return 3
 
     # Write result to test/results/warmup.txt (overwrite)
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
