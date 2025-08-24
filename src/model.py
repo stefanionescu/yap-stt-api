@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import tempfile
 from dataclasses import dataclass
-from typing import List
+from typing import List, Any
 
 import numpy as np
 import soundfile as sf
@@ -59,6 +59,13 @@ class ParakeetModel:
         try:
             if torch.cuda.is_available():
                 asr_model = asr_model.to(torch.device("cuda"))  # type: ignore[assignment]
+                # Enable TF32 for faster matmul on Ampere+ GPUs
+                try:
+                    torch.backends.cuda.matmul.allow_tf32 = True  # type: ignore[attr-defined]
+                    if hasattr(torch, "set_float32_matmul_precision"):
+                        torch.set_float32_matmul_precision("high")  # type: ignore[attr-defined]
+                except Exception:
+                    pass
                 logger.info("ASR model moved to CUDA")
         except Exception as e:
             logger.warning("Could not move model to CUDA: %s", e)
@@ -72,14 +79,44 @@ class ParakeetModel:
 
         return cls(model_id=settings.model_id, _model=asr_model)
 
-    def _transcribe_paths(self, paths: List[str]) -> List[str]:
+    def _extract_text(self, item: Any) -> str:
+        # Handle NeMo Hypothesis objects, dicts, or plain strings
         try:
-            texts = self._model.transcribe(paths)
-        except TypeError:
-            # Some NeMo versions use keyword paths2audio_files
-            texts = self._model.transcribe(paths2audio_files=paths)  # type: ignore[call-arg]
-        # Ensure list[str]
-        return [str(t) for t in texts]
+            if hasattr(item, "text"):
+                return str(getattr(item, "text"))
+            if isinstance(item, dict) and "text" in item:
+                return str(item.get("text", ""))
+            return str(item)
+        except Exception:
+            return str(item)
+
+    def _normalize_outputs(self, outputs: Any) -> List[str]:
+        # NeMo may return list[str], list[Hypothesis], or list[list[Hypothesis]]
+        texts: List[str] = []
+        for out in outputs:
+            cand = out
+            if isinstance(out, (list, tuple)) and len(out) > 0:
+                cand = out[0]
+            texts.append(self._extract_text(cand))
+        return texts
+
+    def _transcribe_paths(self, paths: List[str]) -> List[str]:
+        with torch.inference_mode():
+            try:
+                # Prefer batched transcription without progress bar; keep workers=0 to reduce overhead
+                outputs = self._model.transcribe(
+                    paths,
+                    batch_size=len(paths),
+                    num_workers=0,
+                    verbose=False,
+                )
+            except TypeError:
+                # Some NeMo versions use keyword paths2audio_files
+                try:
+                    outputs = self._model.transcribe(paths2audio_files=paths, batch_size=len(paths), num_workers=0, verbose=False)  # type: ignore[call-arg]
+                except TypeError:
+                    outputs = self._model.transcribe(paths2audio_files=paths)  # type: ignore[call-arg]
+        return self._normalize_outputs(outputs)
 
     def recognize_waveform(self, waveform: np.ndarray, sample_rate: int) -> str:
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as tmp:

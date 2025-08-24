@@ -21,6 +21,9 @@ bash scripts/start_bg.sh && bash scripts/tail_bg_logs.sh
 # Test once (from pod)
 source .venv/bin/activate 2>/dev/null || true
 python3 test/warmup.py
+
+# Inspect saved transcription JSON (written by warmup.py)
+cat test/results/warmup.txt
 ```
 
 Defaults: `PARAKEET_MODEL_ID=nvidia/parakeet-ctc-0.6b`, `PARAKEET_USE_LOCAL_ATTENTION=1`, `PARAKEET_LOCAL_ATTENTION_CONTEXT=128`.
