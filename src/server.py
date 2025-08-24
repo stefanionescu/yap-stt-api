@@ -160,14 +160,20 @@ async def openai_transcribe(
             logger.warning("timestamps path failed, falling back: %s", e)
 
     fut = _scheduler.submit(decoded.waveform, decoded.sample_rate)
+    
+    # Duration-aware inference timeout budget
+    exp_infer = (decoded.duration_seconds / settings.expected_xrt_min) * settings.infer_timeout_safety
+    exp_infer = min(exp_infer, settings.infer_timeout_cap_s)
+    total_timeout = settings.max_queue_wait_s + exp_infer
+    
     try:
         text, _inference_dt, _queue_wait_s = await asyncio.wait_for(
-            fut, timeout=settings.max_queue_wait_s
+            fut, timeout=total_timeout
         )  # type: ignore[misc]
     except asyncio.TimeoutError:
         if not fut.done():
             fut.cancel()
-        raise HTTPException(status_code=503, detail="Queue wait timeout")
+        raise HTTPException(status_code=503, detail="inference_timeout")
 
     return TranscriptionResponse(text=text)
 
@@ -249,11 +255,20 @@ async def ws_realtime(ws: WebSocket) -> None:
                 max_samps = int(settings.max_audio_seconds * 16000)
                 if len(pcm) > max_samps:
                     pcm = pcm[:max_samps]
+                
                 fut = _scheduler.submit(pcm, 16000)
+                
+                # Duration-aware inference timeout budget
+                # Calculate seconds from PCM @16kHz mono
+                secs = len(pcm) / 16000.0
+                exp_infer = (secs / settings.expected_xrt_min) * settings.infer_timeout_safety
+                exp_infer = min(exp_infer, settings.infer_timeout_cap_s)
+                total_timeout = settings.max_queue_wait_s + exp_infer
+                
                 try:
-                    text, _inf, _q = await asyncio.wait_for(fut, timeout=settings.max_queue_wait_s)
+                    text, _inf, _q = await asyncio.wait_for(fut, timeout=total_timeout)
                 except asyncio.TimeoutError:
-                    await ws.send_json({"type": "error", "error": "queue_timeout"})
+                    await ws.send_json({"type": "error", "error": "inference_timeout"})
                     continue
 
                 await ws.send_json({"type": "response.output_text.delta", "delta": text})

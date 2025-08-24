@@ -58,12 +58,12 @@ def main() -> int:
         from utils import file_to_pcm16_mono_16k
         import asyncio
         pcm = file_to_pcm16_mono_16k(file_path)
-        from utils import ws_realtime_transcribe, to_ws_url
+        from utils import ws_realtime_transcribe_with_ttfw, to_ws_url
         ws_url = to_ws_url(args.url)
         t0 = time.perf_counter()
-        text = asyncio.run(ws_realtime_transcribe(ws_url, pcm))
+        text, ttfw_s = asyncio.run(ws_realtime_transcribe_with_ttfw(ws_url, pcm))
         elapsed_s = time.perf_counter() - t0
-        data = {"text": text}
+        data = {"text": text, "ttfw_s": ttfw_s}
     else:
         # HTTP multipart; optionally send audio/pcm
         url = args.url.rstrip("/") + "/v1/audio/transcribe"
@@ -75,14 +75,27 @@ def main() -> int:
                 t0 = time.perf_counter()
                 # Optionally request words+timestamps in the same transaction
                 q = "?timestamps=1" if args.timestamps else ""
+                
+                # Use streaming to detect time to first response byte
                 if args.raw:
                     headers = {"content-type": ctype}
-                    r = client.post(url + q, content=content, headers=headers)
+                    with client.stream("POST", url + q, content=content, headers=headers) as r:
+                        ttfw_s = time.perf_counter() - t0  # Record time to first response byte
+                        response_content = r.read()
                 else:
                     files = {"file": (fname, content, ctype)}
-                    r = client.post(url + q, files=files)
+                    with client.stream("POST", url + q, files=files) as r:
+                        ttfw_s = time.perf_counter() - t0  # Record time to first response byte
+                        response_content = r.read()
+                
                 r.raise_for_status()
-                data = r.json()
+                try:
+                    import json
+                    data = json.loads(response_content.decode('utf-8'))
+                    data["ttfw_s"] = ttfw_s  # Add TTFW to response data
+                except Exception as e:
+                    print(f"JSON decode error: {e}")
+                    return 1
                 elapsed_s = time.perf_counter() - t0
             except httpx.HTTPStatusError as e:
                 resp = e.response
@@ -117,6 +130,12 @@ def main() -> int:
     
     print(f"Audio duration: {duration:.4f}s")
     print(f"Transcription time: {elapsed_s:.4f}s")
+    
+    # Print time to first word if available
+    ttfw = data.get("ttfw_s", 0.0)
+    if ttfw > 0:
+        print(f"Time to first word: {ttfw:.4f}s")
+    
     if duration and duration > 0 and elapsed_s > 0:
         rtf = elapsed_s / float(duration)
         if rtf > 0:

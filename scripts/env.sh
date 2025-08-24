@@ -1,14 +1,20 @@
 #!/usr/bin/env bash
-# Default environment for Parakeet service. Edit as needed.
+# High-performance environment for Parakeet ASR service.
+# Optimized for high concurrency (100+ requests) with mixed short/long audio.
 
 export HOST=${HOST:-0.0.0.0}
 export PORT=${PORT:-8000}
 
-# GPU + scheduling
-export PARAKEET_QUEUE_MAX_FACTOR=${PARAKEET_QUEUE_MAX_FACTOR:-32}
-export PARAKEET_MAX_QUEUE_WAIT_S=${PARAKEET_MAX_QUEUE_WAIT_S:-2}
-export PARAKEET_MICROBATCH_WINDOW_MS=${PARAKEET_MICROBATCH_WINDOW_MS:-8}
-export PARAKEET_MICROBATCH_MAX_BATCH=${PARAKEET_MICROBATCH_MAX_BATCH:-100}
+# GPU + scheduling (optimized for high concurrency + mixed short/long audio)
+export PARAKEET_QUEUE_MAX_FACTOR=${PARAKEET_QUEUE_MAX_FACTOR:-64}
+export PARAKEET_MAX_QUEUE_WAIT_S=${PARAKEET_MAX_QUEUE_WAIT_S:-10}
+export PARAKEET_MICROBATCH_WINDOW_MS=${PARAKEET_MICROBATCH_WINDOW_MS:-15}
+export PARAKEET_MICROBATCH_MAX_BATCH=${PARAKEET_MICROBATCH_MAX_BATCH:-64}
+
+# Duration-aware inference timeout system (for long audio at high concurrency)
+export PARAKEET_EXPECTED_XRT_MIN=${PARAKEET_EXPECTED_XRT_MIN:-1.3}
+export PARAKEET_INFER_TIMEOUT_SAFETY=${PARAKEET_INFER_TIMEOUT_SAFETY:-1.7}
+export PARAKEET_INFER_TIMEOUT_CAP_S=${PARAKEET_INFER_TIMEOUT_CAP_S:-360}
 
 # Limits
 # Max single-audio duration (seconds). Extra audio is ignored (trimmed).
@@ -26,8 +32,8 @@ export PARAKEET_DEVICE_ID=${PARAKEET_DEVICE_ID:-0}
 if [[ -z "${CUDA_VISIBLE_DEVICES:-}" ]]; then export CUDA_VISIBLE_DEVICES="${PARAKEET_DEVICE_ID}"; fi
 export HF_HUB_ENABLE_HF_TRANSFER=${HF_HUB_ENABLE_HF_TRANSFER:-1}
 
-# ASR perf knobs
-export PARAKEET_ASR_BATCH_SIZE=${PARAKEET_ASR_BATCH_SIZE:-100}
+# ASR perf knobs (optimized for high concurrency + GPU utilization)
+export PARAKEET_ASR_BATCH_SIZE=${PARAKEET_ASR_BATCH_SIZE:-64}
 export PARAKEET_ASR_NUM_WORKERS=${PARAKEET_ASR_NUM_WORKERS:-0}
 export PARAKEET_USE_AUTOCAST=${PARAKEET_USE_AUTOCAST:-1}
 export PARAKEET_AUTOCAST_DTYPE=${PARAKEET_AUTOCAST_DTYPE:-float16}

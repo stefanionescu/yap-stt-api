@@ -16,6 +16,7 @@ Reads RUNPOD_TCP_HOST and RUNPOD_TCP_PORT from .env by default.
 Prints the full transcribed text to console.
 """
 import argparse
+import asyncio
 import os
 import sys
 import time
@@ -104,20 +105,34 @@ async def transcribe_file(host: str, port: int, file_path: str, use_https: bool 
         headers["Authorization"] = f"Bearer {api_key}"
     
     t0 = time.time()
+    ttfw = 0.0  # Time to first word
     
     async with httpx.AsyncClient(timeout=120.0, headers=headers) as client:
         with open(file_path, "rb") as f:
             files = {"file": (os.path.basename(file_path), f, "application/octet-stream")}
             q = "?timestamps=1" if timestamps else ""
-            response = await client.post(url + q, files=files)
+            
+            # Use streaming to detect time to first response byte
+            async with client.stream("POST", url + q, files=files) as response:
+                ttfw = time.time() - t0  # Record time to first response byte
+                response_content = await response.aread()
         
         elapsed = time.time() - t0
         
         if response.status_code != 200:
-            print(f"Error {response.status_code}: {response.text}")
+            try:
+                error_text = response_content.decode('utf-8', errors='replace')
+            except:
+                error_text = "<unable to decode response>"
+            print(f"Error {response.status_code}: {error_text}")
             return {}
         
-        data = response.json()
+        try:
+            import json
+            data = json.loads(response_content.decode('utf-8'))
+        except Exception as e:
+            print(f"JSON decode error: {e}")
+            return {}
         
         print(f"\n=== Transcription Result ===")
         print(f"Text: {data.get('text', '')}")
@@ -130,6 +145,7 @@ async def transcribe_file(host: str, port: int, file_path: str, use_https: bool 
             print(f"Refusing: duration {dur:.2f}s > max {max_seconds}s")
             return {}
         print(f"Processing time: {elapsed:.4f}s")
+        print(f"Time to first word: {ttfw:.4f}s")
         print(f"Real-time factor: {elapsed / data.get('duration', 1.0):.4f}")
         print(f"Model: {data.get('model', 'unknown')}")
         
