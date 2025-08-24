@@ -61,7 +61,7 @@ def main() -> int:
         t0 = time.perf_counter()
         text = asyncio.run(ws_realtime_transcribe(ws_url, pcm))
         elapsed_s = time.perf_counter() - t0
-        data = {"text": text, "duration": 0.0, "sample_rate": 16000, "model": ""}
+        data = {"text": text}
     else:
         # HTTP multipart; optionally send audio/pcm
         url = args.url.rstrip("/") + "/v1/audio/transcriptions"
@@ -96,7 +96,14 @@ def main() -> int:
 
     # Console print: first 50 characters or fallback message
     text = str((data.get("text") or "")).strip()
-    duration = data.get("duration", 0.0)
+    # Prefer server-provided duration; fallback to local file duration
+    try:
+        duration = float(data.get("duration")) if isinstance(data.get("duration"), (int, float, str)) else 0.0
+    except Exception:
+        duration = 0.0
+    if not duration or duration <= 0:
+        from utils import file_duration_seconds
+        duration = file_duration_seconds(file_path)
     
     if text:
         snippet = text[:50]
