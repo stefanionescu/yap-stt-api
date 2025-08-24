@@ -7,8 +7,8 @@ soxr==0.3.7
 httpx==0.27.0
 pydantic==2.8.2
 pydantic-settings==2.4.0
-# NeMo ASR stack
+# NeMo ASR/NLP stack
 cython>=0.29.36
 torch>=2.1.0
 torchaudio>=2.1.0
-nemo_toolkit[asr]>=2.0.0
+nemo_toolkit[asr,nlp]>=2.0.0

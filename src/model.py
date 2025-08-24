@@ -10,6 +10,7 @@ import logging
 import torch
 
 import nemo.collections.asr as nemo_asr
+import nemo.collections.nlp as nemo_nlp
 
 from .config import settings
 
@@ -20,6 +21,7 @@ logger = logging.getLogger("parakeet.model")
 class ParakeetModel:
     model_id: str
     _model: nemo_asr.models.ASRModel
+    _punct_model: object | None = None
 
     @classmethod
     def load(cls) -> "ParakeetModel":
@@ -78,6 +80,24 @@ class ParakeetModel:
             pass
 
         return cls(model_id=settings.model_id, _model=asr_model)
+    
+    def _maybe_load_punct_model(self) -> None:
+        if not settings.enable_punct_capit:
+            return
+        if self._punct_model is not None:
+            return
+        try:
+            logger.info("Loading NeMo punctuation/capitalization model: %s", settings.punct_capit_model_id)
+            self._punct_model = nemo_nlp.models.PunctuationCapitalizationModel.from_pretrained(
+                model_name=settings.punct_capit_model_id
+            )
+            try:
+                if torch.cuda.is_available():
+                    self._punct_model = self._punct_model.to(torch.device("cuda"))  # type: ignore[assignment]
+            except Exception:
+                pass
+        except Exception as e:
+            logger.warning("Failed to load punctuation/capitalization model: %s", e)
 
     def _extract_text(self, item: Any) -> str:
         # Handle NeMo Hypothesis objects, dicts, or plain strings
@@ -98,6 +118,23 @@ class ParakeetModel:
             if isinstance(out, (list, tuple)) and len(out) > 0:
                 cand = out[0]
             texts.append(self._extract_text(cand))
+        # Optional punctuation + capitalization
+        if settings.enable_punct_capit:
+            self._maybe_load_punct_model()
+            if self._punct_model is not None and texts:
+                try:
+                    with torch.inference_mode():
+                        puncted = self._punct_model.add_punctuation_capitalization(texts)  # type: ignore[attr-defined]
+                    # Model returns list[{'punct_pred': text, ...}] or list[str] depending on version
+                    processed: List[str] = []
+                    for p in puncted:
+                        if isinstance(p, dict) and "punct_pred" in p:
+                            processed.append(str(p["punct_pred"]))
+                        else:
+                            processed.append(str(p))
+                    return processed
+                except Exception as e:
+                    logger.warning("Punctuation/capitalization failed: %s", e)
         return texts
 
     def _transcribe_paths(self, paths: List[str]) -> List[str]:
