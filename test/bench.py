@@ -56,15 +56,14 @@ def find_sample_by_name(filename: str) -> str | None:
     return None
 
 
-def _metrics(audio_duration_s: float, wall_s: float, queue_wait_s: float = 0.0) -> Dict[str, float]:
-    """Compute transcription metrics."""
+def _metrics(audio_duration_s: float, wall_s: float) -> Dict[str, float]:
+    """Compute transcription metrics (queue wait not tracked by API)."""
     rtf = wall_s / audio_duration_s if audio_duration_s > 0 else float("inf")  # Real-time factor
     xrt = audio_duration_s / wall_s if wall_s > 0 else 0.0  # Times real-time
     throughput_min_per_min = audio_duration_s / wall_s if wall_s > 0 else 0.0  # Minutes of audio per minute of wall time
     return {
         "wall_s": wall_s,
         "audio_s": audio_duration_s,
-        "queue_wait_s": queue_wait_s,
         "rtf": rtf,
         "xrt": xrt,
         "throughput_min_per_min": throughput_min_per_min,
@@ -79,7 +78,6 @@ def summarize(title: str, results: List[Dict[str, float]]) -> None:
     
     wall = [r["wall_s"] for r in results]
     audio = [r["audio_s"] for r in results]
-    queue_wait = [r.get("queue_wait_s", 0.0) for r in results]
     rtf = [r["rtf"] for r in results]
     xrt = [r["xrt"] for r in results]
     throughput = [r["throughput_min_per_min"] for r in results]
@@ -93,7 +91,6 @@ def summarize(title: str, results: List[Dict[str, float]]) -> None:
     print(f"n={n}")
     print(f"Wall s      | avg={stats.mean(wall):.4f}  p50={stats.median(wall):.4f}  p95={p(wall,0.95):.4f}")
     print(f"Audio s     | avg={stats.mean(audio):.4f}")
-    print(f"Queue wait s| avg={stats.mean(queue_wait):.4f}  p95={p(queue_wait,0.95):.4f}")
     print(f"RTF         | avg={stats.mean(rtf):.4f}  p50={stats.median(rtf):.4f}  p95={p(rtf,0.95):.4f}")
     print(f"xRT         | avg={stats.mean(xrt):.4f}")
     print(f"Throughput  | avg={stats.mean(throughput):.2f} min/min")
