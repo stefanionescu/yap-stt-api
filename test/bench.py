@@ -14,9 +14,7 @@ Host/port default to localhost:8000; override with --host/--port.
 """
 import argparse
 import asyncio
-import json
 import os
-import random
 import statistics as stats
 import time
 from pathlib import Path
@@ -148,9 +146,10 @@ async def _http_worker(
                         msg = response.text
                     except Exception:
                         msg = "<no body>"
+                    sanitized = (msg[:300]).replace("\n", " ")
                     line = (
                         f"[{datetime.utcnow().isoformat()}Z] worker={worker_id} req={i+1} "
-                        f"HTTP {response.status_code} body={msg[:300].replace('\n',' ')}"
+                        f"HTTP {response.status_code} body={sanitized}"
                     )
                     async with error_lock:
                         try:
@@ -179,9 +178,10 @@ async def _http_worker(
                 errors += 1
                 print(f"    Worker {worker_id}: Request {i+1} exception: {e}")
                 # Log exception to bench_errors.txt
+                exc_text = (str(e)[:300]).replace("\n", " ")
                 line = (
                     f"[{datetime.utcnow().isoformat()}Z] worker={worker_id} req={i+1} "
-                    f"EXC {type(e).__name__}: {str(e)[:300].replace('\n',' ')}"
+                    f"EXC {type(e).__name__}: {exc_text}"
                 )
                 async with error_lock:
                     try:
