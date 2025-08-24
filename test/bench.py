@@ -199,7 +199,7 @@ def _split_counts(total: int, workers: int) -> List[int]:
     return [base + (1 if i < rem else 0) for i in range(workers)]
 
 
-async def bench_http(base_url: str, file_paths: List[str], total_reqs: int, concurrency: int, use_pcm: bool, raw: bool, timestamps: bool) -> tuple[List[Dict[str, float]], int, int]:
+async def bench_http(base_url: str, file_paths: List[str], total_reqs: int, concurrency: int, use_pcm: bool, raw: bool, timestamps: bool, read_timeout_s: float) -> tuple[List[Dict[str, float]], int, int]:
     """Run HTTP benchmark limiting in-flight requests to `concurrency` without worker sharding."""
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     try:
@@ -219,7 +219,8 @@ async def bench_http(base_url: str, file_paths: List[str], total_reqs: int, conc
 
     transport = httpx.AsyncHTTPTransport(retries=3)
     limits = httpx.Limits(max_keepalive_connections=max(256, concurrency*2), max_connections=max(512, concurrency*4))
-    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=30.0, write=30.0, connect=30.0), transport=transport, limits=limits, http2=True) as client:
+    timeout = httpx.Timeout(connect=30.0, read=read_timeout_s, write=60.0)
+    async with httpx.AsyncClient(timeout=timeout, transport=transport, limits=limits, http2=True) as client:
         async def one_request(req_idx: int) -> None:
             nonlocal rejected_total, errors_total
             async with sem:
@@ -295,6 +296,7 @@ def main() -> None:
     ap.add_argument("--ws", action="store_true", help="Use WebSocket realtime instead of HTTP")
     ap.add_argument("--raw", action="store_true", help="HTTP: send raw body (single-shot) instead of multipart")
     ap.add_argument("--timestamps", action="store_true", help="Request word timestamps in the same transaction (HTTP only)")
+    ap.add_argument("--read-timeout", type=float, default=300.0, help="httpx read timeout seconds (increase for long audio)")
     args = ap.parse_args()
 
     base_url = f"http://{args.host}:{args.port}"
@@ -343,7 +345,7 @@ def main() -> None:
 
         results, rejected, errors = asyncio.run(_ws_bench())
     else:
-        results, rejected, errors = asyncio.run(bench_http(base_url, file_paths, args.n, args.concurrency, not args.no_pcm, args.raw, args.timestamps))
+        results, rejected, errors = asyncio.run(bench_http(base_url, file_paths, args.n, args.concurrency, not args.no_pcm, args.raw, args.timestamps, args.read_timeout))
     elapsed = time.time() - t0
     
     summarize("HTTP Transcription", results)
