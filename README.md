@@ -27,7 +27,7 @@ bash scripts/start_bg.sh && bash scripts/tail_bg_logs.sh
 
 # 4) Test once (from pod)
 source .venv/bin/activate 2>/dev/null || true
-python3 test/warmup.py --file long.mp3
+python3 test/warmup.py
 ```
 
 Defaults: `PARAKEET_MODEL_DIR=./models/parakeet-fp32`, `PARAKEET_USE_TENSORRT=1`.

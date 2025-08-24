@@ -30,7 +30,7 @@ sys.path.append(str(Path(__file__).resolve().parent))
 
 SAMPLES_DIR = "samples"
 EXTS = {".wav", ".flac", ".ogg", ".mp3"}
-from utils import build_http_multipart, file_to_pcm16_mono_16k, ws_realtime_transcribe
+from utils import build_http_multipart, file_to_pcm16_mono_16k, ws_realtime_transcribe, file_duration_seconds
 
 
 def find_sample_files() -> List[str]:
@@ -139,7 +139,12 @@ async def _http_worker(
                     continue
                 
                 data = response.json()
-                audio_duration = data.get("duration", 0.0)
+                try:
+                    audio_duration = float(data.get("duration"))
+                except Exception:
+                    audio_duration = 0.0
+                if not audio_duration or audio_duration <= 0:
+                    audio_duration = file_duration_seconds(file_path)
                 
                 # Note: we don't get queue_wait_s from the API response in this version
                 # but we could extract it from metrics logs later if needed
