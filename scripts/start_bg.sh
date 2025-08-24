@@ -25,6 +25,6 @@ else
 fi
 
 # Launch using venv python to ensure correct interpreter
-nohup python -m uvicorn src.server:app --host "${HOST:-0.0.0.0}" --port "${PORT:-8000}" --loop uvloop --http httptools --timeout-keep-alive 120 \
+nohup python -m uvicorn src.server:app --host "${HOST:-0.0.0.0}" --port "${PORT:-8000}" --loop uvloop --http httptools --timeout-keep-alive 120 --backlog 1024 \
   > logs/server.log 2>&1 & echo $! > logs/server.pid
 echo "Started with PID $(cat logs/server.pid). Logs: logs/server.log"

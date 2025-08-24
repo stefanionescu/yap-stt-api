@@ -217,9 +217,9 @@ async def bench_http(base_url: str, file_paths: List[str], total_reqs: int, conc
     url = base_url.rstrip("/") + "/v1/audio/transcribe"
     file_path = file_paths[0]
 
-    transport = httpx.AsyncHTTPTransport(retries=2)
-    limits = httpx.Limits(max_keepalive_connections=max(64, concurrency), max_connections=max(128, concurrency * 2))
-    async with httpx.AsyncClient(timeout=120.0, transport=transport, limits=limits) as client:
+    transport = httpx.AsyncHTTPTransport(retries=3)
+    limits = httpx.Limits(max_keepalive_connections=max(256, concurrency*2), max_connections=max(512, concurrency*4))
+    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=30.0, write=30.0, connect=30.0), transport=transport, limits=limits, http2=True) as client:
         async def one_request(req_idx: int) -> None:
             nonlocal rejected_total, errors_total
             async with sem:

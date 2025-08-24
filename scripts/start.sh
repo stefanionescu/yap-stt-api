@@ -27,4 +27,4 @@ else
   python -c "import uvicorn" 2>/dev/null || pip install -r requirements.txt
 fi
 
-exec python -m uvicorn src.server:app --host "${HOST:-0.0.0.0}" --port "${PORT:-8000}" --loop uvloop --http httptools --timeout-keep-alive 120
+exec python -m uvicorn src.server:app --host "${HOST:-0.0.0.0}" --port "${PORT:-8000}" --loop uvloop --http httptools --timeout-keep-alive 120 --backlog 1024

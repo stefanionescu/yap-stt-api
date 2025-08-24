@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     subsampling_chunking_factor: int = int(os.getenv("PARAKEET_SUBSAMPLING_CHUNKING_FACTOR", "1"))
 
     # Concurrency and queuing (micro-batching only)
-    queue_max_factor: int = int(os.getenv("PARAKEET_QUEUE_MAX_FACTOR", "2"))
+    queue_max_factor: int = int(os.getenv("PARAKEET_QUEUE_MAX_FACTOR", "32"))
     max_queue_wait_s: float = float(os.getenv("PARAKEET_MAX_QUEUE_WAIT_S", "30"))
 
     # Micro-batching (server-level)
