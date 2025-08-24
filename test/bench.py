@@ -117,7 +117,9 @@ async def _http_worker(
     url = base_url.rstrip("/") + "/v1/audio/transcriptions"
     file_path = file_paths[0]  # Use the single specified file
     
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    transport = httpx.AsyncHTTPTransport(retries=2)
+    limits = httpx.Limits(max_keepalive_connections=64, max_connections=128)
+    async with httpx.AsyncClient(timeout=120.0, transport=transport, limits=limits) as client:
         for i in range(requests_count):
             
             t0 = time.time()
