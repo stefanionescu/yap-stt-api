@@ -161,43 +161,71 @@ async def ws_realtime_transcribe(url: str, pcm16_bytes: bytes, frame_ms: int = 4
 
 
 async def ws_realtime_transcribe_with_ttfw(url: str, pcm16_bytes: bytes, frame_ms: int = 40) -> tuple[str, float]:
-    """Stream PCM16 mono 16 kHz bytes to WS /v1/realtime and return (text, ttfw_seconds).
-    
-    Returns both the transcribed text and time-to-first-word in seconds.
-    Requires the `websockets` package.
     """
+    Simulate Pipecat's OpenAI Realtime WS client:
+      - Send Sec-WebSocket-Protocol: openai-realtime
+      - Send OpenAI-Beta: realtime=v1 (+ dummy Authorization)
+      - Send session.update with modalities=['text'], input_audio_format='pcm16'
+      - Stream base64 PCM16@16k via input_audio_buffer.append
+      - Commit then response.create
+      - Read response.output_text.delta ... response.completed
+    """
+    import asyncio, base64, json, time
     try:
         import websockets
     except ImportError as e:
-        raise RuntimeError("websockets package is required for WS tests: pip install websockets") from e
-    import time
+        raise RuntimeError("pip install websockets") from e
+
+    # Normalize scheme
+    if url.startswith("http://"):  url = "ws://"  + url[len("http://"):]
+    elif url.startswith("https://"): url = "wss://" + url[len("https://"):]
     
+    headers = [
+        ("OpenAI-Beta", "realtime=v1"),
+        ("Authorization", "Bearer local-dev"),
+    ]
+
     bytes_per_sample = 2
     samples_per_frame = int(TARGET_SR * (frame_ms / 1000.0))
     bytes_per_frame = samples_per_frame * bytes_per_sample
 
-    # Ensure ws/wss scheme
-    if url.startswith("http://"):
-        url = "ws://" + url[len("http://"):]
-    elif url.startswith("https://"):
-        url = "wss://" + url[len("https://"):]
-    
-    ttfw = 0.0  # Time to first word
-    
-    async with websockets.connect(url, max_size=None) as ws:
-        # Best-effort consume session.created if sent
-        try:
-            greeting = await ws.recv()
+    async with websockets.connect(
+        url,
+        max_size=None,
+        compression=None,
+        subprotocols=["openai-realtime","realtime"],
+        extra_headers=headers,
+        ping_interval=20,
+        ping_timeout=20,
+        open_timeout=10,
+        close_timeout=10,
+    ) as ws:
+        # Optional: verify the server echoed a realtime subprotocol
+        if ws.subprotocol not in ("openai-realtime", "realtime"):
             try:
-                import json as _json
-                obj = _json.loads(greeting)
-                if not isinstance(obj, dict) or obj.get("type") != "session.created":
-                    # Not a session.created; ignore
-                    pass
+                print(f"warning: server did not echo realtime subprotocol (got {ws.subprotocol!r})")
+            except Exception:
+                pass
+
+        # Consume session.created if sent
+        try:
+            raw0 = await asyncio.wait_for(ws.recv(), timeout=2.0)
+            try:
+                _ = json.loads(raw0)
             except Exception:
                 pass
         except Exception:
             pass
+
+        # Pipecat sends session.update right away
+        await ws.send(json.dumps({
+            "type": "session.update",
+            "session": {
+                "modalities": ["text"],
+                "input_audio_format": "pcm16",
+                "turn_detection": False
+            }
+        }))
 
         # Stream frames
         for i in range(0, len(pcm16_bytes), bytes_per_frame):
@@ -205,17 +233,17 @@ async def ws_realtime_transcribe_with_ttfw(url: str, pcm16_bytes: bytes, frame_m
             if not chunk:
                 break
             b64 = base64.b64encode(chunk).decode("ascii")
-            await ws.send(f'{"{"}"type":"input_audio_buffer.append","audio":"{b64}"{"}"}')
+            await ws.send(json.dumps({"type":"input_audio_buffer.append", "audio": b64}))
 
         # Commit and request response
-        await ws.send('{"type":"input_audio_buffer.commit"}')
-        t_request = time.time()  # Mark when we request the response
-        await ws.send('{"type":"response.create"}')
+        await ws.send(json.dumps({"type": "input_audio_buffer.commit"}))
+        t_request = time.time()
+        await ws.send(json.dumps({"type": "response.create"}))
 
         # Aggregate deltas until completed
         text_parts: list[str] = []
-        import json
         first_delta_received = False
+        ttfw = 0.0
         while True:
             msg = await ws.recv()
             try:
@@ -224,15 +252,13 @@ async def ws_realtime_transcribe_with_ttfw(url: str, pcm16_bytes: bytes, frame_m
                 continue
             if isinstance(obj, dict) and obj.get("type") == "response.output_text.delta":
                 if not first_delta_received:
-                    ttfw = time.time() - t_request  # Record time to first delta
+                    ttfw = time.time() - t_request
                     first_delta_received = True
                 text_parts.append(str(obj.get("delta", "")))
             elif isinstance(obj, dict) and obj.get("type") == "response.completed":
                 break
             elif isinstance(obj, dict) and obj.get("type") == "error":
-                # Stop on error
-                break
-        
+                raise RuntimeError(obj)
         return "".join(text_parts).strip(), ttfw
 
 

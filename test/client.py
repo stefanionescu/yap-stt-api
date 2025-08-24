@@ -87,13 +87,13 @@ async def transcribe_file(host: str, port: int, file_path: str, use_https: bool 
     
     # Handle RunPod proxy (no explicit port) vs direct TCP
     if _is_runpod_proxy_host(host):
-        url = f"https://{host}/v1/transcribe"
+        url = f"https://{host}/v1/audio/transcribe"
     else:
         # Direct TCP endpoint
         if ":" in host:
-            url = f"{scheme}://{host}/v1/transcribe"
+            url = f"{scheme}://{host}/v1/audio/transcribe"
         else:
-            url = f"{scheme}://{host}:{port}/v1/transcribe"
+            url = f"{scheme}://{host}:{port}/v1/audio/transcribe"
     
     print(f"Connecting to: {url}")
     print(f"File: {file_path} ({Path(file_path).stat().st_size / 1024 / 1024:.2f} MB)")

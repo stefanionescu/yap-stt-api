@@ -35,7 +35,7 @@ sys.path.append(str(Path(__file__).resolve().parent))
 
 SAMPLES_DIR = "samples"
 EXTS = {".wav", ".flac", ".ogg", ".mp3"}
-from utils import build_http_multipart, file_to_pcm16_mono_16k, ws_realtime_transcribe, ws_realtime_transcribe_with_ttfw, file_duration_seconds
+from utils import build_http_multipart, file_to_pcm16_mono_16k, ws_realtime_transcribe_with_ttfw, file_duration_seconds, to_ws_url
 
 RESULTS_DIR = Path("test/results")
 ERRORS_FILE = RESULTS_DIR / "bench_errors.txt"
@@ -279,7 +279,7 @@ def main() -> None:
         # WS benchmark: create independent WS connections per request, distributed across workers
         async def _ws_bench() -> tuple[List[Dict[str, float]], int, int]:
             import asyncio, time
-            ws_url = base_url.rstrip("/") + "/v1/realtime"
+            ws_url = to_ws_url(base_url)
             pcm = file_to_pcm16_mono_16k(file_paths[0])
             workers = min(args.concurrency, args.n)
             counts = _split_counts(args.n, workers)
@@ -307,7 +307,7 @@ def main() -> None:
         results, rejected, errors = asyncio.run(bench_http(base_url, file_paths, args.n, args.concurrency, not args.no_pcm, args.raw, args.timestamps, args.read_timeout, args.verbose, args.disable_retries))
     elapsed = time.time() - t0
     
-    summarize("HTTP Transcription", results)
+    summarize("Realtime Transcription (WS)" if args.ws else "HTTP Transcription", results)
     print(f"Rejected: {rejected}")
     print(f"Errors: {errors}")
     print(f"Total elapsed: {elapsed:.4f}s")
