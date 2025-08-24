@@ -4,6 +4,7 @@ import base64
 from typing import Tuple
 import shutil
 import subprocess
+from urllib.parse import urlparse, urlunparse
 
 import numpy as np
 import soundfile as sf
@@ -108,6 +109,11 @@ async def ws_realtime_transcribe(url: str, pcm16_bytes: bytes, frame_ms: int = 4
     samples_per_frame = int(TARGET_SR * (frame_ms / 1000.0))
     bytes_per_frame = samples_per_frame * bytes_per_sample
 
+    # Ensure ws/wss scheme
+    if url.startswith("http://"):
+        url = "ws://" + url[len("http://"):]
+    elif url.startswith("https://"):
+        url = "wss://" + url[len("https://"):]
     async with websockets.connect(url, max_size=None) as ws:
         # Best-effort consume session.created if sent
         try:
@@ -152,5 +158,17 @@ async def ws_realtime_transcribe(url: str, pcm16_bytes: bytes, frame_ms: int = 4
                 # Stop on error
                 break
         return "".join(text_parts).strip()
+
+
+def to_ws_url(base_url: str, path: str = "/v1/realtime") -> str:
+    """Convert an HTTP/HTTPS base URL to WS/WSS URL with the given path."""
+    if not base_url:
+        return "ws://127.0.0.1:8000" + path
+    if "://" not in base_url:
+        base_url = "http://" + base_url
+    parsed = urlparse(base_url)
+    scheme = "wss" if parsed.scheme == "https" else "ws"
+    netloc = parsed.netloc or parsed.path
+    return urlunparse((scheme, netloc, path, "", "", ""))
 
 

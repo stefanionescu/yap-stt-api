@@ -115,7 +115,47 @@ Docs: `https://onnxruntime.ai/docs/execution-providers/TensorRT-ExecutionProvide
 
 ### Testing
 
-Basic test scripts remain under `test/` for warmup, benchmarks, and TPM. See comments in those files.
+Warmup (single request)
+```bash
+# Default (HTTP, multipart, PCM):
+python3 test/warmup.py --file long.mp3
+
+# HTTP single-shot raw body (PCM):
+python3 test/warmup.py --raw --file long.mp3
+
+# HTTP multipart with original file (disable PCM):
+python3 test/warmup.py --no-pcm --file long.mp3
+
+# WebSocket realtime streaming:
+python3 test/warmup.py --ws --file long.mp3
+```
+
+Benchmark (fixed number of requests)
+```bash
+# HTTP default (multipart, PCM): 100 requests, 6 workers
+python3 test/bench.py --n 100 --concurrency 6 --file long.mp3
+
+# HTTP single-shot raw body (PCM):
+python3 test/bench.py --raw --n 50 --concurrency 4 --file long.mp3
+
+# HTTP multipart with original file:
+python3 test/bench.py --no-pcm --n 50 --concurrency 4 --file long.mp3
+
+# WebSocket realtime (independent WS per request):
+python3 test/bench.py --ws --n 60 --concurrency 10 --file long.mp3
+```
+
+TPM (sustained rate)
+```bash
+# HTTP default (multipart, PCM): 12 workers, 60s
+python3 test/tpm.py --concurrency 12 --duration 60 --file long.mp3
+
+# HTTP single-shot raw body (PCM):
+python3 test/tpm.py --raw --concurrency 8 --duration 60 --file long.mp3
+
+# WebSocket realtime (independent WS per transaction):
+python3 test/tpm.py --ws --concurrency 12 --duration 60 --file long.mp3
+```
 
 ### Purging
 

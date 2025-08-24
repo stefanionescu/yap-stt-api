@@ -56,8 +56,8 @@ def main() -> int:
         from utils import file_to_pcm16_mono_16k
         import asyncio
         pcm = file_to_pcm16_mono_16k(file_path)
-        ws_url = args.url.rstrip("/") + "/v1/realtime"
-        from utils import ws_realtime_transcribe
+        from utils import ws_realtime_transcribe, to_ws_url
+        ws_url = to_ws_url(args.url)
         t0 = time.perf_counter()
         text = asyncio.run(ws_realtime_transcribe(ws_url, pcm))
         elapsed_s = time.perf_counter() - t0
