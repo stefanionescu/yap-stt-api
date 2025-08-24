@@ -23,8 +23,13 @@ class ParakeetModel:
 
     @classmethod
     def load(cls) -> "ParakeetModel":
-        logger.info("Loading NeMo ASR model: %s", settings.model_id)
-        asr_model = nemo_asr.models.ASRModel.from_pretrained(model_name=settings.model_id)
+        desired_model_id = settings.model_id
+        # Force RNNT Parakeet-TDT if a CTC model id is provided (accuracy over CTC)
+        if "ctc" in desired_model_id.lower():
+            desired_model_id = "nvidia/parakeet-tdt-0.6b-v2"
+            logger.warning("CTC model id detected; overriding to RNNT: %s", desired_model_id)
+        logger.info("Loading NeMo ASR model: %s", desired_model_id)
+        asr_model = nemo_asr.models.ASRModel.from_pretrained(model_name=desired_model_id)
         # Enable local attention and chunking for long-form inference if configured
         if settings.use_local_attention:
             try:
@@ -38,22 +43,14 @@ class ParakeetModel:
             except Exception as e:
                 logger.warning("Failed to configure local attention/chunking: %s", e)
 
-        # Prefer greedy_batch decoding for CTC (same output, faster than greedy)
+        # Prefer greedy_batch only for CTC models; RNNT uses its own decoding configs
         try:
-            # Primary API
-            if hasattr(asr_model, "change_decoding_strategy"):
+            cls_name = asr_model.__class__.__name__
+            if "CTC" in cls_name and hasattr(asr_model, "change_decoding_strategy"):
                 asr_model.change_decoding_strategy(decoding_cfg={"strategy": "greedy_batch"})  # type: ignore[arg-type]
                 logger.info("CTC decoding strategy set to greedy_batch")
-            else:
-                # Fallback: try to tweak cfg and refresh
-                cfg = getattr(asr_model, "cfg", None) or getattr(asr_model, "_cfg", None)
-                if cfg is not None and getattr(cfg, "decoding", None) is not None:
-                    cfg.decoding.strategy = "greedy_batch"  # type: ignore[attr-defined]
-                    if hasattr(asr_model, "change_decoding_strategy"):
-                        asr_model.change_decoding_strategy(cfg.decoding)  # type: ignore[arg-type]
-                    logger.info("CTC decoding strategy set to greedy_batch via cfg")
         except Exception as e:
-            logger.warning("Could not set decoding strategy to greedy_batch: %s", e)
+            logger.warning("Could not adjust decoding strategy: %s", e)
 
         # Prefer GPU when available
         try:
@@ -79,7 +76,7 @@ class ParakeetModel:
         except Exception:
             pass
 
-        return cls(model_id=settings.model_id, _model=asr_model)
+        return cls(model_id=desired_model_id, _model=asr_model)
     
     def _maybe_load_punct_model(self) -> None:
         return
