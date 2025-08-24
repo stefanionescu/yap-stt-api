@@ -28,7 +28,7 @@ class Settings(BaseSettings):
 
     # Micro-batching (server-level)
     microbatch_window_ms: float = float(os.getenv("PARAKEET_MICROBATCH_WINDOW_MS", "10"))
-    microbatch_max_batch: int = int(os.getenv("PARAKEET_MICROBATCH_MAX_BATCH", "8"))
+    microbatch_max_batch: int = int(os.getenv("PARAKEET_MICROBATCH_MAX_BATCH", "32"))
 
     # Admission control
     max_audio_seconds: float = float(os.getenv("PARAKEET_MAX_AUDIO_SECONDS", "600"))  # 10 minutes
@@ -37,6 +37,13 @@ class Settings(BaseSettings):
     # API
     host: str = os.getenv("HOST", "0.0.0.0")
     port: int = int(os.getenv("PORT", "8000"))
+
+    # ASR dataloader + precision controls
+    asr_batch_size: int = int(os.getenv("PARAKEET_ASR_BATCH_SIZE", "32"))
+    asr_num_workers: int = int(os.getenv("PARAKEET_ASR_NUM_WORKERS", "0"))
+    use_autocast: bool = os.getenv("PARAKEET_USE_AUTOCAST", "1") not in ("0", "false", "False")
+    autocast_dtype: str = os.getenv("PARAKEET_AUTOCAST_DTYPE", "float16")  # float16 | bfloat16
+    cudnn_benchmark: bool = os.getenv("PARAKEET_CUDNN_BENCHMARK", "1") not in ("0", "false", "False")
 
 
 settings = Settings()

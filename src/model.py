@@ -66,6 +66,8 @@ class ParakeetModel:
                     torch.backends.cuda.matmul.allow_tf32 = True  # type: ignore[attr-defined]
                     if hasattr(torch, "set_float32_matmul_precision"):
                         torch.set_float32_matmul_precision("high")  # type: ignore[attr-defined]
+                    if settings.cudnn_benchmark and hasattr(torch.backends, "cudnn"):
+                        torch.backends.cudnn.benchmark = True  # type: ignore[attr-defined]
                 except Exception:
                     pass
                 logger.info("ASR model moved to CUDA")
@@ -138,19 +140,35 @@ class ParakeetModel:
         return texts
 
     def _transcribe_paths(self, paths: List[str]) -> List[str]:
+        autocast_dtype = torch.float16 if settings.autocast_dtype.lower() == "float16" else (
+            torch.bfloat16 if settings.autocast_dtype.lower() == "bfloat16" else torch.float16
+        )
         with torch.inference_mode():
             try:
                 # Prefer batched transcription without progress bar; keep workers=0 to reduce overhead
-                outputs = self._model.transcribe(
-                    paths,
-                    batch_size=len(paths),
-                    num_workers=0,
-                    verbose=False,
-                )
+                if settings.use_autocast and torch.cuda.is_available():
+                    with torch.autocast(device_type="cuda", dtype=autocast_dtype):
+                        outputs = self._model.transcribe(
+                            paths,
+                            batch_size=min(len(paths), settings.asr_batch_size),
+                            num_workers=settings.asr_num_workers,
+                            verbose=False,
+                        )
+                else:
+                    outputs = self._model.transcribe(
+                        paths,
+                        batch_size=min(len(paths), settings.asr_batch_size),
+                        num_workers=settings.asr_num_workers,
+                        verbose=False,
+                    )
             except TypeError:
                 # Some NeMo versions use keyword paths2audio_files
                 try:
-                    outputs = self._model.transcribe(paths2audio_files=paths, batch_size=len(paths), num_workers=0, verbose=False)  # type: ignore[call-arg]
+                    if settings.use_autocast and torch.cuda.is_available():
+                        with torch.autocast(device_type="cuda", dtype=autocast_dtype):
+                            outputs = self._model.transcribe(paths2audio_files=paths, batch_size=min(len(paths), settings.asr_batch_size), num_workers=settings.asr_num_workers, verbose=False)  # type: ignore[call-arg]
+                    else:
+                        outputs = self._model.transcribe(paths2audio_files=paths, batch_size=min(len(paths), settings.asr_batch_size), num_workers=settings.asr_num_workers, verbose=False)  # type: ignore[call-arg]
                 except TypeError:
                     outputs = self._model.transcribe(paths2audio_files=paths)  # type: ignore[call-arg]
         return self._normalize_outputs(outputs)
