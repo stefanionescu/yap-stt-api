@@ -127,6 +127,14 @@ def main() -> int:
     if duration > args.max_seconds:
         print(f"Note: audio longer than {args.max_seconds}s — saving partial result")
 
+    # If timestamps were not requested, drop words from the saved JSON for consistency
+    if not args.timestamps and isinstance(data, dict) and "words" in data:
+        try:
+            if data.get("words") is None:
+                data.pop("words", None)
+        except Exception:
+            pass
+
     # Write result to test/results/warmup.txt (overwrite)
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     with open(RESULTS_FILE, "w", encoding="utf-8") as out:

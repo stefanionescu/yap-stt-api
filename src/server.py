@@ -80,7 +80,7 @@ async def readyz() -> Dict[str, Any]:
     return {"ready": bool(_is_ready)}
 
 
-@app.post("/v1/audio/transcribe", response_model=TranscriptionResponse)
+@app.post("/v1/audio/transcribe", response_model=TranscriptionResponse, response_model_exclude_none=True)
 async def openai_transcribe(
     request: Request,
     file: UploadFile | None = File(None),
