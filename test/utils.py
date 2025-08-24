@@ -192,13 +192,10 @@ async def ws_realtime_transcribe_with_ttfw(url: str, pcm16_bytes: bytes, frame_m
     async with websockets.connect(
         url,
         max_size=None,
-        compression=None,
         subprotocols=["openai-realtime","realtime"],
-        extra_headers=headers,
+        headers=headers,
         ping_interval=20,
         ping_timeout=20,
-        open_timeout=10,
-        close_timeout=10,
     ) as ws:
         # Optional: verify the server echoed a realtime subprotocol
         if ws.subprotocol not in ("openai-realtime", "realtime"):
