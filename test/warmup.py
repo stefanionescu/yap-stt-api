@@ -65,7 +65,7 @@ def main() -> int:
         data = {"text": text}
     else:
         # HTTP multipart; optionally send audio/pcm
-        url = args.url.rstrip("/") + "/v1/audio/transcriptions"
+        url = args.url.rstrip("/") + "/v1/audio/transcribe"
         from utils import build_http_multipart
         use_pcm = not args.no_pcm
         fname, content, ctype = build_http_multipart(file_path, use_pcm)

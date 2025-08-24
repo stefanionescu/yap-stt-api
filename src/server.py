@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 import base64
 import uuid
 
@@ -43,9 +43,6 @@ async def on_startup() -> None:
     global _model, _scheduler, _is_ready
     _model = ParakeetModel.load()
     logger.info("Model loaded: %s", _model.model_id)
-    logger.info("Warming up...")
-    _model.warmup(seconds=0.5)
-    logger.info("Warmup done.")
 
     maxsize = settings.queue_max_factor * settings.microbatch_max_batch
     # Prefer micro-batching for better GPU utilization
@@ -82,7 +79,7 @@ async def readyz() -> Dict[str, Any]:
     return {"ready": bool(_is_ready)}
 
 
-@app.post("/v1/audio/transcriptions", response_model=TranscriptionResponse)
+@app.post("/v1/audio/transcribe", response_model=TranscriptionResponse)
 async def openai_transcribe(
     request: Request,
     file: UploadFile | None = File(None),

@@ -66,7 +66,7 @@ async def _tpm_worker(
     timestamps: bool
 ) -> None:
     """Worker that continuously sends requests for duration_s seconds."""
-    http_url = base_url.rstrip("/") + "/v1/audio/transcriptions"
+    http_url = base_url.rstrip("/") + "/v1/audio/transcribe"
     ws_url = base_url.rstrip("/") + "/v1/realtime"
     start_time = time.time()
     completed = 0

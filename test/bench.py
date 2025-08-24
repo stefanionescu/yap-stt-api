@@ -114,7 +114,7 @@ async def _http_worker(
     rejected = 0
     errors = 0
     
-    url = base_url.rstrip("/") + "/v1/audio/transcriptions"
+    url = base_url.rstrip("/") + "/v1/audio/transcribe"
     file_path = file_paths[0]  # Use the single specified file
     
     transport = httpx.AsyncHTTPTransport(retries=2)
@@ -203,12 +203,7 @@ def _split_counts(total: int, workers: int) -> List[int]:
 
 
 async def bench_http(base_url: str, file_paths: List[str], total_reqs: int, concurrency: int, use_pcm: bool, raw: bool, timestamps: bool) -> tuple[List[Dict[str, float]], int, int]:
-    """Run HTTP benchmark with configurable concurrency."""
-    workers = min(concurrency, total_reqs)
-    counts = _split_counts(total_reqs, workers)
-    
-    print(f"Starting {workers} workers with counts: {counts}")
-    # Prepare error log
+    """Run HTTP benchmark limiting in-flight requests to `concurrency` without worker sharding."""
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     try:
         with open(ERRORS_FILE, "w", encoding="utf-8") as ef:
@@ -216,28 +211,79 @@ async def bench_http(base_url: str, file_paths: List[str], total_reqs: int, conc
     except Exception:
         pass
 
+    sem = asyncio.Semaphore(max(1, concurrency))
     error_lock: asyncio.Lock = asyncio.Lock()
-
-    tasks = [
-        asyncio.create_task(_http_worker(base_url, file_paths, counts[i], i+1, use_pcm, raw, timestamps, error_lock)) 
-        for i in range(workers)
-    ]
-    
-    results_nested = await asyncio.gather(*tasks, return_exceptions=True)
-    
     results: List[Dict[str, float]] = []
     rejected_total = 0
     errors_total = 0
-    
-    for r in results_nested:
-        if isinstance(r, dict):
-            results.extend(r.get("results", []))
-            rejected_total += int(r.get("rejected", 0))
-            errors_total += int(r.get("errors", 0))
-        else:
-            print(f"Worker error: {r}")
-            errors_total += 1
-    
+
+    url = base_url.rstrip("/") + "/v1/audio/transcribe"
+    file_path = file_paths[0]
+
+    transport = httpx.AsyncHTTPTransport(retries=2)
+    limits = httpx.Limits(max_keepalive_connections=max(64, concurrency), max_connections=max(128, concurrency * 2))
+    async with httpx.AsyncClient(timeout=120.0, transport=transport, limits=limits) as client:
+        async def one_request(req_idx: int) -> None:
+            nonlocal rejected_total, errors_total
+            async with sem:
+                t0 = time.time()
+                try:
+                    fname, content, ctype = build_http_multipart(file_path, use_pcm)
+                    if raw:
+                        headers = {"content-type": ctype}
+                        response = await client.post(url + ("?timestamps=1" if timestamps else ""), content=content, headers=headers)
+                    else:
+                        files = {"file": (fname, content, ctype)}
+                        response = await client.post(url + ("?timestamps=1" if timestamps else ""), files=files)
+
+                    t_end = time.time()
+                    wall_s = t_end - t0
+
+                    if response.status_code == 429:
+                        rejected_total += 1
+                        return
+                    if response.status_code != 200:
+                        errors_total += 1
+                        try:
+                            msg = response.text
+                        except Exception:
+                            msg = "<no body>"
+                        sanitized = (msg[:300]).replace("\n", " ")
+                        line = (
+                            f"[{datetime.utcnow().isoformat()}Z] req={req_idx+1} HTTP {response.status_code} body={sanitized}"
+                        )
+                        async with error_lock:
+                            try:
+                                with open(ERRORS_FILE, "a", encoding="utf-8") as ef:
+                                    ef.write(line + "\n")
+                            except Exception:
+                                pass
+                        return
+
+                    data = response.json()
+                    try:
+                        audio_duration = float(data.get("duration"))
+                    except Exception:
+                        audio_duration = 0.0
+                    if not audio_duration or audio_duration <= 0:
+                        audio_duration = file_duration_seconds(file_path)
+                    results.append(_metrics(audio_duration, wall_s))
+                except Exception as e:
+                    errors_total += 1
+                    exc_text = (str(e)[:300]).replace("\n", " ")
+                    line = (
+                        f"[{datetime.utcnow().isoformat()}Z] req={req_idx+1} EXC {type(e).__name__}: {exc_text}"
+                    )
+                    async with error_lock:
+                        try:
+                            with open(ERRORS_FILE, "a", encoding="utf-8") as ef:
+                                ef.write(line + "\n")
+                        except Exception:
+                            pass
+
+        tasks = [asyncio.create_task(one_request(i)) for i in range(total_reqs)]
+        await asyncio.gather(*tasks, return_exceptions=True)
+
     return results[:total_reqs], rejected_total, errors_total
 
 
@@ -246,7 +292,7 @@ def main() -> None:
     ap.add_argument("--host", default="localhost")
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--n", type=int, default=40, help="Total requests")
-    ap.add_argument("--concurrency", type=int, default=1, help="Concurrent workers")
+    ap.add_argument("--concurrency", type=int, default=10, help="Max in-flight requests")
     ap.add_argument("--file", type=str, default="mid.wav", help="Audio file from samples/ (default: mid.wav)")
     ap.add_argument("--no-pcm", action="store_true", help="Send original file (disable PCM mode) for HTTP")
     ap.add_argument("--ws", action="store_true", help="Use WebSocket realtime instead of HTTP")
