@@ -54,12 +54,12 @@ def main() -> int:
     final_recv_ts = 0.0
 
     def audio_iter():
-        yield riva.client.StreamingRecognizeRequest(streaming_config=scfg)
         # Always simulate realtime by sleeping per chunk duration
         import time as _t
+        nonlocal last_chunk_sent_ts
         for i in range(0, len(pcm_bytes), step):
             chunk = pcm_bytes[i : i + step]
-            yield riva.client.StreamingRecognizeRequest(audio_content=chunk)
+            yield chunk
             last_chunk_sent_ts = _t.perf_counter() if hasattr(_t, "perf_counter") else _t.time()
             _t.sleep(max(0.0, args.chunk_ms / 1000.0))
 
