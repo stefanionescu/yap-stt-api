@@ -4,6 +4,10 @@ set -euo pipefail
 PORT=${PORT:-8000}
 HUGGINGFACE_CACHE_DIR=${HUGGINGFACE_CACHE_DIR:-"$HOME/.cache/huggingface"}
 TORCH_CACHE_DIR=${TORCH_CACHE_DIR:-"$HOME/.cache/torch"}
+TORCH_EXT_DIR=${TORCH_EXT_DIR:-"$HOME/.cache/torch_extensions"}
+NUMBA_CACHE_DIR=${NUMBA_CACHE_DIR:-"$HOME/.cache/numba"}
+NEMO_CACHE_DIR=${NEMO_CACHE_DIR:-"$HOME/.cache/nemo"}
+NV_COMPUTE_CACHE=${NV_COMPUTE_CACHE:-"$HOME/.nv/ComputeCache"}
 PIP_CACHE_DIR=${PIP_CACHE_DIR:-"$HOME/.cache/pip"}
 VENV_DIR=${VENV_DIR:-".venv"}
 MODELS_DIR_HOST=${MODELS_DIR_HOST:-"models"}
@@ -13,6 +17,7 @@ DO_LOGS=1
 DO_ENGINES=1
 DO_MODELS=1
 DO_DEPS=1
+DO_REPO=1
 DO_APT_CLEAN=1
 DO_UNINSTALL_SYS_PY=1
 DO_DU_REPORT=1
@@ -21,16 +26,17 @@ DO_UNINSTALL_TRT=0
 
 usage() {
   cat <<EOF
-Usage: $0 [--logs] [--models] [--deps] [--all]
+Usage: $0 [--logs] [--models] [--deps] [--repo] [--all]
 
-Stops the gRPC service and purges logs, caches, dependencies, and local model files.
+Stops the gRPC service and purges logs, caches, dependencies, repo bytecode, and local model files.
 
-Defaults: With no flags, purges core artifacts (logs, models, deps).
+Defaults: With no flags, purges core artifacts (logs, models, deps, repo bytecode).
 
 Options (for selective purge):
   --logs       Remove logs/ and metrics logs (keeps directory)
   --models     Remove NeMo/Hugging Face caches (~/.cache) and host ./models
   --deps       Remove local Python venv (.venv) and pip cache (~/.cache/pip)
+  --repo       Remove repo __pycache__/ *.pyc under src/ and scripts/
   --all        Do all of the above (same as no flags)
 
 Env:
@@ -46,10 +52,11 @@ EOF
 for arg in "$@"; do
   case "$arg" in
     --help|-h) usage; exit 0 ;;
-    --logs) SELECTIVE=1; DO_LOGS=1; DO_ENGINES=0; DO_MODELS=0; DO_DEPS=0 ;;
-    --models) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=0; DO_MODELS=1; DO_DEPS=0 ;;
-    --deps) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=0; DO_MODELS=0; DO_DEPS=1 ;;
-    --all) SELECTIVE=0; DO_LOGS=1; DO_ENGINES=0; DO_MODELS=1; DO_DEPS=1 ;;
+    --logs) SELECTIVE=1; DO_LOGS=1; DO_ENGINES=0; DO_MODELS=0; DO_DEPS=0; DO_REPO=0 ;;
+    --models) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=0; DO_MODELS=1; DO_DEPS=0; DO_REPO=0 ;;
+    --deps) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=0; DO_MODELS=0; DO_DEPS=1; DO_REPO=0 ;;
+    --repo) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=0; DO_MODELS=0; DO_DEPS=0; DO_REPO=1 ;;
+    --all) SELECTIVE=0; DO_LOGS=1; DO_ENGINES=0; DO_MODELS=1; DO_DEPS=1; DO_REPO=1 ;;
     *) echo "Unknown arg: $arg"; usage; exit 2 ;;
   esac
   shift || true
@@ -129,6 +136,18 @@ if [[ $DO_MODELS -eq 1 ]]; then
   echo "Purging Torch cache at $TORCH_CACHE_DIR ..."
   rm -rf "$TORCH_CACHE_DIR" || true
   mkdir -p "$TORCH_CACHE_DIR"
+  echo "Purging Torch extensions at $TORCH_EXT_DIR ..."
+  rm -rf "$TORCH_EXT_DIR" || true
+  mkdir -p "$TORCH_EXT_DIR"
+  echo "Purging NeMo cache at $NEMO_CACHE_DIR ..."
+  rm -rf "$NEMO_CACHE_DIR" || true
+  mkdir -p "$NEMO_CACHE_DIR"
+  echo "Purging NumPy/Numba caches at $NUMBA_CACHE_DIR ..."
+  rm -rf "$NUMBA_CACHE_DIR" || true
+  mkdir -p "$NUMBA_CACHE_DIR"
+  echo "Purging NVIDIA ComputeCache at $NV_COMPUTE_CACHE ..."
+  rm -rf "$NV_COMPUTE_CACHE" || true
+  mkdir -p "$NV_COMPUTE_CACHE"
   echo "Purging host models directory at $MODELS_DIR_HOST ..."
   rm -rf "$MODELS_DIR_HOST" || true
   mkdir -p "$MODELS_DIR_HOST"
@@ -139,6 +158,14 @@ if [[ $DO_DEPS -eq 1 ]]; then
   echo "Removing virtualenv at $VENV_DIR and pip cache at $PIP_CACHE_DIR ..."
   rm -rf "$VENV_DIR" || true
   rm -rf "$PIP_CACHE_DIR" || true
+fi
+
+if [[ $DO_REPO -eq 1 ]]; then
+  echo "Removing repo bytecode (__pycache__/ *.pyc) under src/ and scripts/..."
+  find src -type d -name "__pycache__" -prune -exec rm -rf {} + 2>/dev/null || true
+  find scripts -type d -name "__pycache__" -prune -exec rm -rf {} + 2>/dev/null || true
+  find src -name "*.py[co]" -delete 2>/dev/null || true
+  find scripts -name "*.py[co]" -delete 2>/dev/null || true
 fi
 
 echo "Done."
@@ -170,8 +197,11 @@ fi
 
 if [[ $DO_DU_REPORT -eq 1 ]]; then
   echo "Disk usage report (top 10):"
-  du -h -d 1 /workspace 2>/dev/null | sort -hr | head -n 10 || true
+  du -h -d 1 . 2>/dev/null | sort -hr | head -n 10 || true
   du -h -d 2 "$HOME/.cache" 2>/dev/null | sort -hr | head -n 10 || true
-  du -h -d 1 /usr/local/lib/python3.11/dist-packages 2>/dev/null | sort -hr | head -n 20 || true
+  if command -v python3 >/dev/null 2>&1; then
+    PY_BASE=$(python3 -c 'import sys,site; import os; print(os.path.dirname(site.getsitepackages()[0]))' 2>/dev/null || echo "/usr/local/lib/python3.11")
+    du -h -d 1 "$PY_BASE" 2>/dev/null | sort -hr | head -n 20 || true
+  fi
 fi
 
