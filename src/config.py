@@ -9,7 +9,7 @@ class Settings(BaseSettings):
 
     # NeMo model identifier
     # Use NVIDIA Parakeet CTC 0.6B by default
-    model_id: str = os.getenv("PARAKEET_MODEL_ID", "nvidia/parakeet-ctc-1.1b-v2")
+    model_id: str = os.getenv("PARAKEET_MODEL_ID", "nvidia/parakeet-ctc-1.1b")
 
     # Long-form inference knobs (see NVIDIA blog)
     # Enable limited context attention with 128 tokens left/right
