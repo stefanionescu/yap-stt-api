@@ -191,7 +191,21 @@ fi
 if [[ $DO_UNINSTALL_SYS_PY -eq 1 ]]; then
   echo "Uninstalling heavy system Python packages (global, not venv)..."
   if command -v pip3 >/dev/null 2>&1; then
-    pip3 uninstall -y httpx fastapi uvicorn numpy soundfile soxr huggingface_hub || true
+    # Try to remove the heaviest wheels first
+    PKGS=(
+      torch torchaudio torchvision torchtext triton xformers
+      nemo_toolkit nemo_text_processing pytorch_lightning lightning
+      onnx onnxruntime onnxruntime-gpu
+      transformers sentencepiece datasets accelerate
+      librosa scipy numba
+      huggingface_hub httpx fastapi uvicorn numpy soundfile soxr
+    )
+    # Uninstall in multiple passes to handle dependency ordering
+    for i in 1 2; do
+      pip3 uninstall -y "${PKGS[@]}" || true
+    done
+    # Purge pip cache as well
+    pip3 cache purge || true
   fi
 fi
 
