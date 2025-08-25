@@ -1,1 +1,1 @@
-# Parakeet FastAPI service package
+# Parakeet Riva gRPC API

@@ -9,7 +9,8 @@ import numpy as np
 
 # Using NVIDIA's packaged protos (no local compile needed)
 from riva.client.proto import riva_asr_pb2, riva_asr_pb2_grpc  # type: ignore
-import riva.client.proto.types.audio_pb2 as riva_audio_pb2  # type: ignore
+import riva.client as riva_client  # type: ignore
+AudioEncoding = riva_client.AudioEncoding
 
 from .model import ParakeetModel
 from .scheduler import MicroBatchScheduler
@@ -54,7 +55,7 @@ class RivaASRServicer(riva_asr_pb2_grpc.RivaSpeechRecognitionServicer):
                     await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "first message must include streaming_config")
                 cfg = req.streaming_config
                 # Minimal validation; support only LINEAR_PCM mono 16 kHz
-                if cfg.config.encoding != getattr(riva_audio_pb2, "LINEAR_PCM", 1):
+                if cfg.config.encoding != AudioEncoding.LINEAR_PCM:
                     await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "only LINEAR_PCM supported")
                 continue
 
@@ -130,7 +131,7 @@ class RivaASRServicer(riva_asr_pb2_grpc.RivaSpeechRecognitionServicer):
             )
 
     async def Recognize(self, request, context):  # type: ignore[override]
-        if request.config.encoding != getattr(riva_audio_pb2, "LINEAR_PCM", 1):
+        if request.config.encoding != AudioEncoding.LINEAR_PCM:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "only LINEAR_PCM supported")
         sr = request.config.sample_rate_hertz or SAMPLE_RATE
         if sr != SAMPLE_RATE:
