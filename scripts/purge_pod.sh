@@ -260,9 +260,9 @@ if [[ $DO_APT_REMOVE_CUDA -eq 1 ]]; then
     }
 
     apt_remove_installed \
-      'cuda-*' 'nvidia-cuda-toolkit' \
+      'cuda-*' 'nvidia-cuda-toolkit' 'nvidia-cuda-runtime*' \
       'cuda-compat-*' 'cuda-drivers*' \
-      'libcudnn*' 'libnvinfer*' 'libcublas*' 'libcurand*' 'libcusolver*' 'libcusparse*' 'libcufft*' \
+      'libcudart*' 'libcudnn*' 'libnvinfer*' 'libcublas*' 'libcurand*' 'libcusolver*' 'libcusparse*' 'libcufft*' \
       'libnvjitlink*' 'libnvfatbin*' 'libnvjpeg*' 'libnpp*' 'libcufile*' 'cuda-keyring'
 
     apt-get autoremove -y --purge || true

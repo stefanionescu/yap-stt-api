@@ -52,8 +52,8 @@ Key environment variables (see `scripts/env.sh`):
 - `PARAKEET_MODEL_ID` (default: `nvidia/parakeet-tdt-0.6b-v2`)
 - `PARAKEET_MICROBATCH_WINDOW_MS` (default: 8)
 - `PARAKEET_MICROBATCH_MAX_BATCH` (default: 32)
-- `PARAKEET_STREAM_STEP_MS` (default: 240)
-- `PARAKEET_STREAM_CONTEXT_SECONDS` (default: 4)
+- `PARAKEET_STREAM_STEP_MS` (default: 320)
+- `PARAKEET_STREAM_CONTEXT_SECONDS` (default: 3)
 - `PORT` (gRPC port, default: 8000)
 - TLS (optional): `PARAKEET_GRPC_TLS`, `PARAKEET_GRPC_CERT`, `PARAKEET_GRPC_KEY`
 
