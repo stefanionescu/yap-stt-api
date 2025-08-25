@@ -50,11 +50,25 @@ class RivaASRServicer(riva_asr_pb2_grpc.RivaSpeechRecognitionServicer):
         self.decimation_when_hot = bool(settings.stream_decimation_when_hot)
         self.hot_queue_threshold = max(0.0, min(1.0, float(settings.stream_hot_queue_fraction)))
         self.tick_timeout_s = float(settings.stream_tick_timeout_s)
-        # VAD gating and eager finalize
+        # VAD knobs (used only for segmentation cut selection; not gating interims)
         self.vad_enable = bool(settings.vad_enable)
         self.vad_tail_samples = int((float(settings.vad_tail_ms) / 1000.0) * SAMPLE_RATE)
         self.vad_energy_threshold = float(settings.vad_energy_threshold)
         self.eager_sil_ms = float(settings.eager_sil_ms)
+
+        # Segmentation sizes in bytes (16 kHz, PCM16)
+        self.seg_len_bytes = int((settings.segment_len_ms / 1000.0) * SAMPLE_RATE * BYTES_PER_SAMPLE)
+        self.seg_min_bytes = int((settings.segment_min_ms / 1000.0) * SAMPLE_RATE * BYTES_PER_SAMPLE)
+        self.seg_overlap_bytes = int((settings.segment_overlap_ms / 1000.0) * SAMPLE_RATE * BYTES_PER_SAMPLE)
+        self.sil_win_bytes = int((settings.vad_tail_ms / 1000.0) * SAMPLE_RATE * BYTES_PER_SAMPLE)
+
+        def _is_silence(pcm_tail: np.ndarray) -> bool:
+            if pcm_tail.size == 0:
+                return True
+            return float(np.mean(pcm_tail * pcm_tail)) < self.vad_energy_threshold
+
+        # Bind helper as instance method
+        self._is_silence = _is_silence
 
     async def StreamingRecognize(self, request_iterator, context):  # type: ignore[override]
         cfg = None
@@ -64,9 +78,10 @@ class RivaASRServicer(riva_asr_pb2_grpc.RivaSpeechRecognitionServicer):
         # Track bytes since last emit to gate cadence
         since_last_emit = 0
         last_emit_monotonic = 0.0
-        # VAD/eager finalize state
-        silence_run_ms: float = 0.0
-        final_fut: Optional[asyncio.Future] = None
+        # Segmented finals state
+        pending_segments: list[tuple[asyncio.Future, int]] = []
+        seg_idx = 0
+        seg_start_bytes = 0
 
         first = True
         async for req in request_iterator:
@@ -114,20 +129,6 @@ class RivaASRServicer(riva_asr_pb2_grpc.RivaSpeechRecognitionServicer):
             if pcm.shape[0] > self.max_ctx_samps:
                 pcm = pcm[-self.max_ctx_samps :]
 
-            # Simple VAD gating: if tail energy is low, skip tick and build up silence window
-            if self.vad_enable and pcm.shape[0] > 0:
-                tail = pcm[-min(self.vad_tail_samples, pcm.shape[0]) :]
-                if tail.size > 0 and float(np.mean(tail * tail)) < self.vad_energy_threshold:
-                    silence_run_ms = min(2000.0, silence_run_ms + self.step_ms)
-                    # Fire eager finalize once per stream when sufficient trailing silence is detected
-                    if final_fut is None and silence_run_ms >= self.eager_sil_ms and len(full_buf) > 0:
-                        full_pcm = pcm16_to_f32(memoryview(full_buf)[:])
-                        final_fut = self.scheduler.submit(full_pcm, SAMPLE_RATE, priority=0)
-                    # Skip this tick during silence
-                    continue
-                else:
-                    silence_run_ms = 0.0
-
             fut = self.scheduler.submit(pcm, SAMPLE_RATE, priority=1)
             try:
                 text, *_ = await asyncio.wait_for(fut, timeout=self.tick_timeout_s)
@@ -150,22 +151,90 @@ class RivaASRServicer(riva_asr_pb2_grpc.RivaSpeechRecognitionServicer):
                     ]
                 )
 
-        # Final flush over the full session buffer
-        if full_buf:
-            try:
-                if final_fut is not None:
-                    text, *_ = await asyncio.wait_for(final_fut, timeout=float(settings.finals_timeout_s))
+            # ----- Segmentation for finals (do NOT block the main loop) -----
+            since_seg = len(full_buf) - seg_start_bytes
+
+            should_cut = False
+            if since_seg >= self.seg_min_bytes:
+                tail_len = min(self.sil_win_bytes, since_seg)
+                if tail_len > 0:
+                    tail_pcm = pcm16_to_f32(memoryview(full_buf[-tail_len:])[:])
                 else:
-                    full_pcm = pcm16_to_f32(memoryview(full_buf)[:])
-                    fut = self.scheduler.submit(full_pcm, SAMPLE_RATE, priority=0)
-                    text, *_ = await asyncio.wait_for(fut, timeout=float(settings.finals_timeout_s))
+                    tail_pcm = np.asarray([], dtype=np.float32)
+                if self._is_silence(tail_pcm):
+                    should_cut = True
+            elif since_seg >= self.seg_len_bytes:
+                should_cut = True
+
+            if should_cut:
+                seg_end_bytes = len(full_buf)
+                overlap = self.seg_overlap_bytes
+                seg_slice = full_buf[seg_start_bytes : min(seg_end_bytes + overlap, len(full_buf))]
+                seg_pcm = pcm16_to_f32(memoryview(seg_slice)[:])
+
+                fut2 = self.scheduler.submit(seg_pcm, SAMPLE_RATE, priority=0)
+                pending_segments.append((fut2, seg_idx))
+                seg_idx += 1
+
+                keep = min(overlap, len(full_buf))
+                if keep:
+                    del full_buf[:-keep]
+                    seg_start_bytes = 0
+                else:
+                    full_buf.clear()
+                    seg_start_bytes = 0
+
+            # Emit any completed segment finals
+            if pending_segments:
+                done_now: list[tuple[asyncio.Future, int]] = []
+                for fut3, idx in pending_segments:
+                    if fut3.done():
+                        try:
+                            text2, *_ = fut3.result()
+                        except Exception as e:  # noqa: BLE001
+                            await context.abort(grpc.StatusCode.INTERNAL, f"final_segment_error: {e}")
+                            return
+                        yield riva_asr_pb2.StreamingRecognizeResponse(
+                            results=[
+                                riva_asr_pb2.StreamingRecognitionResult(
+                                    alternatives=[riva_asr_pb2.SpeechRecognitionAlternative(transcript=text2)],
+                                    is_final=True,
+                                )
+                            ]
+                        )
+                        done_now.append((fut3, idx))
+                if done_now:
+                    pending_segments = [p for p in pending_segments if p not in done_now]
+
+        # ----- End of stream: flush the small tail only -----
+        if len(full_buf) > 0:
+            tail_pcm = pcm16_to_f32(memoryview(full_buf)[:])
+            fut4 = self.scheduler.submit(tail_pcm, SAMPLE_RATE, priority=0)
+            try:
+                text3, *_ = await asyncio.wait_for(fut4, timeout=float(settings.finals_timeout_s))
             except Exception as e:  # noqa: BLE001
-                await context.abort(grpc.StatusCode.INTERNAL, f"final_inference_error: {e}")
+                await context.abort(grpc.StatusCode.INTERNAL, f"final_tail_error: {e}")
                 return
             yield riva_asr_pb2.StreamingRecognizeResponse(
                 results=[
                     riva_asr_pb2.StreamingRecognitionResult(
-                        alternatives=[riva_asr_pb2.SpeechRecognitionAlternative(transcript=text)],
+                        alternatives=[riva_asr_pb2.SpeechRecognitionAlternative(transcript=text3)],
+                        is_final=True,
+                    )
+                ]
+            )
+
+        # Emit any still-pending segment results
+        for fut5, idx in pending_segments:
+            try:
+                text4, *_ = await asyncio.wait_for(fut5, timeout=float(settings.finals_timeout_s))
+            except Exception as e:  # noqa: BLE001
+                await context.abort(grpc.StatusCode.INTERNAL, f"final_segment_error: {e}")
+                return
+            yield riva_asr_pb2.StreamingRecognizeResponse(
+                results=[
+                    riva_asr_pb2.StreamingRecognitionResult(
+                        alternatives=[riva_asr_pb2.SpeechRecognitionAlternative(transcript=text4)],
                         is_final=True,
                     )
                 ]

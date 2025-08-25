@@ -63,6 +63,11 @@ class Settings(BaseSettings):
     vad_energy_threshold: float = float(os.getenv("PARAKEET_VAD_ENERGY_THRESHOLD", "0.001"))
     eager_sil_ms: float = float(os.getenv("PARAKEET_EAGER_SIL_MS", "500"))
 
+    # Segmentation knobs for finals
+    segment_len_ms: float = float(os.getenv("PARAKEET_SEGMENT_LEN_MS", "2500"))
+    segment_min_ms: float = float(os.getenv("PARAKEET_SEGMENT_MIN_MS", "1500"))
+    segment_overlap_ms: float = float(os.getenv("PARAKEET_SEGMENT_OVERLAP_MS", "250"))
+
     # ASR dataloader + precision controls
     asr_batch_size: int = int(os.getenv("PARAKEET_ASR_BATCH_SIZE", "32"))
     asr_num_workers: int = int(os.getenv("PARAKEET_ASR_NUM_WORKERS", "0"))
