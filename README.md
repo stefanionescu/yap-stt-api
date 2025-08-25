@@ -21,13 +21,13 @@ source .venv/bin/activate 2>/dev/null || true
 python3 test/warmup.py --server localhost:8000 --file long.mp3 --chunk-ms 50
 ```
 
-Defaults: `PARAKEET_MODEL_ID=nvidia/parakeet-tdt-0.6b`, streaming step `320ms`, context `10s`.
+Defaults: `PARAKEET_MODEL_ID=nvidia/parakeet-tdt-0.6b-v2`, streaming step `320ms`, context `10s`.
 
 ### Configuration
 
 Key environment variables (see `scripts/env.sh`):
 
-- `PARAKEET_MODEL_ID` (default: `nvidia/parakeet-tdt-0.6b`)
+- `PARAKEET_MODEL_ID` (default: `nvidia/parakeet-tdt-0.6b-v2`)
 - `PARAKEET_MICROBATCH_WINDOW_MS` (default: 8)
 - `PARAKEET_MICROBATCH_MAX_BATCH` (default: 32)
 - `PARAKEET_STREAM_STEP_MS` (default: 320)
