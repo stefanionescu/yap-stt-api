@@ -129,6 +129,7 @@ def one_stream(server: str, secure: bool, pcm_bytes: bytes, audio_seconds: float
     partial_ts: list[float] = []
     partials_count = 0
     final_len = 0
+    segment_finals: List[str] = []
     final_recv_ts = 0.0
     for resp in asr.streaming_response_generator(audio_chunks=audio_iter(), streaming_config=scfg):
         for r in resp.results:
@@ -143,7 +144,10 @@ def one_stream(server: str, secure: bool, pcm_bytes: bytes, audio_seconds: float
                     ttfw = now - t0
                     got_first = True
             elif r.is_final:
-                final_len = len(alt.transcript or "")
+                seg_txt = (alt.transcript or "").strip()
+                if seg_txt:
+                    segment_finals.append(seg_txt)
+                final_len = sum(len(s) for s in segment_finals)
                 final_recv_ts = time.perf_counter()
     wall = time.perf_counter() - t0
     metrics = _metrics(audio_seconds, wall, ttfw if got_first else None)

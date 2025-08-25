@@ -155,16 +155,14 @@ class RivaASRServicer(riva_asr_pb2_grpc.RivaSpeechRecognitionServicer):
             since_seg = len(full_buf) - seg_start_bytes
 
             should_cut = False
-            if since_seg >= self.seg_min_bytes:
+            # Always enforce a hard max segment length
+            if since_seg >= self.seg_len_bytes:
+                should_cut = True
+            elif since_seg >= self.seg_min_bytes:
                 tail_len = min(self.sil_win_bytes, since_seg)
-                if tail_len > 0:
-                    tail_pcm = pcm16_to_f32(memoryview(full_buf[-tail_len:])[:])
-                else:
-                    tail_pcm = np.asarray([], dtype=np.float32)
+                tail_pcm = pcm16_to_f32(memoryview(full_buf[-tail_len:])[:]) if tail_len > 0 else np.asarray([], dtype=np.float32)
                 if self._is_silence(tail_pcm):
                     should_cut = True
-            elif since_seg >= self.seg_len_bytes:
-                should_cut = True
 
             if should_cut:
                 seg_end_bytes = len(full_buf)
@@ -194,14 +192,16 @@ class RivaASRServicer(riva_asr_pb2_grpc.RivaSpeechRecognitionServicer):
                         except Exception as e:  # noqa: BLE001
                             await context.abort(grpc.StatusCode.INTERNAL, f"final_segment_error: {e}")
                             return
-                        yield riva_asr_pb2.StreamingRecognizeResponse(
-                            results=[
-                                riva_asr_pb2.StreamingRecognitionResult(
-                                    alternatives=[riva_asr_pb2.SpeechRecognitionAlternative(transcript=text2)],
-                                    is_final=True,
-                                )
-                            ]
-                        )
+                        text2 = (text2 or "").strip()
+                        if text2:
+                            yield riva_asr_pb2.StreamingRecognizeResponse(
+                                results=[
+                                    riva_asr_pb2.StreamingRecognitionResult(
+                                        alternatives=[riva_asr_pb2.SpeechRecognitionAlternative(transcript=text2)],
+                                        is_final=True,
+                                    )
+                                ]
+                            )
                         done_now.append((fut3, idx))
                 if done_now:
                     pending_segments = [p for p in pending_segments if p not in done_now]
@@ -215,14 +215,16 @@ class RivaASRServicer(riva_asr_pb2_grpc.RivaSpeechRecognitionServicer):
             except Exception as e:  # noqa: BLE001
                 await context.abort(grpc.StatusCode.INTERNAL, f"final_tail_error: {e}")
                 return
-            yield riva_asr_pb2.StreamingRecognizeResponse(
-                results=[
-                    riva_asr_pb2.StreamingRecognitionResult(
-                        alternatives=[riva_asr_pb2.SpeechRecognitionAlternative(transcript=text3)],
-                        is_final=True,
-                    )
-                ]
-            )
+            text3 = (text3 or "").strip()
+            if text3:
+                yield riva_asr_pb2.StreamingRecognizeResponse(
+                    results=[
+                        riva_asr_pb2.StreamingRecognitionResult(
+                            alternatives=[riva_asr_pb2.SpeechRecognitionAlternative(transcript=text3)],
+                            is_final=True,
+                        )
+                    ]
+                )
 
         # Emit any still-pending segment results
         for fut5, idx in pending_segments:
@@ -231,14 +233,16 @@ class RivaASRServicer(riva_asr_pb2_grpc.RivaSpeechRecognitionServicer):
             except Exception as e:  # noqa: BLE001
                 await context.abort(grpc.StatusCode.INTERNAL, f"final_segment_error: {e}")
                 return
-            yield riva_asr_pb2.StreamingRecognizeResponse(
-                results=[
-                    riva_asr_pb2.StreamingRecognitionResult(
-                        alternatives=[riva_asr_pb2.SpeechRecognitionAlternative(transcript=text4)],
-                        is_final=True,
-                    )
-                ]
-            )
+            text4 = (text4 or "").strip()
+            if text4:
+                yield riva_asr_pb2.StreamingRecognizeResponse(
+                    results=[
+                        riva_asr_pb2.StreamingRecognitionResult(
+                            alternatives=[riva_asr_pb2.SpeechRecognitionAlternative(transcript=text4)],
+                            is_final=True,
+                        )
+                    ]
+                )
 
     async def Recognize(self, request, context):  # type: ignore[override]
         if request.config.encoding != AudioEncoding.LINEAR_PCM:

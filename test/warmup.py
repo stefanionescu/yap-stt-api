@@ -50,6 +50,7 @@ def main() -> int:
     step = max(1, int(args.chunk_ms)) * bytes_per_ms
 
     partial_ts: list[float] = []
+    segment_finals: list[str] = []
     last_chunk_sent_ts = 0.0
     final_recv_ts = 0.0
 
@@ -79,7 +80,10 @@ def main() -> int:
                     got_first_partial = True
                     first_partial_ts = time.perf_counter()
                 if r.is_final:
-                    final_text = alt.transcript
+                    seg_txt = (alt.transcript or "").strip()
+                    if seg_txt:
+                        segment_finals.append(seg_txt)
+                    final_text = " ".join(segment_finals).strip()
                     final_recv_ts = time.perf_counter()
     else:
         # One-shot
