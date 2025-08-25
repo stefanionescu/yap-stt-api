@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-Parakeet ASR gRPC streaming client (Riva-compatible).
+Parakeet ASR gRPC client (Riva-compatible) — segmented one-shot or plain one-shot.
 
-Streams PCM16@16k from a file to simulate realtime voice and prints partials/final.
+Runs PCM16@16k from a file in 2.5s segments with 250ms overlap and prints finals,
+or runs a single one-shot request for the whole file.
 """
 import argparse
 import os
@@ -13,6 +14,7 @@ import time
 import json
 
 from utils import file_to_pcm16_mono_16k, file_duration_seconds
+import numpy as np
 
 
 SAMPLES_DIR = "samples"
@@ -43,9 +45,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--server", default=os.getenv("RIVA_SERVER", "localhost:8000"))
     parser.add_argument("--secure", action="store_true", help="Use TLS")
     parser.add_argument("--file", type=str, default="mid.wav", help="Audio file from samples/")
-    parser.add_argument("--chunk-ms", type=int, default=50, help="Chunk size in ms for streaming")
-    parser.add_argument("--mode", choices=["stream", "oneshot"], default="stream", help="Run streaming or one-shot ASR")
-    # Always stream in realtime
+    parser.add_argument("--mode", choices=["segmented", "oneshot"], default="segmented", help="Run segmented one-shot or plain one-shot")
     return parser.parse_args()
 
 
@@ -73,45 +73,15 @@ def main() -> None:
         max_alternatives=1,
         enable_automatic_punctuation=False,
     )
-    scfg = riva.client.StreamingRecognitionConfig(config=cfg, interim_results=True)
-
-    bytes_per_ms = int(16000 * 2 / 1000)
-    step = max(1, int(args.chunk_ms)) * bytes_per_ms
-
-    partial_ts: list[float] = []
-    last_chunk_sent_ts = 0.0
-    final_recv_ts = 0.0
-
-    def audio_iter():
-        yield riva.client.StreamingRecognizeRequest(streaming_config=scfg)
-        import time as _t
-        for i in range(0, len(pcm), step):
-            chunk = pcm[i : i + step]
-            yield riva.client.StreamingRecognizeRequest(audio_content=chunk)
-            last_chunk_sent_ts = _t.perf_counter() if hasattr(_t, "perf_counter") else _t.time()
-            _t.sleep(max(0.0, args.chunk_ms / 1000.0))
-
+    
     print(f"Connecting to: {args.server}")
     print(f"File: {os.path.basename(file_path)} ({duration:.2f}s)")
 
     final_text = ""
     t0 = time.perf_counter()
     try:
-        if args.mode == "stream":
-            for resp in asr.streaming_response_generator(audio_chunks=audio_iter(), streaming_config=scfg):
-                for r in resp.results:
-                    if not r.alternatives:
-                        continue
-                    alt = r.alternatives[0]
-                    if r.is_final:
-                        final_text = alt.transcript
-                        final_recv_ts = time.perf_counter()
-                        print("FINAL:", final_text)
-                    else:
-                        partial_ts.append(time.perf_counter() - t0)
-                        print("PART:", alt.transcript)
-        else:
-            # One-shot
+        if args.mode == "oneshot":
+            # Plain one-shot for the entire file
             try:
                 try:
                     resp = asr.offline_recognize(pcm, cfg)  # type: ignore[arg-type]
@@ -127,6 +97,58 @@ def main() -> None:
                         break
             finally:
                 pass
+        else:
+            # Segmented one-shot with 2.5s segments and 250ms overlap
+            wav = np.frombuffer(pcm, dtype=np.int16)
+            sr = 16000
+            seg_ms, min_ms, overlap_ms = 2500, 1500, 250
+            seg_len = int(seg_ms * sr / 1000)
+            min_len = int(min_ms * sr / 1000)
+            ovl = int(overlap_ms * sr / 1000)
+            edges: list[tuple[int, int, int]] = []
+            start = 0
+            while start + min_len < len(wav):
+                end = min(start + seg_len, len(wav))
+                edges.append((start, end, ovl))
+                if end >= len(wav):
+                    break
+                start = max(end - ovl, 0)
+            if not edges or edges[-1][1] < len(wav):
+                edges.append((edges[-1][1] if edges else 0, len(wav), 0))
+            s, e, _ = edges[-1]
+            edges[-1] = (s, e, 0)
+
+            finals: list[str] = []
+            t_start = time.perf_counter()
+            last_resp_ts = t_start
+            for (s, e, ovl) in edges:
+                # Pace to real-time boundary for the cut
+                cut_time = t_start + (e / float(sr))
+                now = time.perf_counter()
+                if cut_time > now:
+                    time.sleep(cut_time - now)
+                seg = wav[s:min(e + ovl, len(wav))]
+                pcm_seg = seg.astype(np.int16).tobytes()
+                try:
+                    try:
+                        resp = asr.offline_recognize(pcm_seg, cfg)  # type: ignore[arg-type]
+                    except TypeError:
+                        try:
+                            resp = asr.offline_recognize(audio=pcm_seg, config=cfg)  # type: ignore[call-arg]
+                        except AttributeError:
+                            resp = asr.recognize(pcm_seg, cfg)  # type: ignore[arg-type]
+                    txt = ""
+                    for r in getattr(resp, "results", []) or []:
+                        if getattr(r, "alternatives", None):
+                            txt = getattr(r.alternatives[0], "transcript", "") or ""
+                            break
+                    if txt:
+                        finals.append(txt.strip())
+                        print("FINAL(seg):", txt.strip())
+                finally:
+                    last_resp_ts = time.perf_counter()
+            final_text = " ".join([t for t in finals if t])
+            final_recv_ts = last_resp_ts
     except Exception as e:
         print(f"Error: {e}")
         return
@@ -139,13 +161,12 @@ def main() -> None:
 
     # Metrics
     elapsed_s = time.perf_counter() - t0
-    finalize_ms = ((final_recv_ts - last_chunk_sent_ts) * 1000.0) if (final_recv_ts and last_chunk_sent_ts) else 0.0
-    if len(partial_ts) >= 2:
-        gaps = [b - a for a, b in zip(partial_ts[:-1], partial_ts[1:])]
-        avg_gap_ms = (sum(gaps) / len(gaps)) * 1000.0
+    if args.mode == "segmented":
+        last_audio_ts = t0 + duration
+        finalize_ms = max(0.0, (final_recv_ts - last_audio_ts) * 1000.0)
     else:
-        avg_gap_ms = 0.0
-    print(f"Elapsed: {elapsed_s:.3f}s  Partials: {len(partial_ts)}  Avg partial gap: {avg_gap_ms:.1f} ms  Finalize: {finalize_ms:.1f} ms")
+        finalize_ms = 0.0
+    print(f"Elapsed: {elapsed_s:.3f}s  Finalize: {finalize_ms:.1f} ms")
 
     # Write single-record JSONL (overwrite each run)
     try:
@@ -154,11 +175,10 @@ def main() -> None:
         with open(out_dir / "client_metrics.jsonl", "w", encoding="utf-8") as f:
             f.write(json.dumps({
                 "elapsed_s": elapsed_s,
-                "partials": len(partial_ts),
-                "avg_partial_gap_ms": avg_gap_ms,
                 "finalize_ms": finalize_ms,
                 "file": os.path.basename(file_path),
                 "server": args.server,
+                "mode": args.mode,
             }, ensure_ascii=False) + "\n")
     except Exception as e:
         print(f"Warning: could not write client metrics: {e}")

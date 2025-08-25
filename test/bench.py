@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Benchmark gRPC streaming (Riva-compatible) for Parakeet ASR.
+Benchmark gRPC segmented or one-shot (Riva-compatible) for Parakeet ASR.
 
-Streams PCM16@16k from audio files in chunks to simulate realtime voice.
-Measures latency (wall), time-to-first-word, and throughput under concurrency.
+Runs PCM16@16k files either as a single Recognize or segmented one-shot with
+overlap, and measures latency (wall), finalize, and throughput under concurrency.
 """
 import argparse
 import asyncio
@@ -12,9 +12,10 @@ import statistics as stats
 import time
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import riva.client  # type: ignore
+import numpy as np
 import json
 import sys
 from pathlib import Path
@@ -97,74 +98,7 @@ def summarize(title: str, results: List[Dict[str, float]]) -> None:
         print(f"Partial gap | avg={stats.mean(gaps):.1f}  p50={p(gaps,0.50):.1f}  p95={p(gaps,0.95):.1f}")
 
 
-def one_stream(server: str, secure: bool, pcm_bytes: bytes, audio_seconds: float, chunk_ms: int) -> Dict[str, float]:
-    auth = riva.client.Auth(ssl_cert=None, use_ssl=bool(secure), uri=server)
-    asr = riva.client.ASRService(auth)
-    cfg = riva.client.RecognitionConfig(
-        encoding=riva.client.AudioEncoding.LINEAR_PCM,
-        sample_rate_hertz=16000,
-        language_code="en-US",
-        max_alternatives=1,
-        enable_automatic_punctuation=False,
-    )
-    scfg = riva.client.StreamingRecognitionConfig(config=cfg, interim_results=True)
-
-    bytes_per_ms = int(16000 * 2 / 1000)
-    step = max(1, int(chunk_ms)) * bytes_per_ms
-
-    last_chunk_sent_ts = 0.0
-
-    def audio_iter():
-        nonlocal last_chunk_sent_ts
-        # Yield raw PCM bytes to match warmup.py behavior; config is passed to generator
-        import time as _t
-        for i in range(0, len(pcm_bytes), step):
-            yield pcm_bytes[i : i + step]
-            last_chunk_sent_ts = _t.perf_counter() if hasattr(_t, "perf_counter") else _t.time()
-            _t.sleep(max(0.0, chunk_ms / 1000.0))
-
-    t0 = time.perf_counter()
-    got_first = False
-    ttfw = 0.0
-    partial_ts: list[float] = []
-    partials_count = 0
-    final_len = 0
-    segment_finals: List[str] = []
-    final_recv_ts = 0.0
-    for resp in asr.streaming_response_generator(audio_chunks=audio_iter(), streaming_config=scfg):
-        for r in resp.results:
-            if not r.alternatives:
-                continue
-            alt = r.alternatives[0]
-            if not r.is_final and alt.transcript:
-                partials_count += 1
-                now = time.perf_counter()
-                partial_ts.append(now - t0)
-                if not got_first:
-                    ttfw = now - t0
-                    got_first = True
-            elif r.is_final:
-                seg_txt = (alt.transcript or "").strip()
-                if seg_txt:
-                    segment_finals.append(seg_txt)
-                final_len = sum(len(s) for s in segment_finals)
-                final_recv_ts = time.perf_counter()
-    wall = time.perf_counter() - t0
-    metrics = _metrics(audio_seconds, wall, ttfw if got_first else None)
-    # Derive partial cadence metrics
-    if len(partial_ts) >= 2:
-        gaps = [b - a for a, b in zip(partial_ts[:-1], partial_ts[1:])]
-        avg_gap_ms = (sum(gaps) / len(gaps)) * 1000.0
-    else:
-        avg_gap_ms = 0.0
-    metrics.update({
-        "partials": float(partials_count),
-        "avg_partial_gap_ms": float(avg_gap_ms),
-        "final_len_chars": float(final_len),
-        "finalize_ms": float(((final_recv_ts - last_chunk_sent_ts) * 1000.0) if (final_recv_ts and last_chunk_sent_ts) else 0.0),
-        "mode": "stream",
-    })
-    return metrics
+# Streaming mode removed
 
 
 def one_oneshot(server: str, secure: bool, pcm_bytes: bytes, audio_seconds: float) -> Dict[str, float]:
@@ -203,6 +137,98 @@ def one_oneshot(server: str, secure: bool, pcm_bytes: bytes, audio_seconds: floa
     return metrics
 
 
+def _segment_edges(total_len: int, *, sr: int = 16000, seg_ms: int = 2500, min_ms: int = 1500, overlap_ms: int = 250) -> List[Tuple[int, int, int]]:
+    seg_len = int(seg_ms * sr / 1000)
+    min_len = int(min_ms * sr / 1000)
+    ovl = int(overlap_ms * sr / 1000)
+    edges: List[Tuple[int, int, int]] = []
+    start = 0
+    # Create full segments with overlap on the right
+    while start + min_len < total_len:
+        end = min(start + seg_len, total_len)
+        edges.append((start, end, ovl))
+        if end >= total_len:
+            break
+        start = max(end - ovl, 0)
+    # Ensure tail present
+    if not edges or edges[-1][1] < total_len:
+        edges.append((edges[-1][1] if edges else 0, total_len, 0))
+    # Force last segment to have zero overlap extension during request build
+    if edges:
+        s, e, _ = edges[-1]
+        edges[-1] = (s, e, 0)
+    return edges
+
+
+def one_segmented(
+    server: str,
+    secure: bool,
+    pcm_bytes: bytes,
+    audio_seconds: float,
+    *,
+    seg_ms: int = 2500,
+    min_ms: int = 1500,
+    overlap_ms: int = 250,
+) -> Dict[str, float]:
+    auth = riva.client.Auth(ssl_cert=None, use_ssl=bool(secure), uri=server)
+    asr = riva.client.ASRService(auth)
+    cfg = riva.client.RecognitionConfig(
+        encoding=riva.client.AudioEncoding.LINEAR_PCM,
+        sample_rate_hertz=16000,
+        language_code="en-US",
+        max_alternatives=1,
+        enable_automatic_punctuation=False,
+    )
+    # Build segments over samples
+    wav = np.frombuffer(pcm_bytes, dtype=np.int16)
+    sr = 16000
+    edges = _segment_edges(len(wav), sr=sr, seg_ms=seg_ms, min_ms=min_ms, overlap_ms=overlap_ms)
+
+    t0 = time.perf_counter()
+    last_resp_ts = t0
+    finals: List[str] = []
+
+    for i, (s, e, ovl) in enumerate(edges):
+        # Real-time pacing: ensure we don't "close" a segment before its audio time
+        cut_time = t0 + (e / float(sr))
+        now = time.perf_counter()
+        if cut_time > now:
+            time.sleep(cut_time - now)
+        # Slice with overlap except on last where ovl==0
+        seg = wav[s : min(e + ovl, len(wav))]
+        pcm_seg = seg.astype(np.int16).tobytes()
+        # Recognize this closed segment
+        try:
+            try:
+                resp = asr.offline_recognize(pcm_seg, cfg)  # type: ignore[arg-type]
+            except TypeError:
+                try:
+                    resp = asr.offline_recognize(audio=pcm_seg, config=cfg)  # type: ignore[call-arg]
+                except AttributeError:
+                    resp = asr.recognize(pcm_seg, cfg)  # type: ignore[arg-type]
+            seg_txt = ""
+            for r in getattr(resp, "results", []) or []:
+                if getattr(r, "alternatives", None):
+                    seg_txt = getattr(r.alternatives[0], "transcript", "") or ""
+                    break
+            if seg_txt:
+                finals.append(seg_txt.strip())
+        finally:
+            last_resp_ts = time.perf_counter()
+
+    wall = last_resp_ts - t0
+    metrics = _metrics(audio_seconds, wall, None)
+    last_audio_ts = t0 + audio_seconds
+    finalize_ms = max(0.0, (last_resp_ts - last_audio_ts) * 1000.0)
+    metrics.update({
+        "final_len_chars": float(sum(len(s) for s in finals)),
+        "segments": float(len(edges)),
+        "finalize_ms": float(finalize_ms),
+        "mode": "segmented",
+    })
+    return metrics
+
+
 async def bench_grpc(server: str, secure: bool, file_path: str, total_reqs: int, concurrency: int, chunk_ms: int, mode: str) -> tuple[List[Dict[str, float]], int, int]:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     try:
@@ -222,10 +248,10 @@ async def bench_grpc(server: str, secure: bool, file_path: str, total_reqs: int,
         nonlocal errors_total
         async with sem:
             try:
-                if mode == "stream":
-                    res = await asyncio.to_thread(one_stream, server, secure, pcm, audio_seconds, chunk_ms)
-                else:
+                if mode == "oneshot":
                     res = await asyncio.to_thread(one_oneshot, server, secure, pcm, audio_seconds)
+                else:  # segmented
+                    res = await asyncio.to_thread(one_segmented, server, secure, pcm, audio_seconds)
                 results.append(res)
             except Exception:
                 errors_total += 1
@@ -236,14 +262,14 @@ async def bench_grpc(server: str, secure: bool, file_path: str, total_reqs: int,
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="gRPC streaming benchmark")
+    ap = argparse.ArgumentParser(description="gRPC segmented/oneshot benchmark")
     ap.add_argument("--server", default="localhost:8000")
     ap.add_argument("--secure", action="store_true")
     ap.add_argument("--n", type=int, default=20, help="Total streams")
     ap.add_argument("--concurrency", type=int, default=5, help="Max concurrent streams")
     ap.add_argument("--file", type=str, default="mid.wav", help="Audio file from samples/")
-    ap.add_argument("--chunk-ms", type=int, default=50, help="Chunk size in ms for streaming")
-    ap.add_argument("--mode", choices=["stream", "oneshot"], default="stream", help="Run streaming or one-shot ASR")
+    ap.add_argument("--chunk-ms", type=int, default=50, help="Unused (kept for arg compat)")
+    ap.add_argument("--mode", choices=["oneshot", "segmented"], default="segmented", help="Run one-shot or segmented one-shot ASR")
     args = ap.parse_args()
 
     file_path = find_sample_by_name(args.file)
@@ -261,7 +287,7 @@ def main() -> None:
     results, rejected, errors = asyncio.run(bench_grpc(args.server, args.secure, file_path, args.n, args.concurrency, args.chunk_ms, args.mode))
     elapsed = time.time() - t0
 
-    summarize("gRPC Streaming", results)
+    summarize("gRPC", results)
     print(f"Rejected: {rejected}")
     print(f"Errors: {errors}")
     print(f"Total elapsed: {elapsed:.4f}s")

@@ -45,25 +45,7 @@ class Settings(BaseSettings):
     grpc_cert_path: str | None = os.getenv("PARAKEET_GRPC_CERT", None)
     grpc_key_path: str | None = os.getenv("PARAKEET_GRPC_KEY", None)
 
-    # Streaming cadence and context window
-    stream_step_ms: float = float(os.getenv("PARAKEET_STREAM_STEP_MS", "240"))
-    stream_context_seconds: float = float(os.getenv("PARAKEET_STREAM_CONTEXT_SECONDS", "4"))
-
-    # Streaming backpressure and decimation
-    stream_decimation_min_interval_ms: float = float(os.getenv("PARAKEET_STREAM_DECIMATION_MIN_INTERVAL_MS", "300"))
-    stream_decimation_when_hot: bool = os.getenv("PARAKEET_STREAM_DECIMATION_WHEN_HOT", "1") not in ("0", "false", "False")
-    stream_hot_queue_fraction: float = float(os.getenv("PARAKEET_STREAM_HOT_QUEUE_FRACTION", "0.5"))  # 0..1
-
-    # Per-tick inference timeout cap (seconds)
-    stream_tick_timeout_s: float = float(os.getenv("PARAKEET_STREAM_TICK_TIMEOUT_S", "1.0"))
-
-    # Simple VAD gating for partial ticks and eager finalize
-    vad_enable: bool = os.getenv("PARAKEET_VAD_ENABLE", "0") not in ("0", "false", "False")
-    vad_tail_ms: float = float(os.getenv("PARAKEET_VAD_TAIL_MS", "300"))
-    vad_energy_threshold: float = float(os.getenv("PARAKEET_VAD_ENERGY_THRESHOLD", "0.001"))
-    eager_sil_ms: float = float(os.getenv("PARAKEET_EAGER_SIL_MS", "500"))
-
-    # Segmentation knobs for finals
+    # Segmented one-shot defaults (client-side policy; kept here for reference)
     segment_len_ms: float = float(os.getenv("PARAKEET_SEGMENT_LEN_MS", "2500"))
     segment_min_ms: float = float(os.getenv("PARAKEET_SEGMENT_MIN_MS", "1500"))
     segment_overlap_ms: float = float(os.getenv("PARAKEET_SEGMENT_OVERLAP_MS", "250"))

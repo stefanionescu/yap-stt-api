@@ -84,8 +84,6 @@ async def main() -> None:
         secure=bool(settings.grpc_use_tls),
         cert=settings.grpc_cert_path,
         key=settings.grpc_key_path,
-        step_ms=settings.stream_step_ms,
-        max_ctx_seconds=settings.stream_context_seconds,
     )
 
     try:

@@ -1,12 +1,10 @@
-## Parakeet on GPU — Riva-compatible gRPC ASR (Pipecat-ready)
+## Parakeet on GPU — Riva-compatible gRPC ASR (segmented one-shot)
 
-This service runs NVIDIA Parakeet (NeMo) and exposes a Riva-compatible gRPC interface for streaming and single-shot ASR. It plugs directly into Pipecat’s `RivaSTTService` without NVIDIA cloud.
+This service runs NVIDIA Parakeet (NeMo) and exposes a Riva-compatible gRPC `Recognize` interface for single-shot ASR. For realtime UX, use segmented one-shot on the client: send 2.5s segments with 250ms overlap and stitch finals.
 
 - RPCs:
-  - `StreamingRecognize(stream StreamingRecognizeRequest) returns (stream StreamingRecognizeResponse)`
   - `Recognize(RecognizeRequest) returns (RecognizeResponse)`
 - Audio: PCM16 mono 16 kHz
-- Partials: emitted with `is_final=false`; final result with `is_final=true`
 
 GPU is strongly recommended. NeMo downloads model checkpoints automatically on first run.
 
@@ -16,15 +14,15 @@ GPU is strongly recommended. NeMo downloads model checkpoints automatically on f
 source scripts/env.sh
 bash scripts/start_bg.sh && bash scripts/tail_bg_logs.sh
 
-# Warmup (realtime streaming)
+# Warmup (segmented or oneshot)
 source .venv/bin/activate 2>/dev/null || true
-python3 test/warmup.py --server localhost:8000 --file long.mp3 --chunk-ms 50
+python3 test/warmup.py --server localhost:8000 --file long.mp3 --mode segmented
 
 # Check transcription/metrics written by warmup
 cat test/results/warmup.txt
 ```
 
-Defaults: `PARAKEET_MODEL_ID=nvidia/parakeet-tdt-0.6b-v2`, streaming step `240ms`, context `4s`.
+Defaults: `PARAKEET_MODEL_ID=nvidia/parakeet-tdt-0.6b-v2`.
 
 ### Purge / Reset
 
@@ -52,8 +50,6 @@ Key environment variables (see `scripts/env.sh`):
 - `PARAKEET_MODEL_ID` (default: `nvidia/parakeet-tdt-0.6b-v2`)
 - `PARAKEET_MICROBATCH_WINDOW_MS` (default: 8)
 - `PARAKEET_MICROBATCH_MAX_BATCH` (default: 32)
-- `PARAKEET_STREAM_STEP_MS` (default: 240)
-- `PARAKEET_STREAM_CONTEXT_SECONDS` (default: 4)
 - `PORT` (gRPC port, default: 8000)
 - TLS (optional): `PARAKEET_GRPC_TLS`, `PARAKEET_GRPC_CERT`, `PARAKEET_GRPC_KEY`
 
@@ -98,19 +94,19 @@ The server logs a diagnostic at startup indicating whether `cuda-python` was det
 
 ### Testing
 
-- Warmup (realtime streaming):
+- Warmup (segmented):
 ```bash
-python3 test/warmup.py --server localhost:8000 --file long.mp3 --chunk-ms 50
+python3 test/warmup.py --server localhost:8000 --file long.mp3 --mode segmented
 ```
 
-- Simple client (prints PART/FINAL):
+- Simple client (segmented):
 ```bash
-python3 test/client.py --server localhost:8000 --file mid.wav --chunk-ms 50
+python3 test/client.py --server localhost:8000 --file mid.wav --mode segmented
 ```
 
-- Benchmark (gRPC realtime streaming under concurrency):
+- Benchmark (segmented under concurrency):
 ```bash
-python3 test/bench.py --server localhost:8000 --n 20 --concurrency 5 --file long.mp3 --chunk-ms 50
+python3 test/bench.py --server localhost:8000 --n 20 --concurrency 5 --file long.mp3 --mode segmented
 ```
 
 ### Sources & docs
