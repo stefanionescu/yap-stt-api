@@ -88,9 +88,29 @@ kill_by_port() {
   fi
 }
 
+# Best-effort kill of server processes started via python -m src.server
+kill_server_by_pattern() {
+  local pids=""
+  if command -v pgrep >/dev/null 2>&1; then
+    # Match common patterns: python -m src.server or python ... src/server.py
+    pids=$(pgrep -f "python .* -m src\\.server|python .*src/server\\.py" || true)
+  else
+    # Fallback using ps/grep
+    pids=$(ps aux | grep -E "python .* -m src\\.server|python .*src/server\\.py" | grep -v grep | awk '{print $2}' || true)
+  fi
+  if [[ -n "$pids" ]]; then
+    echo "Killing server processes by pattern: $pids"
+    kill $pids || true
+    sleep 1
+    for p in $pids; do
+      if kill -0 "$p" 2>/dev/null; then kill -9 "$p" || true; fi
+    done
+  fi
+}
+
 echo "Stopping service..."
 kill_by_pidfile logs/server.pid
-kill_uvicorn_by_pattern
+kill_server_by_pattern
 kill_by_port
 
 echo "Service stopped. Beginning purge..."
