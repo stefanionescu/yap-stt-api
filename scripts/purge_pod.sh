@@ -25,7 +25,7 @@ usage() {
   cat <<EOF
 Usage: $0 [--logs] [--models] [--deps] [--all]
 
-Stops the FastAPI service and purges logs, caches, dependencies, and local model files.
+Stops the gRPC service and purges logs, caches, dependencies, and local model files.
 
 Defaults: With no flags, purges core artifacts (logs, models, deps).
 
@@ -72,21 +72,6 @@ kill_by_pidfile() {
       fi
     fi
     rm -f "$pidfile"
-  fi
-}
-
-kill_uvicorn_by_pattern() {
-  if command -v pgrep >/dev/null 2>&1; then
-    local pids
-    pids=$(pgrep -f "uvicorn .*src.server:app" || true)
-    if [[ -n "$pids" ]]; then
-      echo "Killing uvicorn PIDs: $pids"
-      kill $pids || true
-      sleep 1
-      for p in $pids; do
-        if kill -0 "$p" 2>/dev/null; then kill -9 "$p" || true; fi
-      done
-    fi
   fi
 }
 

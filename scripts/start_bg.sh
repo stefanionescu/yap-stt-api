@@ -21,11 +21,9 @@ if [[ ! -f .venv/bin/activate ]]; then
   fi
 else
   source .venv/bin/activate
-  python -c "import uvicorn" 2>/dev/null || pip install -r requirements.txt
+  pip install -r requirements.txt
 fi
 
 # Launch using venv python to ensure correct interpreter
-nohup python -m uvicorn src.server:app --host "${HOST:-0.0.0.0}" --port "${PORT:-8000}" --loop uvloop --http httptools --timeout-keep-alive 120 --backlog 1024 \
-  --ws-max-size "${WS_MAX_SIZE:-16777216}" --ws-ping-interval "${WS_PING_INTERVAL:-20}" --ws-ping-timeout "${WS_PING_TIMEOUT:-20}" \
-  > logs/server.log 2>&1 & echo $! > logs/server.pid
+nohup python -m src.server > logs/server.log 2>&1 & echo $! > logs/server.pid
 echo "Started with PID $(cat logs/server.pid). Logs: logs/server.log"

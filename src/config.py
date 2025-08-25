@@ -35,9 +35,16 @@ class Settings(BaseSettings):
     max_audio_seconds: float = float(os.getenv("PARAKEET_MAX_AUDIO_SECONDS", "600"))  # 10 minutes
     max_upload_mb: float = float(os.getenv("PARAKEET_MAX_UPLOAD_MB", "64"))
 
-    # API
-    host: str = os.getenv("HOST", "0.0.0.0")
-    port: int = int(os.getenv("PORT", "8000"))
+    # gRPC API
+    grpc_host: str = os.getenv("HOST", "0.0.0.0")
+    grpc_port: int = int(os.getenv("PORT", "8000"))
+    grpc_use_tls: bool = os.getenv("PARAKEET_GRPC_TLS", "0") not in ("0", "false", "False")
+    grpc_cert_path: str | None = os.getenv("PARAKEET_GRPC_CERT", None)
+    grpc_key_path: str | None = os.getenv("PARAKEET_GRPC_KEY", None)
+
+    # Streaming cadence and context window
+    stream_step_ms: float = float(os.getenv("PARAKEET_STREAM_STEP_MS", "320"))
+    stream_context_seconds: float = float(os.getenv("PARAKEET_STREAM_CONTEXT_SECONDS", "10"))
 
     # ASR dataloader + precision controls
     asr_batch_size: int = int(os.getenv("PARAKEET_ASR_BATCH_SIZE", "32"))

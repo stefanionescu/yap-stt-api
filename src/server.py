@@ -2,316 +2,60 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Dict
-import base64
-import uuid
 
 import numpy as np
-from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect, Form, Request, Query
-from pydantic import BaseModel
 
-from .audio import decode_and_resample, DecodedAudio
 from .config import settings
 from .logging_config import configure_logging
-from .metrics import Timer, RequestMetrics, log_request
 from .model import ParakeetModel
 from .scheduler import MicroBatchScheduler
-from .constants import PCM16_BYTES_PER_SAMPLE, PCM_CONTENT_TYPES, WS_EVENT_LIMIT_REACHED
+from .riva_server import start_riva_grpc_server
+
 
 logger = logging.getLogger("parakeet.server")
 configure_logging()
-app = FastAPI(title="Parakeet ASR (NeMo)")
-
-# Global runtime state
-_model: ParakeetModel | None = None
-_scheduler: MicroBatchScheduler | None = None
-_is_ready: bool = False
 
 
-class WordTimestamp(BaseModel):
-    word: str
-    start: float
-    end: float
-
-
-class TranscriptionResponse(BaseModel):
-    text: str
-    words: list[WordTimestamp] | None = None
-
-
-@app.on_event("startup")
-async def on_startup() -> None:
-    global _model, _scheduler, _is_ready
-    _model = ParakeetModel.load()
-    logger.info("Model loaded: %s", _model.model_id)
+async def main() -> None:
+    model = ParakeetModel.load()
+    logger.info("Model loaded: %s", model.model_id)
 
     maxsize = settings.queue_max_factor * settings.microbatch_max_batch
-    # Prefer micro-batching for better GPU utilization
-    def run_batch_fn(wavs: list[np.ndarray], srs: list[int]) -> list[str]:
-        return _model.recognize_waveforms(wavs, srs)  # type: ignore[union-attr]
 
-    _scheduler = MicroBatchScheduler(
+    def run_batch_fn(wavs: list[np.ndarray], srs: list[int]) -> list[str]:
+        return model.recognize_waveforms(wavs, srs)
+
+    scheduler = MicroBatchScheduler(
         maxsize=maxsize,
         run_batch_fn=run_batch_fn,
         window_ms=settings.microbatch_window_ms,
         max_batch=settings.microbatch_max_batch,
     )
-    _scheduler.start()
-    _is_ready = True
-    logger.info("MicroBatchScheduler started (window_ms=%s, max_batch=%s, queue maxsize=%d)",
-                settings.microbatch_window_ms, settings.microbatch_max_batch, maxsize)
+    scheduler.start()
+    logger.info(
+        "MicroBatchScheduler started (window_ms=%s, max_batch=%s, queue maxsize=%d)",
+        settings.microbatch_window_ms,
+        settings.microbatch_max_batch,
+        maxsize,
+    )
 
-
-@app.on_event("shutdown")
-async def on_shutdown() -> None:
-    global _scheduler, _is_ready
-    if _scheduler is not None:
-        await _scheduler.stop()
-    _is_ready = False
-
-
-@app.get("/healthz")
-async def healthz() -> Dict[str, Any]:
-    return {"status": "ok", "model": settings.model_id}
-
-
-@app.get("/readyz")
-async def readyz() -> Dict[str, Any]:
-    return {"ready": bool(_is_ready)}
-
-
-@app.post("/v1/audio/transcribe", response_model=TranscriptionResponse, response_model_exclude_none=True)
-async def openai_transcribe(
-    request: Request,
-    file: UploadFile | None = File(None),
-    timestamps: bool = Query(False),
-) -> TranscriptionResponse:
-    global _scheduler, _model
-    if _scheduler is None or _model is None or not _is_ready:
-        raise HTTPException(status_code=503, detail="Model not initialized")
-
-    # Input size validation
-    # Support multipart (UploadFile) or raw body (Content-Type: audio/pcm or application/octet-stream)
-    content_length = None
-    if file is not None and hasattr(file, "size"):
-        content_length = file.size  # type: ignore[attr-defined]
-    else:
-        try:
-            content_length = int(request.headers.get("content-length", "0")) or None
-        except Exception:
-            content_length = None
-    if content_length is not None:
-        max_bytes = int(settings.max_upload_mb * 1024 * 1024)
-        if content_length > max_bytes:
-            raise HTTPException(status_code=413, detail="Upload too large")
-
-    # Admission control — immediate 429 if full to keep latency predictable
-    if _scheduler.queue.full():
-        headers = {"Retry-After": str(int(settings.max_queue_wait_s))}
-        raise HTTPException(status_code=429, detail="Busy, try again later", headers=headers)
-
-    if file is not None:
-        raw = await file.read()
-        if content_length is None:
-            max_bytes = int(settings.max_upload_mb * 1024 * 1024)
-            if len(raw) > max_bytes:
-                raise HTTPException(status_code=413, detail="Upload too large")
-
-        filename = (file.filename or "").lower()
-        content_type = (file.content_type or "").lower()
-    else:
-        raw = await request.body()
-        if content_length is None:
-            max_bytes = int(settings.max_upload_mb * 1024 * 1024)
-            if len(raw) > max_bytes:
-                raise HTTPException(status_code=413, detail="Upload too large")
-        filename = ""
-        content_type = (request.headers.get("content-type") or "").lower()
-
-    # Accept containerized audio (mp3/ogg/wav/flac/...) and also raw PCM16 mono 16kHz (filename .pcm/.raw or audio/pcm)
-    if filename.endswith((".pcm", ".raw")) or content_type in PCM_CONTENT_TYPES:
-        try:
-            pcm = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
-            sr = 16000
-            decoded = DecodedAudio(waveform=pcm, sample_rate=sr, duration_seconds=float(len(pcm) / sr))
-        except Exception as e:
-            raise HTTPException(status_code=415, detail=f"Invalid PCM payload: {e}")
-    else:
-        decoded = decode_and_resample(raw)
-    # Trim to max duration instead of rejecting
-    if decoded.duration_seconds > settings.max_audio_seconds:
-        max_samps = int(settings.max_audio_seconds * decoded.sample_rate)
-        trimmed = decoded.waveform[:max_samps]
-        decoded = DecodedAudio(
-            waveform=trimmed,
-            sample_rate=decoded.sample_rate,
-            duration_seconds=float(len(trimmed) / float(decoded.sample_rate)),
-        )
-        logger.info("Input audio exceeded max duration; trimmed to %.2fs", settings.max_audio_seconds)
-
-    # Queue submit
-    # If timestamps requested, bypass scheduler and run single inference with timestamps for this request
-    if timestamps:
-        try:
-            text_words = _model.recognize_waveform_with_timestamps(decoded.waveform, decoded.sample_rate)  # type: ignore[union-attr]
-            words = text_words.get("words") or None
-            return TranscriptionResponse(text=str(text_words.get("text", "")), words=words)
-        except Exception as e:
-            logger.warning("timestamps path failed, falling back: %s", e)
-
-    fut = _scheduler.submit(decoded.waveform, decoded.sample_rate)
-    
-    # Duration-aware inference timeout budget
-    exp_infer = (decoded.duration_seconds / settings.expected_xrt_min) * settings.infer_timeout_safety
-    exp_infer = min(exp_infer, settings.infer_timeout_cap_s)
-    total_timeout = settings.max_queue_wait_s + exp_infer
-    
-    try:
-        text, _inference_dt, _queue_wait_s = await asyncio.wait_for(
-            fut, timeout=total_timeout
-        )  # type: ignore[misc]
-    except asyncio.TimeoutError:
-        if not fut.done():
-            fut.cancel()
-        raise HTTPException(status_code=503, detail="inference_timeout")
-
-    return TranscriptionResponse(text=text)
-
-
-@app.websocket("/v1/realtime")
-async def ws_realtime(ws: WebSocket) -> None:
-    # Echo OpenAI Realtime subprotocol if requested by client
-    subprotocol: str | None = None
-    try:
-        requested = (ws.headers.get("sec-websocket-protocol") or "").split(",")
-        requested = [p.strip() for p in requested if p.strip()]
-        for proto in ("openai-realtime", "realtime"):
-            if proto in requested:
-                subprotocol = proto
-                break
-    except Exception:
-        subprotocol = None
-
-    await ws.accept(subprotocol=subprotocol)
-    if _scheduler is None or _model is None or not _is_ready:
-        await ws.send_json({"type": "error", "error": {"type": "model_not_ready", "message": "Model not initialized"}})
-        await ws.close(code=1013)
-        return
-
-    # Send session created event
-    await ws.send_json({"type": "session.created", "id": str(uuid.uuid4())})
-
-    audio_buf = bytearray()
-    current_future: asyncio.Future | None = None
-    current_task: asyncio.Task | None = None
-    # Cap streaming buffer to first N seconds (PCM16 mono 16k)
-    target_sr = 16000
-    max_bytes_ws = int(settings.max_audio_seconds * target_sr * PCM16_BYTES_PER_SAMPLE)
-    limit_reached = False
+    # Start gRPC server (secure optional)
+    grpc_server = await start_riva_grpc_server(
+        model,
+        scheduler,
+        port=settings.grpc_port,
+        secure=bool(settings.grpc_use_tls),
+        cert=settings.grpc_cert_path,
+        key=settings.grpc_key_path,
+        step_ms=settings.stream_step_ms,
+        max_ctx_seconds=settings.stream_context_seconds,
+    )
 
     try:
-        while True:
-            msg = await ws.receive_json()
-            mtype = msg.get("type")
+        await grpc_server.wait_for_termination()
+    finally:
+        await scheduler.stop()
 
-            if mtype == "session.update" or mtype == "session.create":
-                await ws.send_json({"type": "session.updated"})
 
-            elif mtype == "input_audio_buffer.append":
-                # Expect base64-encoded PCM16 mono 16 kHz
-                b64 = msg.get("audio") or msg.get("audio_base64")
-                if not isinstance(b64, str):
-                    await ws.send_json({"type": "error", "error": {"type": "missing_audio_base64", "message": "audio_base64 string is required"}})
-                    continue
-                try:
-                    chunk = base64.b64decode(b64)
-                    if len(audio_buf) < max_bytes_ws:
-                        cap = max_bytes_ws - len(audio_buf)
-                        if len(chunk) > cap:
-                            audio_buf.extend(chunk[:cap])
-                            if not limit_reached:
-                                await ws.send_json({
-                                    "type": WS_EVENT_LIMIT_REACHED,
-                                    "max_seconds": float(settings.max_audio_seconds),
-                                })
-                                limit_reached = True
-                        else:
-                            audio_buf.extend(chunk)
-                    else:
-                        if not limit_reached:
-                            await ws.send_json({
-                                "type": WS_EVENT_LIMIT_REACHED,
-                                "max_seconds": float(settings.max_audio_seconds),
-                            })
-                            limit_reached = True
-                except Exception:
-                    await ws.send_json({"type": "error", "error": {"type": "invalid_base64", "message": "Invalid base64 audio chunk"}})
-
-            elif mtype == "input_audio_buffer.clear":
-                audio_buf.clear()
-                limit_reached = False
-                await ws.send_json({"type": "input_audio_buffer.cleared"})
-
-            elif mtype == "input_audio_buffer.commit":
-                await ws.send_json({"type": "input_audio_buffer.committed"})
-
-            elif mtype == "response.cancel":
-                # Cancel in-flight inference if any
-                if current_future is not None and not current_future.done():
-                    current_future.cancel()
-                if current_task is not None and not current_task.done():
-                    current_task.cancel()
-                current_future = None
-                current_task = None
-                await ws.send_json({"type": "response.cancelled"})
-
-            elif mtype == "response.create":
-                # Transcribe accumulated buffer
-                if not audio_buf:
-                    await ws.send_json({"type": "error", "error": {"type": "no_audio", "message": "No audio in buffer"}})
-                    continue
-                # Admission control — immediate backpressure for realtime
-                if _scheduler.queue.full() or (current_task is not None and not current_task.done()):
-                    await ws.send_json({"type": "error", "error": {"type": "busy", "message": "Too many requests or response in progress"}})
-                    continue
-                pcm = np.frombuffer(bytes(audio_buf), dtype=np.int16).astype(np.float32) / 32768.0
-                # Trim to max duration
-                max_samps = int(settings.max_audio_seconds * 16000)
-                if len(pcm) > max_samps:
-                    pcm = pcm[:max_samps]
-
-                fut = _scheduler.submit(pcm, 16000)
-                current_future = fut
-
-                async def _await_and_send() -> None:
-                    nonlocal current_future, current_task, audio_buf
-                    # Duration-aware inference timeout budget
-                    secs = len(pcm) / 16000.0
-                    exp_infer = (secs / settings.expected_xrt_min) * settings.infer_timeout_safety
-                    exp_infer = min(exp_infer, settings.infer_timeout_cap_s)
-                    total_timeout = settings.max_queue_wait_s + exp_infer
-                    try:
-                        text, _inf, _q = await asyncio.wait_for(fut, timeout=total_timeout)
-                    except asyncio.TimeoutError:
-                        await ws.send_json({"type": "error", "error": {"type": "inference_timeout", "message": "Inference timed out"}})
-                    except asyncio.CancelledError:
-                        # Cancellation is acknowledged separately via response.cancelled
-                        pass
-                    except Exception as e:
-                        await ws.send_json({"type": "error", "error": {"type": "inference_error", "message": str(e)}})
-                    else:
-                        await ws.send_json({"type": "response.output_text.delta", "delta": text})
-                        await ws.send_json({"type": "response.completed"})
-                    finally:
-                        current_future = None
-                        current_task = None
-                        # reset buffer for next turn
-                        audio_buf.clear()
-
-                current_task = asyncio.create_task(_await_and_send())
-
-            else:
-                await ws.send_json({"type": "error", "error": {"type": "unsupported_type", "message": "Unsupported event type"}})
-
-    except WebSocketDisconnect:
-        pass
+if __name__ == "__main__":
+    asyncio.run(main())
