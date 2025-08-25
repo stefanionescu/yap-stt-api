@@ -24,10 +24,6 @@ class ParakeetModel:
     @classmethod
     def load(cls) -> "ParakeetModel":
         desired_model_id = settings.model_id
-        # Force RNNT Parakeet-TDT if a CTC model id is provided (accuracy over CTC)
-        if "ctc" in desired_model_id.lower():
-            desired_model_id = "nvidia/parakeet-tdt-0.6b-v2"
-            logger.warning("CTC model id detected; overriding to RNNT: %s", desired_model_id)
         logger.info("Loading NeMo ASR model: %s", desired_model_id)
         asr_model = nemo_asr.models.ASRModel.from_pretrained(model_name=desired_model_id)
         # Enable local attention and chunking for long-form inference if configured

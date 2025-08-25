@@ -1,6 +1,6 @@
-## Parakeet TDT 0.6B FastAPI (NeMo)
+## Parakeet CTC 1.1B FastAPI (NeMo)
 
-A single-process FastAPI service that runs NVIDIA Parakeet TDT RNNT 0.6B v2 (English) using the NeMo toolkit, exposing OpenAI-compatible audio endpoints and a streaming WebSocket endpoint.
+A single-process FastAPI service that runs NVIDIA Parakeet CTC 1.1B v2 (English) using the NeMo toolkit, exposing OpenAI-compatible audio endpoints and a streaming WebSocket endpoint.
 
 - Endpoints:
   - `POST /v1/audio/transcriptions` — OpenAI-compatible transcription (multipart form: `file`)
@@ -26,7 +26,7 @@ python3 test/warmup.py
 cat test/results/warmup.txt
 ```
 
-Defaults: `PARAKEET_MODEL_ID=nvidia/parakeet-tdt-0.6b-v2`, `PARAKEET_USE_LOCAL_ATTENTION=1`, `PARAKEET_LOCAL_ATTENTION_CONTEXT=128`.
+Defaults: `PARAKEET_MODEL_ID=nvidia/parakeet-ctc-1.1b-v2`, `PARAKEET_USE_LOCAL_ATTENTION=1`, `PARAKEET_LOCAL_ATTENTION_CONTEXT=128`.
 NeMo checkpoints are fetched automatically; no local FP32 model directory is required.
 
 ### Admission control
@@ -38,7 +38,7 @@ NeMo checkpoints are fetched automatically; no local FP32 model directory is req
 
 ### Model
 
-Model is loaded via NeMo by `PARAKEET_MODEL_ID` (default: `nvidia/parakeet-tdt-0.6b-v2`). Local attention and chunking are enabled by default for long-form inference.
+Model is loaded via NeMo by `PARAKEET_MODEL_ID` (default: `nvidia/parakeet-ctc-1.1b-v2`). Local attention and chunking are enabled by default for long-form inference.
 
 ### API
 
@@ -67,7 +67,7 @@ python3 -m src.metrics --windows 30m 1h 3h 6h 12h 24h 3d
 
 Defaults live in `scripts/env.sh`. You can override via environment vars before `start.sh`.
 
-- `PARAKEET_MODEL_ID` (default: `nvidia/parakeet-tdt-0.6b-v2`)
+- `PARAKEET_MODEL_ID` (default: `nvidia/parakeet-ctc-1.1b-v2`)
 - `PARAKEET_USE_LOCAL_ATTENTION` (default: 1)
 - `PARAKEET_LOCAL_ATTENTION_CONTEXT` (default: 128)
 - `PARAKEET_SUBSAMPLING_CHUNKING_FACTOR` (default: 1)
