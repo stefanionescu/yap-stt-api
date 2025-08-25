@@ -54,8 +54,11 @@ def merge_segment(merged_tokens, new_text, *, max_overlap_tokens=10):
     add_tok = new_tok[best:]
     # also kill trivial 1–2 token repeats at the join (e.g., "the the", "it it")
     if add_tok and merged_tokens:
-        if len(add_tok) >= 1 and _norm_tokens(merged_tokens[-1]) == _norm_tokens(add_tok[:1])[0:1]:
-            add_tok = add_tok[1:]
+        if len(add_tok) >= 1:
+            prev_last = _norm_tokens(merged_tokens[-1])[:1]
+            add_first = _norm_tokens(add_tok[0])[:1]
+            if prev_last and prev_last == add_first:
+                add_tok = add_tok[1:]
         if len(add_tok) >= 2 and len(merged_tokens) >= 2:
             if _norm_tokens(" ".join(merged_tokens[-2:])) == _norm_tokens(" ".join(add_tok[:2])):
                 add_tok = add_tok[2:]
