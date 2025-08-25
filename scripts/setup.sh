@@ -7,7 +7,12 @@ VENV=.venv
 $PY -m venv $VENV
 source $VENV/bin/activate
 pip install --upgrade pip
+# Install PyTorch CUDA wheels first
 pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121 || true
+# Remove possible conflicting package named 'cuda' that can shadow cuda-python
+pip uninstall -y cuda || true
+# Ensure cuda-python is present (provides cuda.cudart)
+pip install -U cuda-python
 pip install -r requirements.txt
 
 echo "Venv ready. Activate with: source $VENV/bin/activate"

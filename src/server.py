@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import importlib
+import importlib.util
 
 import numpy as np
 
@@ -17,6 +19,40 @@ configure_logging()
 
 
 async def main() -> None:
+    # CUDA diagnostics: detect cuda-python availability and driver load
+    try:
+        cuda_spec = importlib.util.find_spec("cuda")
+        cudart_spec = importlib.util.find_spec("cuda.cudart")
+        if cuda_spec and not cudart_spec:
+            logger.warning(
+                "Found 'cuda' top-level module but no 'cuda.cudart'. A conflicting 'cuda' package may be installed."
+            )
+        cuda_mod = importlib.import_module("cuda")
+        # Try driver API first; this only requires libcuda (no full toolkit)
+        try:
+            cu = importlib.import_module("cuda.cuda")
+            try:
+                cu.cuInit(0)
+                _err, ndev_drv = cu.cuDeviceGetCount()
+                logger.info("cuda-python driver API ok; devices=%s", ndev_drv)
+            except Exception as e:
+                logger.warning("cuda driver API present but failed to query devices: %s", e)
+        except Exception:
+            pass
+        # Then try runtime API (requires libcudart from CUDA toolkit)
+        try:
+            cudart = importlib.import_module("cuda.cudart")
+            try:
+                _err, ndev = cudart.cudaGetDeviceCount()
+                num_devices = ndev
+            except Exception:
+                num_devices = -1
+            logger.info("cuda-python runtime API ok; cuda.cudart devices=%s", num_devices)
+        except Exception:
+            logger.info("cuda runtime API (cudart) not available; likely no CUDA toolkit in the container")
+    except Exception as e:
+        logger.warning("cuda-python import failed (no CUDA graphs optimizations): %s", e)
+
     model = ParakeetModel.load()
     logger.info("Model loaded: %s", model.model_id)
 

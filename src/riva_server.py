@@ -161,7 +161,14 @@ async def start_riva_grpc_server(
     step_ms: Optional[float] = None,
     max_ctx_seconds: Optional[float] = None,
 ):
-    opts = [("grpc.max_receive_message_length", 64 * 1024 * 1024)]
+    opts = [
+        ("grpc.max_receive_message_length", 64 * 1024 * 1024),
+        ("grpc.max_send_message_length", 64 * 1024 * 1024),
+        ("grpc.http2.max_pings_without_data", 0),
+        ("grpc.keepalive_permit_without_calls", 1),
+        ("grpc.keepalive_time_ms", 30000),
+        ("grpc.keepalive_timeout_ms", 20000),
+    ]
     server = grpc.aio.server(options=opts)
     servicer = RivaASRServicer(
         model,

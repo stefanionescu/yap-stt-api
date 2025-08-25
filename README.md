@@ -40,6 +40,40 @@ Key environment variables (see `scripts/env.sh`):
 - Local/dev (no TLS): subclass Pipecat’s Riva client to allow insecure channels, or run with a local override.
 - Prod: enable TLS on the gRPC server and point Pipecat at `your-domain:443`.
 
+#### Insecure vs TLS
+
+- Dev (insecure): server listens on `:8000` without TLS. Construct auth with `use_ssl=False`.
+
+```python
+import riva.client as rc
+auth = rc.Auth(ssl_cert=None, use_ssl=False, uri="localhost:8000")
+```
+
+- Prod (TLS): set `PARAKEET_GRPC_TLS=1` and provide cert/key paths:
+
+```bash
+PARAKEET_GRPC_TLS=1 \
+PARAKEET_GRPC_CERT=/path/server.crt \
+PARAKEET_GRPC_KEY=/path/server.key \
+bash scripts/start.sh
+```
+
+### CUDA and cuda-python troubleshooting
+
+NeMo may warn that `cuda-python` is missing, which disables certain CUDA graph optimizations for RNNT greedy decoding. Verify in the same venv used to start the server:
+
+```bash
+python -c "from cuda import cuda; cuda.cuInit(0); print('driver devices=', cuda.cuDeviceGetCount()[1])"
+```
+
+If this import fails:
+
+- Ensure `cuda-python` is installed in your venv: `pip show cuda-python` (our `scripts/setup.sh` installs/updates it and removes conflicting `cuda` package).
+- Confirm NVIDIA drivers and runtime are exposed in your container/host so `libcuda.so` is available.
+- Ensure `CUDA_VISIBLE_DEVICES` is set (see `scripts/env.sh`).
+
+The server logs a diagnostic at startup indicating whether `cuda-python` was detected.
+
 ### Testing
 
 - Warmup (realtime streaming):
