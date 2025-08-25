@@ -40,18 +40,24 @@ def merge_segment(merged_tokens, new_text, *, max_overlap_tokens=10):
         merged_tokens.extend(new_tok)
         return _detok(merged_tokens)
 
-    # find best overlap between suffix(merged) and prefix(new)
+    # find best overlap between suffix(merged) and (possibly shifted) prefix(new)
     prev_norm = _norm_tokens(_detok(merged_tokens))
     new_norm = _norm_tokens(new_text)
     K = min(max_overlap_tokens, len(prev_norm), len(new_norm))
-    best = 0
+    best_drop = 0
+    # allow a small shift at the start of new (e.g., leading 'the', 'a')
+    SHIFT_MAX = 3
     for k in range(K, 0, -1):
-        if prev_norm[-k:] == new_norm[:k]:
-            best = k
+        max_shift = min(SHIFT_MAX, max(0, len(new_norm) - k))
+        for shift in range(0, max_shift + 1):
+            if prev_norm[-k:] == new_norm[shift:shift + k]:
+                best_drop = shift + k
+                break
+        if best_drop:
             break
 
     # drop the overlapped prefix from new segment
-    add_tok = new_tok[best:]
+    add_tok = new_tok[best_drop:]
     # also kill trivial 1–2 token repeats at the join (e.g., "the the", "it it")
     if add_tok and merged_tokens:
         if len(add_tok) >= 1:
