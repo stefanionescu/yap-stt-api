@@ -39,12 +39,12 @@ class ParakeetModel:
             except Exception as e:
                 logger.warning("Failed to configure local attention/chunking: %s", e)
 
-        # Prefer greedy_batch only for CTC models; RNNT uses its own decoding configs
+        # Prefer greedy_batch only for CTC and TDT models; RNNT uses its own decoding configs
         try:
             cls_name = asr_model.__class__.__name__
-            if "CTC" in cls_name and hasattr(asr_model, "change_decoding_strategy"):
+            if "ctc" in cls_name and hasattr(asr_model, "change_decoding_strategy"):
                 asr_model.change_decoding_strategy(decoding_cfg={"strategy": "greedy_batch"})  # type: ignore[arg-type]
-                logger.info("CTC decoding strategy set to greedy_batch")
+                logger.info("Decoding strategy set to greedy_batch")
             # For RNNT, hint to allow CUDA graphs if decoder supports it (NVIDIA recommends for speed)
             if "RNNT" in cls_name and hasattr(asr_model, "change_decoding_strategy"):
                 try:
