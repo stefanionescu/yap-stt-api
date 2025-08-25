@@ -7,8 +7,6 @@ TORCH_CACHE_DIR=${TORCH_CACHE_DIR:-"$HOME/.cache/torch"}
 PIP_CACHE_DIR=${PIP_CACHE_DIR:-"$HOME/.cache/pip"}
 VENV_DIR=${VENV_DIR:-".venv"}
 MODELS_DIR_HOST=${MODELS_DIR_HOST:-"models"}
-# Legacy var; no longer used
-PARAKEET_MODEL_DIR=${PARAKEET_MODEL_DIR:-""}
  
 # Purge core artifacts by default (no flags needed).
 DO_LOGS=1

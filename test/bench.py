@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Dict, List
 
 import riva.client  # type: ignore
+import json
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent))
@@ -85,6 +86,16 @@ def summarize(title: str, results: List[Dict[str, float]]) -> None:
     print(f"xRT         | avg={stats.mean(xrt):.4f}")
     print(f"Throughput  | avg={stats.mean(throughput):.2f} min/min")
 
+    # Finalization latency percentiles across streams
+    fin = [r.get("finalize_ms", 0.0) for r in results if r.get("finalize_ms", 0.0) > 0]
+    if fin:
+        print(f"Finalize ms | avg={stats.mean(fin):.1f}  p50={p(fin,0.50):.1f}  p95={p(fin,0.95):.1f}")
+
+    # Partial cadence (avg gap) percentiles across streams
+    gaps = [r.get("avg_partial_gap_ms", 0.0) for r in results if r.get("avg_partial_gap_ms", 0.0) > 0]
+    if gaps:
+        print(f"Partial gap | avg={stats.mean(gaps):.1f}  p50={p(gaps,0.50):.1f}  p95={p(gaps,0.95):.1f}")
+
 
 def one_stream(server: str, secure: bool, pcm_bytes: bytes, audio_seconds: float, chunk_ms: int) -> Dict[str, float]:
     auth = riva.client.Auth(ssl_cert=None, use_ssl=bool(secure), uri=server)
@@ -147,11 +158,48 @@ def one_stream(server: str, secure: bool, pcm_bytes: bytes, audio_seconds: float
         "avg_partial_gap_ms": float(avg_gap_ms),
         "final_len_chars": float(final_len),
         "finalize_ms": float(((final_recv_ts - last_chunk_sent_ts) * 1000.0) if (final_recv_ts and last_chunk_sent_ts) else 0.0),
+        "mode": "stream",
     })
     return metrics
 
 
-async def bench_grpc(server: str, secure: bool, file_path: str, total_reqs: int, concurrency: int, chunk_ms: int) -> tuple[List[Dict[str, float]], int, int]:
+def one_oneshot(server: str, secure: bool, pcm_bytes: bytes, audio_seconds: float) -> Dict[str, float]:
+    auth = riva.client.Auth(ssl_cert=None, use_ssl=bool(secure), uri=server)
+    asr = riva.client.ASRService(auth)
+    cfg = riva.client.RecognitionConfig(
+        encoding=riva.client.AudioEncoding.LINEAR_PCM,
+        sample_rate_hertz=16000,
+        language_code="en-US",
+        max_alternatives=1,
+        enable_automatic_punctuation=False,
+    )
+    t0 = time.perf_counter()
+    text = ""
+    try:
+        # Try common method signatures across riva client versions
+        try:
+            resp = asr.offline_recognize(pcm_bytes, cfg)  # type: ignore[arg-type]
+        except TypeError:
+            try:
+                resp = asr.offline_recognize(audio=pcm_bytes, config=cfg)  # type: ignore[call-arg]
+            except AttributeError:
+                resp = asr.recognize(pcm_bytes, cfg)  # type: ignore[arg-type]
+        for r in getattr(resp, "results", []) or []:
+            if getattr(r, "alternatives", None):
+                alt = r.alternatives[0]
+                text = getattr(alt, "transcript", "") or ""
+                break
+    finally:
+        wall = time.perf_counter() - t0
+    metrics = _metrics(audio_seconds, wall, None)
+    metrics.update({
+        "final_len_chars": float(len(text)),
+        "mode": "oneshot",
+    })
+    return metrics
+
+
+async def bench_grpc(server: str, secure: bool, file_path: str, total_reqs: int, concurrency: int, chunk_ms: int, mode: str) -> tuple[List[Dict[str, float]], int, int]:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     try:
         with open(ERRORS_FILE, "w", encoding="utf-8") as ef:
@@ -170,7 +218,10 @@ async def bench_grpc(server: str, secure: bool, file_path: str, total_reqs: int,
         nonlocal errors_total
         async with sem:
             try:
-                res = await asyncio.to_thread(one_stream, server, secure, pcm, audio_seconds, chunk_ms)
+                if mode == "stream":
+                    res = await asyncio.to_thread(one_stream, server, secure, pcm, audio_seconds, chunk_ms)
+                else:
+                    res = await asyncio.to_thread(one_oneshot, server, secure, pcm, audio_seconds)
                 results.append(res)
             except Exception:
                 errors_total += 1
@@ -188,6 +239,7 @@ def main() -> None:
     ap.add_argument("--concurrency", type=int, default=5, help="Max concurrent streams")
     ap.add_argument("--file", type=str, default="mid.wav", help="Audio file from samples/")
     ap.add_argument("--chunk-ms", type=int, default=50, help="Chunk size in ms for streaming")
+    ap.add_argument("--mode", choices=["stream", "oneshot"], default="stream", help="Run streaming or one-shot ASR")
     args = ap.parse_args()
 
     file_path = find_sample_by_name(args.file)
@@ -198,11 +250,11 @@ def main() -> None:
             print(f"Available files: {[os.path.basename(f) for f in available]}")
         return
 
-    print(f"Benchmark → gRPC | n={args.n} | concurrency={args.concurrency} | server={args.server}")
+    print(f"Benchmark → gRPC ({args.mode}) | n={args.n} | concurrency={args.concurrency} | server={args.server}")
     print(f"File: {os.path.basename(file_path)}")
 
     t0 = time.time()
-    results, rejected, errors = asyncio.run(bench_grpc(args.server, args.secure, file_path, args.n, args.concurrency, args.chunk_ms))
+    results, rejected, errors = asyncio.run(bench_grpc(args.server, args.secure, file_path, args.n, args.concurrency, args.chunk_ms, args.mode))
     elapsed = time.time() - t0
 
     summarize("gRPC Streaming", results)
@@ -213,6 +265,17 @@ def main() -> None:
         total_audio = sum(r["audio_s"] for r in results)
         print(f"Total audio processed: {total_audio:.2f}s")
         print(f"Overall throughput: {total_audio/elapsed*60:.2f} sec/min = {total_audio/elapsed:.2f} min/min")
+
+    # Write per-stream metrics JSONL (overwrite each run)
+    try:
+        RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+        metrics_path = RESULTS_DIR / "bench_metrics.jsonl"
+        with open(metrics_path, "w", encoding="utf-8") as f:
+            for rec in results:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        print(f"Saved per-stream metrics to {metrics_path}")
+    except Exception as e:
+        print(f"Warning: could not write metrics JSONL: {e}")
 
 
 if __name__ == "__main__":
