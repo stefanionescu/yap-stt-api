@@ -4,7 +4,7 @@ import asyncio
 import itertools
 import time
 from dataclasses import dataclass
-from typing import Callable, Optional, List
+from typing import Callable, Optional, List, Tuple
 
 import numpy as np
 
@@ -33,8 +33,10 @@ class MicroBatchScheduler:
         window_ms: float = 15.0,
         max_batch: int = 4,
     ):
-        # FIFO queue of work items
-        self.queue: "asyncio.Queue[WorkItem]" = asyncio.Queue(maxsize=maxsize)
+        # Priority queue of work items (earliest enqueued first)
+        # Store entries as (priority_key, seq, WorkItem)
+        self.queue: "asyncio.PriorityQueue[Tuple[float, int, WorkItem]]" = asyncio.PriorityQueue(maxsize=maxsize)
+        self._maxsize = int(maxsize)
         self._seq = itertools.count()
         self._run_batch_fn = run_batch_fn
         self._window_ms = max(0.0, float(window_ms))
@@ -59,13 +61,22 @@ class MicroBatchScheduler:
             future=fut,
             enqueued_ts=time.time(),
         )
-        self.queue.put_nowait(item)
+        # Earlier enqueue time -> smaller key -> higher priority
+        prio_key = time.monotonic()
+        # Use seq for stable tiebreaking
+        self.queue.put_nowait((prio_key, item.seq, item))
         return fut
+
+    def qsize(self) -> int:
+        return self.queue.qsize()
+
+    def maxsize(self) -> int:
+        return self._maxsize
 
     async def _aggregator(self) -> None:
         while True:
             # block for the first item
-            first = await self.queue.get()
+            _prio, _seq, first = await self.queue.get()
             batch_items: List[WorkItem] = [first]
 
             # compute deadline
@@ -75,7 +86,8 @@ class MicroBatchScheduler:
                 if timeout <= 0:
                     break
                 try:
-                    nxt = await asyncio.wait_for(self.queue.get(), timeout)
+                    prio_seq_item = await asyncio.wait_for(self.queue.get(), timeout)
+                    _prio2, _seq2, nxt = prio_seq_item
                     batch_items.append(nxt)
                 except asyncio.TimeoutError:
                     break

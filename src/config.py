@@ -46,6 +46,14 @@ class Settings(BaseSettings):
     stream_step_ms: float = float(os.getenv("PARAKEET_STREAM_STEP_MS", "320"))
     stream_context_seconds: float = float(os.getenv("PARAKEET_STREAM_CONTEXT_SECONDS", "10"))
 
+    # Streaming backpressure and decimation
+    stream_decimation_min_interval_ms: float = float(os.getenv("PARAKEET_STREAM_DECIMATION_MIN_INTERVAL_MS", "250"))
+    stream_decimation_when_hot: bool = os.getenv("PARAKEET_STREAM_DECIMATION_WHEN_HOT", "1") not in ("0", "false", "False")
+    stream_hot_queue_fraction: float = float(os.getenv("PARAKEET_STREAM_HOT_QUEUE_FRACTION", "0.7"))  # 0..1
+
+    # Per-tick inference timeout cap (seconds)
+    stream_tick_timeout_s: float = float(os.getenv("PARAKEET_STREAM_TICK_TIMEOUT_S", "1.2"))
+
     # ASR dataloader + precision controls
     asr_batch_size: int = int(os.getenv("PARAKEET_ASR_BATCH_SIZE", "32"))
     asr_num_workers: int = int(os.getenv("PARAKEET_ASR_NUM_WORKERS", "0"))
