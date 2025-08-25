@@ -234,14 +234,38 @@ fi
 
 if [[ $DO_APT_REMOVE_CUDA -eq 1 ]]; then
   echo "Removing system CUDA/toolkit packages via apt-get (destructive)..."
-  if command -v apt-get >/devnull 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then
     export DEBIAN_FRONTEND=noninteractive
-    apt-get update -y || true
-    # Remove common CUDA/toolkit packages; ignore failures
-    apt-get remove -y --purge \
+
+    # Helper: remove only currently installed packages matching patterns
+    apt_remove_installed() {
+      local patterns=("$@")
+      local to_remove=()
+      local pat names
+      for pat in "${patterns[@]}"; do
+        names=$(dpkg -l "$pat" 2>/dev/null | awk '/^ii/ {print $2}')
+        if [[ -n "$names" ]]; then
+          while IFS= read -r n; do
+            # de-duplicate
+            if [[ -n "$n" && ! " ${to_remove[*]} " =~ " $n " ]]; then
+              to_remove+=("$n")
+            fi
+          done <<< "$names"
+        fi
+      done
+      if [[ ${#to_remove[@]} -gt 0 ]]; then
+        echo "Purging: ${to_remove[*]}"
+        apt-get remove -y --purge --allow-change-held-packages "${to_remove[@]}" || true
+      fi
+    }
+
+    apt_remove_installed \
       'cuda-*' 'nvidia-cuda-toolkit' \
-      'libcudnn*' 'libnvinfer*' 'libcublas*' 'libcurand*' 'libcusolver*' 'libcusparse*' 'libcufft*' || true
-    apt-get autoremove -y || true
+      'cuda-compat-*' 'cuda-drivers*' \
+      'libcudnn*' 'libnvinfer*' 'libcublas*' 'libcurand*' 'libcusolver*' 'libcusparse*' 'libcufft*' \
+      'libnvjitlink*' 'libnvfatbin*' 'libnvjpeg*' 'libnpp*' 'libcufile*' 'cuda-keyring'
+
+    apt-get autoremove -y --purge || true
     apt-get clean || true
     rm -rf /var/lib/apt/lists/* /var/cache/apt/* || true
   fi

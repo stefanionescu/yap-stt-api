@@ -24,7 +24,7 @@ python3 test/warmup.py --server localhost:8000 --file long.mp3 --chunk-ms 50
 cat test/results/warmup.txt
 ```
 
-Defaults: `PARAKEET_MODEL_ID=nvidia/parakeet-tdt-0.6b-v2`, streaming step `320ms`, context `10s`.
+Defaults: `PARAKEET_MODEL_ID=nvidia/parakeet-tdt-0.6b-v2`, streaming step `240ms`, context `4s`.
 
 ### Purge / Reset
 

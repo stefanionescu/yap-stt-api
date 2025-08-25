@@ -116,10 +116,10 @@ def one_stream(server: str, secure: bool, pcm_bytes: bytes, audio_seconds: float
 
     def audio_iter():
         nonlocal last_chunk_sent_ts
-        yield riva.client.StreamingRecognizeRequest(streaming_config=scfg)
+        # Yield raw PCM bytes to match warmup.py behavior; config is passed to generator
         import time as _t
         for i in range(0, len(pcm_bytes), step):
-            yield riva.client.StreamingRecognizeRequest(audio_content=pcm_bytes[i : i + step])
+            yield pcm_bytes[i : i + step]
             last_chunk_sent_ts = _t.perf_counter() if hasattr(_t, "perf_counter") else _t.time()
             _t.sleep(max(0.0, chunk_ms / 1000.0))
 
