@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 from dataclasses import dataclass
+import os
 from typing import List, Any
 
 import numpy as np
@@ -166,7 +167,8 @@ class ParakeetModel:
         return results
 
     def recognize_waveform_with_timestamps(self, waveform: np.ndarray, sample_rate: int) -> dict:
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as tmp:
+        tmpdir = "/dev/shm" if os.path.isdir("/dev/shm") else None
+        with tempfile.NamedTemporaryFile(suffix=".wav", dir=tmpdir, delete=True) as tmp:
             sf.write(tmp.name, waveform, sample_rate)
             out = self._transcribe_paths_with_timestamps([tmp.name])[0]
         return out
@@ -206,17 +208,19 @@ class ParakeetModel:
         return self._normalize_outputs(outputs)
 
     def recognize_waveform(self, waveform: np.ndarray, sample_rate: int) -> str:
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as tmp:
+        tmpdir = "/dev/shm" if os.path.isdir("/dev/shm") else None
+        with tempfile.NamedTemporaryFile(suffix=".wav", dir=tmpdir, delete=True) as tmp:
             sf.write(tmp.name, waveform, sample_rate)
             out = self._transcribe_paths([tmp.name])[0]
         return out
 
     def recognize_waveforms(self, waveforms: List[np.ndarray], sample_rates: List[int]) -> List[str]:
+        tmpdir = "/dev/shm" if os.path.isdir("/dev/shm") else None
         tmp_files: List[tempfile.NamedTemporaryFile] = []
         paths: List[str] = []
         try:
             for wav, sr in zip(waveforms, sample_rates):
-                tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+                tmp = tempfile.NamedTemporaryFile(suffix=".wav", dir=tmpdir, delete=False)
                 sf.write(tmp.name, wav, sr)
                 tmp_files.append(tmp)
                 paths.append(tmp.name)

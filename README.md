@@ -19,9 +19,31 @@ bash scripts/start_bg.sh && bash scripts/tail_bg_logs.sh
 # Warmup (realtime streaming)
 source .venv/bin/activate 2>/dev/null || true
 python3 test/warmup.py --server localhost:8000 --file long.mp3 --chunk-ms 50
+
+# Check transcription/metrics written by warmup
+cat test/results/warmup.txt
 ```
 
 Defaults: `PARAKEET_MODEL_ID=nvidia/parakeet-tdt-0.6b-v2`, streaming step `320ms`, context `10s`.
+
+### Purge / Reset
+
+If you need to stop the service and clear local caches/models/deps/bytecode, run:
+
+```bash
+bash scripts/purge_pod.sh
+```
+
+Selective purge examples:
+
+```bash
+bash scripts/purge_pod.sh --logs    # only logs
+bash scripts/purge_pod.sh --models  # HF/NeMo/Torch caches + ./models
+bash scripts/purge_pod.sh --deps    # .venv + pip cache
+bash scripts/purge_pod.sh --repo    # __pycache__/ and *.pyc
+```
+
+Note: See `scripts/purge_pod.sh` for details and destructive options.
 
 ### Configuration
 
@@ -30,8 +52,8 @@ Key environment variables (see `scripts/env.sh`):
 - `PARAKEET_MODEL_ID` (default: `nvidia/parakeet-tdt-0.6b-v2`)
 - `PARAKEET_MICROBATCH_WINDOW_MS` (default: 8)
 - `PARAKEET_MICROBATCH_MAX_BATCH` (default: 32)
-- `PARAKEET_STREAM_STEP_MS` (default: 320)
-- `PARAKEET_STREAM_CONTEXT_SECONDS` (default: 10)
+- `PARAKEET_STREAM_STEP_MS` (default: 240)
+- `PARAKEET_STREAM_CONTEXT_SECONDS` (default: 4)
 - `PORT` (gRPC port, default: 8000)
 - TLS (optional): `PARAKEET_GRPC_TLS`, `PARAKEET_GRPC_CERT`, `PARAKEET_GRPC_KEY`
 

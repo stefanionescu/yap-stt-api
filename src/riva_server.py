@@ -44,7 +44,11 @@ class RivaASRServicer(riva_asr_pb2_grpc.RivaSpeechRecognitionServicer):
 
     async def StreamingRecognize(self, request_iterator, context):  # type: ignore[override]
         cfg = None
-        buf = bytearray()
+        # Rolling context buffer (bounded) for partials and full buffer for final
+        ctx_buf = bytearray()
+        full_buf = bytearray()
+        # Track bytes since last emit to gate cadence
+        since_last_emit = 0
         last_emit_monotonic = 0.0
 
         first = True
@@ -57,52 +61,54 @@ class RivaASRServicer(riva_asr_pb2_grpc.RivaSpeechRecognitionServicer):
                 # Minimal validation; support only LINEAR_PCM mono 16 kHz
                 if cfg.config.encoding != AudioEncoding.LINEAR_PCM:
                     await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "only LINEAR_PCM supported")
+                # Respect interim_results if present (default True)
+                interim = getattr(cfg, "interim_results", True)
                 continue
 
             if not req.audio_content:
                 continue
 
-            buf.extend(req.audio_content)
+            chunk = req.audio_content
+            full_buf.extend(chunk)
+            ctx_buf.extend(chunk)
+            since_last_emit += len(chunk)
 
-            # Emit at cadence governed by step_bytes, but optionally decimate under load
-            if len(buf) >= self.step_bytes:
-                now_mono = asyncio.get_running_loop().time()
-                queue_fraction = 0.0
-                try:
-                    queue_fraction = self.scheduler.qsize() / max(1, self.scheduler.maxsize())
-                except Exception:
-                    pass
+            # Bound rolling context buffer
+            if len(ctx_buf) > self.max_ctx_bytes:
+                del ctx_buf[:-self.max_ctx_bytes]
 
-                # Decimation: if hot and last emit was too recent, skip this tick
-                if self.decimation_when_hot and queue_fraction >= self.hot_queue_threshold:
-                    if (now_mono - last_emit_monotonic) < self.decimation_min_interval_s:
-                        # drop this partial emit to reduce pressure; keep rolling context bounded
-                        if len(buf) > self.max_ctx_bytes:
-                            # trim to last max_ctx_bytes
-                            del buf[:-self.max_ctx_bytes]
-                        continue
+            # Only emit when NEW audio since last emit crosses cadence
+            if since_last_emit < self.step_bytes:
+                continue
 
-                pcm = pcm16_to_f32(memoryview(buf)[:])
-                if pcm.shape[0] > self.max_ctx_samps:
-                    # Keep only rightmost max_ctx_samps; model will re-use limited left context implicit in audio
-                    pcm = pcm[-self.max_ctx_samps :]
+            now_mono = asyncio.get_running_loop().time()
+            queue_fraction = 0.0
+            try:
+                queue_fraction = self.scheduler.qsize() / max(1, self.scheduler.maxsize())
+            except Exception:
+                pass
 
-                fut = self.scheduler.submit(pcm, SAMPLE_RATE)
-                try:
-                    text, *_ = await asyncio.wait_for(fut, timeout=self.tick_timeout_s)
-                except asyncio.TimeoutError:
-                    # Skip missed tick; bound rolling context so we don't grow unbounded
-                    if len(buf) > self.max_ctx_bytes:
-                        del buf[:-self.max_ctx_bytes]
+            # Decimate under heat if needed
+            if self.decimation_when_hot and queue_fraction >= self.hot_queue_threshold:
+                if (now_mono - last_emit_monotonic) < self.decimation_min_interval_s:
                     continue
-                except Exception as e:  # noqa: BLE001
-                    await context.abort(grpc.StatusCode.INTERNAL, f"inference_error: {e}")
 
-                last_emit_monotonic = now_mono
-                # retain only last max_ctx_bytes as rolling context for next tick
-                if len(buf) > self.max_ctx_bytes:
-                    del buf[:-self.max_ctx_bytes]
+            pcm = pcm16_to_f32(memoryview(ctx_buf)[:])
+            if pcm.shape[0] > self.max_ctx_samps:
+                pcm = pcm[-self.max_ctx_samps :]
 
+            fut = self.scheduler.submit(pcm, SAMPLE_RATE)
+            try:
+                text, *_ = await asyncio.wait_for(fut, timeout=self.tick_timeout_s)
+            except asyncio.TimeoutError:
+                continue
+            except Exception as e:  # noqa: BLE001
+                await context.abort(grpc.StatusCode.INTERNAL, f"inference_error: {e}")
+
+            last_emit_monotonic = now_mono
+            since_last_emit = 0
+
+            if interim:
                 yield riva_asr_pb2.StreamingRecognizeResponse(
                     results=[
                         riva_asr_pb2.StreamingRecognitionResult(
@@ -113,10 +119,10 @@ class RivaASRServicer(riva_asr_pb2_grpc.RivaSpeechRecognitionServicer):
                     ]
                 )
 
-        # Final flush
-        if buf:
+        # Final flush over the full session buffer
+        if full_buf:
             try:
-                pcm = pcm16_to_f32(memoryview(buf)[:])
+                pcm = pcm16_to_f32(memoryview(full_buf)[:])
                 text = self.model.recognize_waveform(pcm, SAMPLE_RATE)
             except Exception as e:  # noqa: BLE001
                 await context.abort(grpc.StatusCode.INTERNAL, f"final_inference_error: {e}")
