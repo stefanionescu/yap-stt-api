@@ -23,12 +23,12 @@ class Settings(BaseSettings):
     max_queue_wait_s: float = float(os.getenv("PARAKEET_MAX_QUEUE_WAIT_S", "30"))
     
     # Duration-aware inference timeout system
-    expected_xrt_min: float = float(os.getenv("PARAKEET_EXPECTED_XRT_MIN", "2.0"))
+    expected_xrt_min: float = float(os.getenv("PARAKEET_EXPECTED_XRT_MIN", "1.3"))
     infer_timeout_safety: float = float(os.getenv("PARAKEET_INFER_TIMEOUT_SAFETY", "1.8"))
     infer_timeout_cap_s: float = float(os.getenv("PARAKEET_INFER_TIMEOUT_CAP_S", "210"))
 
     # Micro-batching (server-level)
-    microbatch_window_ms: float = float(os.getenv("PARAKEET_MICROBATCH_WINDOW_MS", "10"))
+    microbatch_window_ms: float = float(os.getenv("PARAKEET_MICROBATCH_WINDOW_MS", "8"))
     microbatch_max_batch: int = int(os.getenv("PARAKEET_MICROBATCH_MAX_BATCH", "32"))
 
     # Admission control

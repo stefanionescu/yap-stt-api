@@ -73,8 +73,8 @@ Defaults live in `scripts/env.sh`. You can override via environment vars before 
 - `PARAKEET_SUBSAMPLING_CHUNKING_FACTOR` (default: 1)
 - `PARAKEET_QUEUE_MAX_FACTOR` (default: 32)
 - `PARAKEET_MAX_QUEUE_WAIT_S` (default: 2)
-- `PARAKEET_MICROBATCH_WINDOW_MS` (default: 10)
-- `PARAKEET_MICROBATCH_MAX_BATCH` (default: 8)
+- `PARAKEET_MICROBATCH_WINDOW_MS` (default: 8)
+- `PARAKEET_MICROBATCH_MAX_BATCH` (default: 32)
 - `PARAKEET_MAX_AUDIO_SECONDS` (default: 600)
 - `PARAKEET_MAX_UPLOAD_MB` (default: 64)
  

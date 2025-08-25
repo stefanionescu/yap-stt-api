@@ -42,11 +42,11 @@ class ParakeetModel:
         # Prefer greedy_batch only for CTC and TDT models; RNNT uses its own decoding configs
         try:
             cls_name = asr_model.__class__.__name__
-            if "ctc" in cls_name and hasattr(asr_model, "change_decoding_strategy"):
+            if ["ctc", "tdt"] in cls_name and hasattr(asr_model, "change_decoding_strategy"):
                 asr_model.change_decoding_strategy(decoding_cfg={"strategy": "greedy_batch"})  # type: ignore[arg-type]
                 logger.info("Decoding strategy set to greedy_batch")
             # For RNNT, hint to allow CUDA graphs if decoder supports it (NVIDIA recommends for speed)
-            if "RNNT" in cls_name and hasattr(asr_model, "change_decoding_strategy"):
+            if "rnnt" in cls_name and hasattr(asr_model, "change_decoding_strategy"):
                 try:
                     asr_model.change_decoding_strategy(decoding_cfg={"greedy": {"allow_cuda_graphs": True}})  # type: ignore[arg-type]
                     logger.info("RNNT decoding configured with allow_cuda_graphs=True")
