@@ -61,42 +61,25 @@ async def main() -> None:
     def run_batch_fn(wavs: list[np.ndarray], srs: list[int]) -> list[str]:
         return model.recognize_waveforms(wavs, srs)
 
-    # Partials scheduler (normal lane)
-    scheduler_partials = MicroBatchScheduler(
+    # Single priority scheduler (finals priority=0, partials priority=1)
+    scheduler = MicroBatchScheduler(
         maxsize=maxsize,
         run_batch_fn=run_batch_fn,
         window_ms=settings.microbatch_window_ms,
         max_batch=settings.microbatch_max_batch,
     )
-    scheduler_partials.start()
+    scheduler.start()
     logger.info(
-        "Partials MicroBatchScheduler started (window_ms=%s, max_batch=%s, queue maxsize=%d)",
+        "Priority MicroBatchScheduler started (window_ms=%s, max_batch=%s, queue maxsize=%d)",
         settings.microbatch_window_ms,
         settings.microbatch_max_batch,
         maxsize,
     )
 
-    # Finals fast-lane scheduler
-    finals_maxsize = settings.finals_queue_max_factor * settings.microbatch_max_batch
-    scheduler_finals = MicroBatchScheduler(
-        maxsize=finals_maxsize,
-        run_batch_fn=run_batch_fn,
-        window_ms=settings.microbatch_finals_window_ms,
-        max_batch=settings.microbatch_max_batch,
-    )
-    scheduler_finals.start()
-    logger.info(
-        "Finals MicroBatchScheduler started (window_ms=%s, max_batch=%s, queue maxsize=%d)",
-        settings.microbatch_finals_window_ms,
-        settings.microbatch_max_batch,
-        finals_maxsize,
-    )
-
     # Start gRPC server (secure optional)
     grpc_server = await start_riva_grpc_server(
         model,
-        scheduler_partials,
-        scheduler_finals,
+        scheduler,
         port=settings.grpc_port,
         secure=bool(settings.grpc_use_tls),
         cert=settings.grpc_cert_path,
@@ -108,8 +91,7 @@ async def main() -> None:
     try:
         await grpc_server.wait_for_termination()
     finally:
-        await scheduler_partials.stop()
-        await scheduler_finals.stop()
+        await scheduler.stop()
 
 
 if __name__ == "__main__":

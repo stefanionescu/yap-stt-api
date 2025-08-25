@@ -31,15 +31,13 @@ class RivaASRServicer(riva_asr_pb2_grpc.RivaSpeechRecognitionServicer):
     def __init__(
         self,
         model: ParakeetModel,
-        scheduler_partials: MicroBatchScheduler,
-        finals_scheduler: MicroBatchScheduler,
+        scheduler: MicroBatchScheduler,
         *,
         step_ms: float,
         max_ctx_seconds: float,
     ):
         self.model = model
-        self.scheduler = scheduler_partials
-        self.finals_scheduler = finals_scheduler
+        self.scheduler = scheduler
         # Tick cadence
         self.step_ms = float(step_ms)
         # Convert cadence to bytes at 16k PCM16
@@ -124,13 +122,13 @@ class RivaASRServicer(riva_asr_pb2_grpc.RivaSpeechRecognitionServicer):
                     # Fire eager finalize once per stream when sufficient trailing silence is detected
                     if final_fut is None and silence_run_ms >= self.eager_sil_ms and len(full_buf) > 0:
                         full_pcm = pcm16_to_f32(memoryview(full_buf)[:])
-                        final_fut = self.finals_scheduler.submit(full_pcm, SAMPLE_RATE)
+                        final_fut = self.scheduler.submit(full_pcm, SAMPLE_RATE, priority=0)
                     # Skip this tick during silence
                     continue
                 else:
                     silence_run_ms = 0.0
 
-            fut = self.scheduler.submit(pcm, SAMPLE_RATE)
+            fut = self.scheduler.submit(pcm, SAMPLE_RATE, priority=1)
             try:
                 text, *_ = await asyncio.wait_for(fut, timeout=self.tick_timeout_s)
             except asyncio.TimeoutError:
@@ -159,7 +157,7 @@ class RivaASRServicer(riva_asr_pb2_grpc.RivaSpeechRecognitionServicer):
                     text, *_ = await asyncio.wait_for(final_fut, timeout=float(settings.finals_timeout_s))
                 else:
                     full_pcm = pcm16_to_f32(memoryview(full_buf)[:])
-                    fut = self.finals_scheduler.submit(full_pcm, SAMPLE_RATE)
+                    fut = self.scheduler.submit(full_pcm, SAMPLE_RATE, priority=0)
                     text, *_ = await asyncio.wait_for(fut, timeout=float(settings.finals_timeout_s))
             except Exception as e:  # noqa: BLE001
                 await context.abort(grpc.StatusCode.INTERNAL, f"final_inference_error: {e}")
@@ -195,8 +193,7 @@ class RivaASRServicer(riva_asr_pb2_grpc.RivaSpeechRecognitionServicer):
 
 async def start_riva_grpc_server(
     model: ParakeetModel,
-    scheduler_partials: MicroBatchScheduler,
-    finals_scheduler: MicroBatchScheduler,
+    scheduler: MicroBatchScheduler,
     *,
     port: int,
     secure: bool = False,
@@ -216,8 +213,7 @@ async def start_riva_grpc_server(
     server = grpc.aio.server(options=opts)
     servicer = RivaASRServicer(
         model,
-        scheduler_partials,
-        finals_scheduler,
+        scheduler,
         step_ms=step_ms if step_ms is not None else float(getattr(settings, "stream_step_ms", 320.0)),
         max_ctx_seconds=max_ctx_seconds if max_ctx_seconds is not None else float(getattr(settings, "stream_context_seconds", 10.0)),
     )

@@ -11,7 +11,7 @@ import numpy as np
 
 @dataclass
 class WorkItem:
-    priority: int
+    priority: int  # 0 = highest (finals), 1 = partials
     seq: int
     waveform: np.ndarray
     sample_rate: int
@@ -21,8 +21,10 @@ class WorkItem:
 
 class MicroBatchScheduler:
     """
-    Micro-batching scheduler that aggregates items for a short window or up to max batch size,
-    then invokes a batch run function. Intended to improve GPU utilization.
+    Priority micro-batching scheduler.
+    - Single GPU lane (no concurrent model calls).
+    - Finals (priority 0) always preempt partials (priority 1).
+    - Batches items of the same priority only within a short window.
     """
 
     def __init__(
@@ -33,9 +35,9 @@ class MicroBatchScheduler:
         window_ms: float = 15.0,
         max_batch: int = 4,
     ):
-        # Priority queue of work items (earliest enqueued first)
-        # Store entries as (priority_key, seq, WorkItem)
-        self.queue: "asyncio.PriorityQueue[Tuple[float, int, WorkItem]]" = asyncio.PriorityQueue(maxsize=maxsize)
+        # Priority queue of work items.
+        # Store entries as (priority, enqueue_monotonic, seq, WorkItem)
+        self.queue: "asyncio.PriorityQueue[Tuple[int, float, int, WorkItem]]" = asyncio.PriorityQueue(maxsize=maxsize)
         self._maxsize = int(maxsize)
         self._seq = itertools.count()
         self._run_batch_fn = run_batch_fn
@@ -51,20 +53,18 @@ class MicroBatchScheduler:
             self._aggregator_task.cancel()
             await asyncio.gather(self._aggregator_task, return_exceptions=True)
 
-    def submit(self, waveform: np.ndarray, sample_rate: int) -> asyncio.Future:
+    def submit(self, waveform: np.ndarray, sample_rate: int, *, priority: int = 1) -> asyncio.Future:
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
         item = WorkItem(
-            priority=0,
+            priority=int(priority),
             seq=next(self._seq),
             waveform=waveform,
             sample_rate=sample_rate,
             future=fut,
             enqueued_ts=time.time(),
         )
-        # Earlier enqueue time -> smaller key -> higher priority
-        prio_key = time.monotonic()
-        # Use seq for stable tiebreaking
-        self.queue.put_nowait((prio_key, item.seq, item))
+        key = (item.priority, time.monotonic(), item.seq, item)
+        self.queue.put_nowait(key)
         return fut
 
     def qsize(self) -> int:
@@ -75,22 +75,38 @@ class MicroBatchScheduler:
 
     async def _aggregator(self) -> None:
         while True:
-            # block for the first item
-            _prio, _seq, first = await self.queue.get()
+            # Block for the first item
+            prio, _, _, first = await self.queue.get()
             batch_items: List[WorkItem] = [first]
 
-            # compute deadline
+            # Collect more items of the SAME priority within window
             deadline = time.monotonic() + (self._window_ms / 1000.0)
+            pushed_back: List[Tuple[int, float, int, WorkItem]] = []
             while len(batch_items) < self._max_batch:
                 timeout = deadline - time.monotonic()
                 if timeout <= 0:
                     break
                 try:
-                    prio_seq_item = await asyncio.wait_for(self.queue.get(), timeout)
-                    _prio2, _seq2, nxt = prio_seq_item
-                    batch_items.append(nxt)
+                    tup = await asyncio.wait_for(self.queue.get(), timeout)
                 except asyncio.TimeoutError:
                     break
+                p2, t2, s2, wi2 = tup
+                if p2 == prio:
+                    batch_items.append(wi2)
+                else:
+                    # Return mismatched priority to the queue and continue
+                    pushed_back.append(tup)
+                    # If the very next item is higher priority, preempt current batch
+                    if len(batch_items) == 1 and p2 < prio:
+                        # Push back the first and switch to higher priority
+                        pushed_back.append((prio, time.monotonic(), first.seq, first))
+                        batch_items.clear()
+                        prio = p2
+                        batch_items.append(wi2)
+                        deadline = time.monotonic() + (self._window_ms / 1000.0)
+            # Return mismatched priority items to the queue
+            for tup in pushed_back:
+                self.queue.put_nowait(tup)
 
             waveforms = [wi.waveform for wi in batch_items]
             sample_rates = [wi.sample_rate for wi in batch_items]
@@ -110,7 +126,7 @@ class MicroBatchScheduler:
             now = time.time()
             for wi, text in zip(batch_items, texts):
                 inference_dt = max(0.0, now - wi.enqueued_ts)  # coarse estimate
-                queue_wait = 0.0  # not exact here; main server tracks
+                queue_wait = 0.0  # placeholder; main server tracks
                 if not wi.future.done():
                     wi.future.set_result((text, inference_dt, queue_wait))
                 self.queue.task_done()

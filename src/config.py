@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     subsampling_chunking_factor: int = int(os.getenv("PARAKEET_SUBSAMPLING_CHUNKING_FACTOR", "1"))
 
     # Concurrency and queuing (micro-batching only)
-    queue_max_factor: int = int(os.getenv("PARAKEET_QUEUE_MAX_FACTOR", "32"))
+    queue_max_factor: int = int(os.getenv("PARAKEET_QUEUE_MAX_FACTOR", "128"))
     max_queue_wait_s: float = float(os.getenv("PARAKEET_MAX_QUEUE_WAIT_S", "30"))
     
     # Duration-aware inference timeout system
@@ -31,10 +31,8 @@ class Settings(BaseSettings):
     microbatch_window_ms: float = float(os.getenv("PARAKEET_MICROBATCH_WINDOW_MS", "8"))
     microbatch_max_batch: int = int(os.getenv("PARAKEET_MICROBATCH_MAX_BATCH", "32"))
 
-    # Finals fast-lane micro-batching
-    microbatch_finals_window_ms: float = float(os.getenv("PARAKEET_MICROBATCH_FINALS_WINDOW_MS", "2"))
-    finals_queue_max_factor: int = int(os.getenv("PARAKEET_FINALS_QUEUE_MAX_FACTOR", "16"))
-    finals_timeout_s: float = float(os.getenv("PARAKEET_FINALS_TIMEOUT_S", "5.0"))
+    # Finals timeout (single-lane priority scheduler, no separate finals lane)
+    finals_timeout_s: float = float(os.getenv("PARAKEET_FINALS_TIMEOUT_S", "20"))
 
     # Admission control
     max_audio_seconds: float = float(os.getenv("PARAKEET_MAX_AUDIO_SECONDS", "600"))  # 10 minutes
@@ -48,8 +46,8 @@ class Settings(BaseSettings):
     grpc_key_path: str | None = os.getenv("PARAKEET_GRPC_KEY", None)
 
     # Streaming cadence and context window
-    stream_step_ms: float = float(os.getenv("PARAKEET_STREAM_STEP_MS", "320"))
-    stream_context_seconds: float = float(os.getenv("PARAKEET_STREAM_CONTEXT_SECONDS", "3"))
+    stream_step_ms: float = float(os.getenv("PARAKEET_STREAM_STEP_MS", "240"))
+    stream_context_seconds: float = float(os.getenv("PARAKEET_STREAM_CONTEXT_SECONDS", "4"))
 
     # Streaming backpressure and decimation
     stream_decimation_min_interval_ms: float = float(os.getenv("PARAKEET_STREAM_DECIMATION_MIN_INTERVAL_MS", "300"))
@@ -57,10 +55,10 @@ class Settings(BaseSettings):
     stream_hot_queue_fraction: float = float(os.getenv("PARAKEET_STREAM_HOT_QUEUE_FRACTION", "0.5"))  # 0..1
 
     # Per-tick inference timeout cap (seconds)
-    stream_tick_timeout_s: float = float(os.getenv("PARAKEET_STREAM_TICK_TIMEOUT_S", "0.4"))
+    stream_tick_timeout_s: float = float(os.getenv("PARAKEET_STREAM_TICK_TIMEOUT_S", "1.0"))
 
     # Simple VAD gating for partial ticks and eager finalize
-    vad_enable: bool = os.getenv("PARAKEET_VAD_ENABLE", "1") not in ("0", "false", "False")
+    vad_enable: bool = os.getenv("PARAKEET_VAD_ENABLE", "0") not in ("0", "false", "False")
     vad_tail_ms: float = float(os.getenv("PARAKEET_VAD_TAIL_MS", "300"))
     vad_energy_threshold: float = float(os.getenv("PARAKEET_VAD_ENERGY_THRESHOLD", "0.001"))
     eager_sil_ms: float = float(os.getenv("PARAKEET_EAGER_SIL_MS", "500"))
