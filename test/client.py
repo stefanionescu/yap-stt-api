@@ -2,7 +2,7 @@
 """
 Parakeet ASR gRPC client (Riva-compatible) — segmented one-shot or plain one-shot.
 
-Runs PCM16@16k from a file in 2.5s segments with 250ms overlap and prints finals,
+Runs PCM16@16k from a file in 2.2s segments with 200ms overlap and prints finals,
 or runs a single one-shot request for the whole file.
 """
 import argparse
@@ -12,6 +12,8 @@ from pathlib import Path
 import riva.client  # type: ignore
 import time
 import json
+from segmentation import build_segments
+from merge import merge_segment
 
 from utils import file_to_pcm16_mono_16k, file_duration_seconds
 import numpy as np
@@ -71,7 +73,7 @@ def main() -> None:
         sample_rate_hertz=16000,
         language_code="en-US",
         max_alternatives=1,
-        enable_automatic_punctuation=False,
+        enable_automatic_punctuation=True,
     )
     
     print(f"Connecting to: {args.server}")
@@ -98,27 +100,21 @@ def main() -> None:
             finally:
                 pass
         else:
-            # Segmented one-shot with 2.5s segments and 250ms overlap
+            # Segmented one-shot with silence-aware cuts and token-overlap merge
             wav = np.frombuffer(pcm, dtype=np.int16)
             sr = 16000
-            seg_ms, min_ms, overlap_ms = 2500, 1500, 250
-            seg_len = int(seg_ms * sr / 1000)
-            min_len = int(min_ms * sr / 1000)
-            ovl = int(overlap_ms * sr / 1000)
-            edges: list[tuple[int, int, int]] = []
-            start = 0
-            while start + min_len < len(wav):
-                end = min(start + seg_len, len(wav))
-                edges.append((start, end, ovl))
-                if end >= len(wav):
-                    break
-                start = max(end - ovl, 0)
-            if not edges or edges[-1][1] < len(wav):
-                edges.append((edges[-1][1] if edges else 0, len(wav), 0))
-            s, e, _ = edges[-1]
-            edges[-1] = (s, e, 0)
+            edges = build_segments(
+                wav,
+                sr=sr,
+                seg_ms=2200,
+                min_ms=1200,
+                overlap_ms=200,
+                vad_window_ms=400,
+                vad_thr=1.2e-3,
+                vad_frame_ms=20,
+            )
 
-            finals: list[str] = []
+            merged_tokens: list[str] = []
             t_start = time.perf_counter()
             last_resp_ts = t_start
             for (s, e, ovl) in edges:
@@ -137,17 +133,16 @@ def main() -> None:
                             resp = asr.offline_recognize(audio=pcm_seg, config=cfg)  # type: ignore[call-arg]
                         except AttributeError:
                             resp = asr.recognize(pcm_seg, cfg)  # type: ignore[arg-type]
-                    txt = ""
+                    seg_txt = ""
                     for r in getattr(resp, "results", []) or []:
                         if getattr(r, "alternatives", None):
-                            txt = getattr(r.alternatives[0], "transcript", "") or ""
+                            seg_txt = getattr(r.alternatives[0], "transcript", "") or ""
                             break
-                    if txt:
-                        finals.append(txt.strip())
-                        print("FINAL(seg):", txt.strip())
+                    if seg_txt:
+                        final_text = merge_segment(merged_tokens, seg_txt, max_overlap_tokens=10)
+                        print("FINAL(seg):", seg_txt.strip())
                 finally:
                     last_resp_ts = time.perf_counter()
-            final_text = " ".join([t for t in finals if t])
             final_recv_ts = last_resp_ts
     except Exception as e:
         print(f"Error: {e}")
@@ -164,9 +159,14 @@ def main() -> None:
     if args.mode == "segmented":
         last_audio_ts = t0 + duration
         finalize_ms = max(0.0, (final_recv_ts - last_audio_ts) * 1000.0)
+        print(f"Elapsed: {elapsed_s:.3f}s  Finalize: {finalize_ms:.1f} ms")
+        rtf = elapsed_s / duration if duration > 0 else 0.0
+        xrt = (duration / elapsed_s) if elapsed_s > 0 else 0.0
     else:
         finalize_ms = 0.0
-    print(f"Elapsed: {elapsed_s:.3f}s  Finalize: {finalize_ms:.1f} ms")
+        rtf = elapsed_s / duration if duration > 0 else 0.0
+        xrt = (duration / elapsed_s) if elapsed_s > 0 else 0.0
+        print(f"Elapsed: {elapsed_s:.3f}s  RTF: {rtf:.4f}  xRT: {xrt:.2f}x")
 
     # Write single-record JSONL (overwrite each run)
     try:
@@ -179,6 +179,8 @@ def main() -> None:
                 "file": os.path.basename(file_path),
                 "server": args.server,
                 "mode": args.mode,
+                "rtf": rtf,
+                "xrt": xrt,
             }, ensure_ascii=False) + "\n")
     except Exception as e:
         print(f"Warning: could not write client metrics: {e}")

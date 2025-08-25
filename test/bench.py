@@ -25,6 +25,8 @@ sys.path.append(str(Path(__file__).resolve().parent))
 SAMPLES_DIR = "samples"
 EXTS = {".wav", ".flac", ".ogg", ".mp3"}
 from utils import file_to_pcm16_mono_16k, file_duration_seconds
+from segmentation import build_segments
+from merge import merge_segment
 
 RESULTS_DIR = Path("test/results")
 ERRORS_FILE = RESULTS_DIR / "bench_errors.txt"
@@ -109,7 +111,7 @@ def one_oneshot(server: str, secure: bool, pcm_bytes: bytes, audio_seconds: floa
         sample_rate_hertz=16000,
         language_code="en-US",
         max_alternatives=1,
-        enable_automatic_punctuation=False,
+        enable_automatic_punctuation=True,
     )
     t0 = time.perf_counter()
     text = ""
@@ -133,31 +135,13 @@ def one_oneshot(server: str, secure: bool, pcm_bytes: bytes, audio_seconds: floa
     metrics.update({
         "final_len_chars": float(len(text)),
         "mode": "oneshot",
+        "rtf": (wall / audio_seconds) if audio_seconds > 0 else float("inf"),
+        "xrt": (audio_seconds / wall) if wall > 0 else 0.0,
     })
     return metrics
 
 
-def _segment_edges(total_len: int, *, sr: int = 16000, seg_ms: int = 2500, min_ms: int = 1500, overlap_ms: int = 250) -> List[Tuple[int, int, int]]:
-    seg_len = int(seg_ms * sr / 1000)
-    min_len = int(min_ms * sr / 1000)
-    ovl = int(overlap_ms * sr / 1000)
-    edges: List[Tuple[int, int, int]] = []
-    start = 0
-    # Create full segments with overlap on the right
-    while start + min_len < total_len:
-        end = min(start + seg_len, total_len)
-        edges.append((start, end, ovl))
-        if end >= total_len:
-            break
-        start = max(end - ovl, 0)
-    # Ensure tail present
-    if not edges or edges[-1][1] < total_len:
-        edges.append((edges[-1][1] if edges else 0, total_len, 0))
-    # Force last segment to have zero overlap extension during request build
-    if edges:
-        s, e, _ = edges[-1]
-        edges[-1] = (s, e, 0)
-    return edges
+# replaced by silence-aware build_segments from segmentation.py
 
 
 def one_segmented(
@@ -166,9 +150,9 @@ def one_segmented(
     pcm_bytes: bytes,
     audio_seconds: float,
     *,
-    seg_ms: int = 2500,
-    min_ms: int = 1500,
-    overlap_ms: int = 250,
+    seg_ms: int = 2200,
+    min_ms: int = 1200,
+    overlap_ms: int = 200,
 ) -> Dict[str, float]:
     auth = riva.client.Auth(ssl_cert=None, use_ssl=bool(secure), uri=server)
     asr = riva.client.ASRService(auth)
@@ -177,16 +161,25 @@ def one_segmented(
         sample_rate_hertz=16000,
         language_code="en-US",
         max_alternatives=1,
-        enable_automatic_punctuation=False,
+        enable_automatic_punctuation=True,
     )
     # Build segments over samples
     wav = np.frombuffer(pcm_bytes, dtype=np.int16)
     sr = 16000
-    edges = _segment_edges(len(wav), sr=sr, seg_ms=seg_ms, min_ms=min_ms, overlap_ms=overlap_ms)
+    edges = build_segments(
+        wav,
+        sr=sr,
+        seg_ms=seg_ms,
+        min_ms=min_ms,
+        overlap_ms=overlap_ms,
+        vad_window_ms=400,
+        vad_thr=1.2e-3,
+        vad_frame_ms=20,
+    )
 
     t0 = time.perf_counter()
     last_resp_ts = t0
-    finals: List[str] = []
+    merged_tokens: List[str] = []
 
     for i, (s, e, ovl) in enumerate(edges):
         # Real-time pacing: ensure we don't "close" a segment before its audio time
@@ -212,7 +205,7 @@ def one_segmented(
                     seg_txt = getattr(r.alternatives[0], "transcript", "") or ""
                     break
             if seg_txt:
-                finals.append(seg_txt.strip())
+                merged = merge_segment(merged_tokens, seg_txt, max_overlap_tokens=10)
         finally:
             last_resp_ts = time.perf_counter()
 
@@ -221,7 +214,7 @@ def one_segmented(
     last_audio_ts = t0 + audio_seconds
     finalize_ms = max(0.0, (last_resp_ts - last_audio_ts) * 1000.0)
     metrics.update({
-        "final_len_chars": float(sum(len(s) for s in finals)),
+        "final_len_chars": float(len("".join(merged_tokens))),
         "segments": float(len(edges)),
         "finalize_ms": float(finalize_ms),
         "mode": "segmented",

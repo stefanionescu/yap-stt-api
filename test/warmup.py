@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import time
 from pathlib import Path
 
 import riva.client  # type: ignore
 import numpy as np
+from segmentation import build_segments
+from merge import merge_segment
 
 from utils import file_to_pcm16_mono_16k, file_duration_seconds
 
@@ -41,7 +42,7 @@ def main() -> int:
         sample_rate_hertz=16000,
         language_code="en-US",
         max_alternatives=1,
-        enable_automatic_punctuation=False,
+        enable_automatic_punctuation=True,
     )
 
     t0 = time.perf_counter()
@@ -64,27 +65,21 @@ def main() -> int:
             pass
         final_recv_ts = time.perf_counter()
     else:
-        # Segmented path
+        # Segmented path with silence-aware cuts and token-overlap merge
         wav = np.frombuffer(pcm_bytes, dtype=np.int16)
         sr = 16000
-        seg_ms, min_ms, overlap_ms = 2500, 1500, 250
-        seg_len = int(seg_ms * sr / 1000)
-        min_len = int(min_ms * sr / 1000)
-        ovl = int(overlap_ms * sr / 1000)
-        edges: list[tuple[int, int, int]] = []
-        start = 0
-        while start + min_len < len(wav):
-            end = min(start + seg_len, len(wav))
-            edges.append((start, end, ovl))
-            if end >= len(wav):
-                break
-            start = max(end - ovl, 0)
-        if not edges or edges[-1][1] < len(wav):
-            edges.append((edges[-1][1] if edges else 0, len(wav), 0))
-        s, e, _ = edges[-1]
-        edges[-1] = (s, e, 0)
+        edges = build_segments(
+            wav,
+            sr=sr,
+            seg_ms=2200,
+            min_ms=1200,
+            overlap_ms=200,
+            vad_window_ms=400,
+            vad_thr=1.2e-3,
+            vad_frame_ms=20,
+        )
 
-        finals: list[str] = []
+        merged_tokens: list[str] = []
         t_start = time.perf_counter()
         last_resp_ts = t_start
         for (s, e, ovl) in edges:
@@ -92,6 +87,7 @@ def main() -> int:
             now = time.perf_counter()
             if cut_time > now:
                 time.sleep(cut_time - now)
+
             seg = wav[s:min(e + ovl, len(wav))]
             pcm_seg = seg.astype(np.int16).tobytes()
             try:
@@ -102,16 +98,17 @@ def main() -> int:
                         resp = asr.offline_recognize(audio=pcm_seg, config=cfg)  # type: ignore[call-arg]
                     except AttributeError:
                         resp = asr.recognize(pcm_seg, cfg)  # type: ignore[arg-type]
-                txt = ""
+                seg_txt = ""
                 for r in getattr(resp, "results", []) or []:
                     if getattr(r, "alternatives", None):
-                        txt = getattr(r.alternatives[0], "transcript", "") or ""
+                        seg_txt = getattr(r.alternatives[0], "transcript", "") or ""
                         break
-                if txt:
-                    finals.append(txt.strip())
+                if seg_txt:
+                    final_text = merge_segment(merged_tokens, seg_txt, max_overlap_tokens=10)
+                else:
+                    final_text = "".join(merged_tokens)
             finally:
                 last_resp_ts = time.perf_counter()
-        final_text = " ".join([t for t in finals if t])
         final_recv_ts = last_resp_ts
 
     elapsed_s = time.perf_counter() - t0
@@ -121,6 +118,10 @@ def main() -> int:
     last_audio_ts = t0 + duration
     finalize_ms = max(0.0, (final_recv_ts - last_audio_ts) * 1000.0)
     print(f"Finalize: {finalize_ms:.1f} ms")
+    rtf = elapsed_s / duration if duration > 0 else 0.0
+    xrt = (duration / elapsed_s) if elapsed_s > 0 else 0.0
+    if args.mode == "oneshot":
+        print(f"RTF: {rtf:.4f}  xRT: {xrt:.2f}x")
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     with open(RESULTS_FILE, "w", encoding="utf-8") as out:
@@ -130,6 +131,8 @@ def main() -> int:
             "elapsed_s": elapsed_s,
             "finalize_ms": finalize_ms,
             "mode": args.mode,
+            "rtf": rtf,
+            "xrt": xrt,
         }, ensure_ascii=False))
         out.write("\n")
 
