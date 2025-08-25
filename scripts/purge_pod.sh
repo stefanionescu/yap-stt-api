@@ -23,6 +23,8 @@ DO_UNINSTALL_SYS_PY=1
 DO_DU_REPORT=1
 SELECTIVE=0
 DO_UNINSTALL_TRT=0
+# Remove system CUDA/toolkit packages via apt-get by default (destructive)
+DO_APT_REMOVE_CUDA=1
 
 usage() {
   cat <<EOF
@@ -45,6 +47,11 @@ Env:
   PIP_CACHE_DIR (default: ~/.cache/pip)
   VENV_DIR (default: .venv)
   MODELS_DIR_HOST (default: ./models)
+ 
+ Destructive defaults:
+   - Also attempts to uninstall global Python CUDA wheels (cuda, cuda-python, nvidia-*cu11/cu12, etc.)
+   - Also attempts to remove system CUDA/toolkit libs via apt-get (cuda-*, nvidia-cuda-toolkit, libcudnn*, etc.)
+   - Disable those only by using selective flags that do not include deps, or by editing DO_APT_REMOVE_CUDA
   
 EOF
 }
@@ -52,11 +59,11 @@ EOF
 for arg in "$@"; do
   case "$arg" in
     --help|-h) usage; exit 0 ;;
-    --logs) SELECTIVE=1; DO_LOGS=1; DO_ENGINES=0; DO_MODELS=0; DO_DEPS=0; DO_REPO=0 ;;
-    --models) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=0; DO_MODELS=1; DO_DEPS=0; DO_REPO=0 ;;
-    --deps) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=0; DO_MODELS=0; DO_DEPS=1; DO_REPO=0 ;;
-    --repo) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=0; DO_MODELS=0; DO_DEPS=0; DO_REPO=1 ;;
-    --all) SELECTIVE=0; DO_LOGS=1; DO_ENGINES=0; DO_MODELS=1; DO_DEPS=1; DO_REPO=1 ;;
+    --logs) SELECTIVE=1; DO_LOGS=1; DO_ENGINES=0; DO_MODELS=0; DO_DEPS=0; DO_REPO=0; DO_APT_REMOVE_CUDA=0 ;;
+    --models) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=0; DO_MODELS=1; DO_DEPS=0; DO_REPO=0; DO_APT_REMOVE_CUDA=0 ;;
+    --deps) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=0; DO_MODELS=0; DO_DEPS=1; DO_REPO=0; DO_APT_REMOVE_CUDA=1 ;;
+    --repo) SELECTIVE=1; DO_LOGS=0; DO_ENGINES=0; DO_MODELS=0; DO_DEPS=0; DO_REPO=1; DO_APT_REMOVE_CUDA=0 ;;
+    --all) SELECTIVE=0; DO_LOGS=1; DO_ENGINES=0; DO_MODELS=1; DO_DEPS=1; DO_REPO=1; DO_APT_REMOVE_CUDA=1 ;;
     *) echo "Unknown arg: $arg"; usage; exit 2 ;;
   esac
   shift || true
@@ -199,14 +206,47 @@ if [[ $DO_UNINSTALL_SYS_PY -eq 1 ]]; then
       transformers sentencepiece datasets accelerate
       librosa scipy numba
       huggingface_hub httpx fastapi uvicorn numpy soundfile soxr
+      # CUDA wheels and CUDA-toolkits packaged for pip
+      cuda cuda-python \
+      nvidia-cublas-cu11 nvidia-cublas-cu12 \
+      nvidia-cuda-runtime-cu11 nvidia-cuda-runtime-cu12 \
+      nvidia-cudnn-cu11 nvidia-cudnn-cu12 \
+      nvidia-cusparse-cu11 nvidia-cusparse-cu12 \
+      nvidia-cufft-cu11 nvidia-cufft-cu12 \
+      nvidia-curand-cu11 nvidia-curand-cu12 \
+      nvidia-cusolver-cu11 nvidia-cusolver-cu12 \
+      nvidia-nvjitlink-cu12 tensorrt
     )
     # Uninstall in multiple passes to handle dependency ordering
     for i in 1 2; do
       pip3 uninstall -y "${PKGS[@]}" || true
     done
+    # Dynamically uninstall any leftover nvidia-* CUDA wheels
+    EXTRA=$(pip3 list --format=freeze | awk -F'=' '{print $1}' | grep -E '^(cuda|cuda-python|nvidia-.*cu(11|12)|nvidia-.*cuda|nvidia-.*cudnn|nvidia-.*nvjitlink|tensorrt)$' || true)
+    if [[ -n "$EXTRA" ]]; then
+      echo "Uninstalling detected CUDA-related wheels: $EXTRA"
+      pip3 uninstall -y $EXTRA || true
+    fi
     # Purge pip cache as well
     pip3 cache purge || true
   fi
+fi
+
+if [[ $DO_APT_REMOVE_CUDA -eq 1 ]]; then
+  echo "Removing system CUDA/toolkit packages via apt-get (destructive)..."
+  if command -v apt-get >/devnull 2>&1; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -y || true
+    # Remove common CUDA/toolkit packages; ignore failures
+    apt-get remove -y --purge \
+      'cuda-*' 'nvidia-cuda-toolkit' \
+      'libcudnn*' 'libnvinfer*' 'libcublas*' 'libcurand*' 'libcusolver*' 'libcusparse*' 'libcufft*' || true
+    apt-get autoremove -y || true
+    apt-get clean || true
+    rm -rf /var/lib/apt/lists/* /var/cache/apt/* || true
+  fi
+  # Remove common CUDA install directories if present
+  rm -rf /usr/local/cuda* /usr/local/nvidia /opt/nvidia 2>/dev/null || true
 fi
 
 if [[ $DO_DU_REPORT -eq 1 ]]; then
