@@ -159,6 +159,39 @@ if [[ $DO_MODELS -eq 1 ]]; then
   rm -rf "$MODELS_DIR_HOST" || true
   mkdir -p "$MODELS_DIR_HOST"
   # NeMo downloads checkpoints into Hugging Face cache; no local model dir to purge
+
+  echo "Purging expanded caches under /workspace and $HOME ..."
+  # General cache roots (XDG + .local)
+  rm -rf "${XDG_CACHE_HOME:-$HOME/.cache}" || true
+  rm -rf "$HOME/.local" "/workspace/.local" || true
+  rm -rf "/workspace/.cache" || true
+
+  # Hugging Face (all env variants & defaults)
+  rm -rf \
+    "${HF_HOME:-$HOME/.cache/huggingface}" \
+    "${HF_HUB_CACHE:-$HOME/.cache/huggingface/hub}" \
+    "${HUGGINGFACE_HUB_CACHE:-$HOME/.cache/huggingface/hub}" \
+    "${HF_DATASETS_CACHE:-$HOME/.cache/huggingface/datasets}" \
+    "${TRANSFORMERS_CACHE:-$HOME/.cache/huggingface/transformers}" \
+    "/workspace/.cache/huggingface" || true
+
+  # PyTorch caches
+  rm -rf \
+    "${TORCH_HOME:-$HOME/.cache/torch}" \
+    "$HOME/.cache/torch/hub" \
+    "${TORCH_EXT_DIR:-$HOME/.cache/torch_extensions}" \
+    "/workspace/.cache/torch" \
+    "/workspace/.cache/torch_extensions" || true
+
+  # Weights & Biases (wandb)
+  rm -rf "$HOME/wandb" "/workspace/wandb" || true
+
+  # Temp & RAM-disk temps used by the server for WAVs
+  rm -rf /tmp/* /var/tmp/* || true
+  rm -rf /dev/shm/* || true
+
+  # NVIDIA JIT caches
+  rm -rf "$HOME/.nv" "/workspace/.nv" || true
 fi
 
 if [[ $DO_DEPS -eq 1 ]]; then
@@ -198,6 +231,14 @@ fi
 if [[ $DO_UNINSTALL_SYS_PY -eq 1 ]]; then
   echo "Uninstalling heavy system Python packages (global, not venv)..."
   if command -v pip3 >/dev/null 2>&1; then
+    SYS_PIP="/usr/bin/pip3"
+    [[ -x "$SYS_PIP" ]] || SYS_PIP="/usr/local/bin/pip3"
+    if [[ -n "${VIRTUAL_ENV:-}" && -x "$SYS_PIP" ]]; then
+      echo "Using system pip at $SYS_PIP (bypassing venv)"
+    else
+      SYS_PIP="$(command -v pip3)"
+    fi
+
     # Try to remove the heaviest wheels first
     PKGS=(
       torch torchaudio torchvision torchtext triton xformers
@@ -219,16 +260,16 @@ if [[ $DO_UNINSTALL_SYS_PY -eq 1 ]]; then
     )
     # Uninstall in multiple passes to handle dependency ordering
     for i in 1 2; do
-      pip3 uninstall -y "${PKGS[@]}" || true
+      "$SYS_PIP" uninstall -y "${PKGS[@]}" || true
     done
     # Dynamically uninstall any leftover nvidia-* CUDA wheels
-    EXTRA=$(pip3 list --format=freeze | awk -F'=' '{print $1}' | grep -E '^(cuda|cuda-python|nvidia-.*cu(11|12)|nvidia-.*cuda|nvidia-.*cudnn|nvidia-.*nvjitlink|tensorrt)$' || true)
+    EXTRA=$("$SYS_PIP" list --format=freeze | awk -F'=' '{print $1}' | grep -E '^(cuda|cuda-python|nvidia-.*cu(11|12)|nvidia-.*cuda|nvidia-.*cudnn|nvidia-.*nvjitlink|tensorrt)$' || true)
     if [[ -n "$EXTRA" ]]; then
       echo "Uninstalling detected CUDA-related wheels: $EXTRA"
-      pip3 uninstall -y $EXTRA || true
+      "$SYS_PIP" uninstall -y $EXTRA || true
     fi
     # Purge pip cache as well
-    pip3 cache purge || true
+    "$SYS_PIP" cache purge || true
   fi
 fi
 
