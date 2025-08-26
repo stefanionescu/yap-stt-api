@@ -39,15 +39,11 @@ echo "[start] sherpa-onnx WS server on :$PORT (provider=$PROVIDER, batch=$MAX_BA
 nohup python "$ROOT/repos/sherpa-onnx/python-api-examples/streaming_server.py" \
   --provider="$PROVIDER" \
   --port="$PORT" \
-  --nemo-ctc-model "$MODEL" \
+  --max-batch-size="$MAX_BATCH" \
+  --max-wait-ms="$LOOP_MS" \
+  --nn-pool-size="$NN_POOL" \
   --tokens "$TOKENS" \
-  --max-batch-size "$MAX_BATCH" \
-  --nn-pool-size "$NN_POOL" \
-  --loop-interval-ms "$LOOP_MS" \
-  --max-wait-ms "$MAX_WAIT_MS" \
-  --num-threads "$NUM_THREADS" \
-  --max-active-connections "$MAX_ACTIVE" \
-  --max-queue-size "$MAX_QUEUE" \
+  --nemo-ctc "$MODEL" \
   > "$LOG" 2>&1 & echo $! > "$ROOT/server.pid"
 
 sleep 1
