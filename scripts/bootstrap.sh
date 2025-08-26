@@ -81,7 +81,7 @@ if [ ! -f model.onnx ]; then
 fi
 cd "$ROOT"
 
-echo "[7/9] Tiny sanity check (load model + list I/O)"
+echo "[7/8] Tiny sanity check (load model + list I/O)"
 python - <<'PY'
 import onnxruntime as ort, os
 sess = ort.InferenceSession(os.path.join("models","nemo_ctc_80ms","model.onnx"),
@@ -91,9 +91,6 @@ print("Inputs:", [i.name for i in sess.get_inputs()])
 print("Outputs:", [o.name for o in sess.get_outputs()])
 PY
 
-echo "[8/9] Build C++ WebSocket server"
-bash "$ROOT/scripts/build_ws_server.sh"
-
-echo "[9/9] Done. Use ./scripts/start_server.sh to run the WS server."
+echo "[8/8] Done. Use ./scripts/start_server.sh to run the WS server."
 
 
