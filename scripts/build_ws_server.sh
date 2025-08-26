@@ -9,8 +9,14 @@ CUDA_LIBS="${CUDA_LIBS:-/usr/local/cuda/lib64:/usr/local/cuda-12.8/lib64:/usr/li
 mkdir -p "$BIN_OUT" "$ROOT/deps" "$ROOT/logs"
 
 # deps (ssl is needed by sherpa build; ALSA optional)
-sudo apt-get update -y
-sudo apt-get install -y git cmake ninja-build build-essential pkg-config libssl-dev
+# Use sudo only if not running as root
+if [ "$EUID" -eq 0 ]; then
+  apt-get update -y
+  apt-get install -y git cmake ninja-build build-essential pkg-config libssl-dev
+else
+  sudo apt-get update -y
+  sudo apt-get install -y git cmake ninja-build build-essential pkg-config libssl-dev
+fi
 
 # clone at the tag that matches your pip (v1.12.10)
 if [ ! -d "$REPO" ]; then
