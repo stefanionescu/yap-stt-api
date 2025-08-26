@@ -44,6 +44,9 @@ nohup python "$ROOT/repos/sherpa-onnx/python-api-examples/streaming_server.py" \
   --nn-pool-size="$NN_POOL" \
   --tokens "$TOKENS" \
   --nemo-ctc "$MODEL" \
+  --num-threads "$NUM_THREADS" \
+  --max-active-connections "$MAX_ACTIVE" \
+  --max-queue-size "$MAX_QUEUE" \
   > "$LOG" 2>&1 & echo $! > "$ROOT/server.pid"
 
 sleep 1
