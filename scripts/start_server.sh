@@ -2,7 +2,10 @@
 set -euo pipefail
 ROOT="${ROOT:-$(pwd)}"
 BIN="$ROOT/bin/sherpa-onnx-online-websocket-server"
+MODEL="$ROOT/models/nemo_ctc_80ms/model.onnx"
+TOKENS="$ROOT/models/nemo_ctc_80ms/tokens.txt"
 ENVFILE="$ROOT/.env.sherpa_ws"
+LOG="$ROOT/logs/server.out"
 
 PORT=${PORT:-8000}
 MAX_BATCH=${MAX_BATCH:-16}
@@ -11,41 +14,35 @@ NUM_THREADS=${NUM_THREADS:-1}
 MAX_ACTIVE=${MAX_ACTIVE:-400}
 MAX_QUEUE=${MAX_QUEUE:-32768}
 
-MODEL="$ROOT/models/nemo_ctc_80ms/model.onnx"
-TOKENS="$ROOT/models/nemo_ctc_80ms/tokens.txt"
-LOG="$ROOT/logs/server.out"
+mkdir -p "$ROOT/logs"
 
-[ -x "$BIN" ]    || { echo "Missing binary: $BIN (run scripts/build_ws_server_gpu.sh)"; exit 2; }
+[ -x "$BIN" ]    || { echo "Missing server bin: $BIN (run scripts/build_ws_server_gpu.sh)"; exit 2; }
 [ -f "$MODEL" ]  || { echo "Missing model: $MODEL"; exit 3; }
 [ -f "$TOKENS" ] || { echo "Missing tokens: $TOKENS"; exit 4; }
 [ -f "$ENVFILE" ] && source "$ENVFILE"
 
-mkdir -p "$ROOT/logs"
-
-# Detect which flag the C++ server exposes for CTC models
+# Pick the correct model flag by probing --help once
 HELP=$("$BIN" --help 2>&1 || true)
-
-CTC_FLAG=""
-if   echo "$HELP" | grep -q -- "--nemo-ctc";   then CTC_FLAG="--nemo-ctc"
-elif echo "$HELP" | grep -q -- "--ctc-model";  then CTC_FLAG="--ctc-model"
-fi
-
-if [ -z "$CTC_FLAG" ]; then
-  echo "This sherpa C++ WS binary does not expose a CTC model flag (--nemo-ctc/--ctc-model)."
-  echo "Rebuild or use the Python WS server from the repo's python-api-examples (which supports NeMo CTC)."
+if   echo "$HELP" | grep -q -- "--nemo-ctc"; then FLAG="--nemo-ctc"
+elif echo "$HELP" | grep -q -- "--ctc-model"; then FLAG="--ctc-model"
+elif echo "$HELP" | grep -q -- "--zipformer2-ctc-model"; then FLAG="--zipformer2-ctc-model"
+else
+  echo "Could not find a CTC model flag in server --help output."
+  echo "Available help:"
+  echo "$HELP"
   exit 5
 fi
 
-echo "[start] sherpa-onnx ONLINE WS (CUDA) :$PORT  using CTC flag: $CTC_FLAG"
+echo "[start] sherpa-onnx ONLINE WS (CUDA) on :$PORT  using flag $FLAG"
 nohup "$BIN" \
   --port="$PORT" \
-  "$CTC_FLAG=$MODEL" \
-  --tokens="$TOKENS" \
-  --max-batch-size="$MAX_BATCH" \
-  --max-wait-ms="$MAX_WAIT_MS" \
-  --num-threads="$NUM_THREADS" \
-  --max-active-connections="$MAX_ACTIVE" \
-  --max-queue-size="$MAX_QUEUE" \
+  "$FLAG" "$MODEL" \
+  --tokens "$TOKENS" \
+  --max-batch-size "$MAX_BATCH" \
+  --max-wait-ms "$MAX_WAIT_MS" \
+  --num-threads "$NUM_THREADS" \
+  --max-active-connections "$MAX_ACTIVE" \
+  --max-queue-size "$MAX_QUEUE" \
   > "$LOG" 2>&1 & echo $! > "$ROOT/server.pid"
 
 sleep 1
