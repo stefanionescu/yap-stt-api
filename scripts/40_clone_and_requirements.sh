@@ -12,4 +12,8 @@ cd "$REPO_DIR"
 
 pip install -r requirements.txt
 pip install fastapi uvicorn pydantic-settings loguru
-pip install modelscope huggingface_hub
+pip install modelscope huggingface_hub funasr soundfile
+
+# Make the repo importable from anywhere
+export PYTHONPATH="${REPO_DIR}:${PYTHONPATH:-}"
+echo "Added to PYTHONPATH: ${REPO_DIR}"

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source ~/.venvs/sensevoice/bin/activate
+
+# Make the repo importable
+export PYTHONPATH="${HOME}/streaming-sensevoice:${PYTHONPATH:-}"
 cd "${HOME}/streaming-sensevoice"
 
 export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
