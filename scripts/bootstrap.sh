@@ -26,15 +26,14 @@ pip install --upgrade pip wheel setuptools
 pip install onnx onnxruntime-gpu==1.18.0 fastapi uvicorn websockets soundfile numpy
 
 echo "[3/8] Install sherpa-onnx from PyPI + clone repo for server scripts"
-pip install sherpa-onnx==1.10.24
+pip install "sherpa-onnx==1.12.10"
 if [ ! -d repos/sherpa-onnx ]; then
   git clone https://github.com/k2-fsa/sherpa-onnx.git repos/sherpa-onnx
 fi
 
 # Force TRT EP preference in the streaming WS server if available.
-# Some versions only accept provider strings ("cuda"/"cpu"), so we patch the
-# script to request ORT providers explicitly with TRT first. Safe no-op if pattern differs.
-sed -i 's/providers=\[provider\]/providers=\[(("TensorrtExecutionProvider",{\"trt_fp16_enable\":True,\"trt_engine_cache_enable\":True,\"trt_engine_cache_path\":\"'"$ROOT"'\/trt_cache\", \"trt_max_workspace_size\":8589934592}),("CUDAExecutionProvider"))\]/' \
+# Make patch tolerant to whitespace changes: match providers = [provider]
+sed -E -i "s/providers *= *\[provider\]/providers=['TensorrtExecutionProvider',{'trt_fp16_enable':True,'trt_engine_cache_enable':True,'trt_engine_cache_path':'$ROOT\\/trt_cache','trt_max_workspace_size':8589934592}],'CUDAExecutionProvider']/" \
   "$ROOT/repos/sherpa-onnx/python-api-examples/streaming_server.py" || true
 
 echo "[4/8] Download Streaming NeMo CTC 80ms ONNX pack (pre-converted)"
@@ -67,8 +66,12 @@ if [ -n "$TRT_SO" ]; then
   git submodule update --init --recursive
 
   # infer default paths for CUDA/cuDNN/TRT on Ubuntu 22.04
-  # If you pinned TRT to CUDA 12.x, set CUDA_HOME accordingly (e.g., /usr/local/cuda-12.8)
-  CUDA_HOME=${CUDA_HOME:-/usr/local/cuda}
+  # Prefer CUDA 12.x if present; override by exporting CUDA_HOME before running
+  if [ -z "${CUDA_HOME:-}" ]; then
+    for C in /usr/local/cuda-12.* /usr/local/cuda; do
+      if [ -d "$C" ]; then CUDA_HOME="$C"; break; fi
+    done
+  fi
   CUDNN_HOME=${CUDNN_HOME:-/usr/lib/x86_64-linux-gnu}
   # libnvinfer is typically under /usr/lib/x86_64-linux-gnu; tweak if custom
   TENSORRT_HOME=${TENSORRT_HOME:-/usr/lib/x86_64-linux-gnu}

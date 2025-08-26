@@ -30,10 +30,7 @@ This repo runs sherpa-onnx’s streaming WebSocket server with NVIDIA FastConfor
 ### Setup on RunPod (Ubuntu 22.04 / CUDA 12.x)
 
 ```bash
-# 1) Make scripts executable
-chmod +x scripts/*.sh
-
-# 2) (Optional) Install TensorRT pinned to CUDA 12.x, then bootstrap
+# 1) (Optional) Install TensorRT pinned to CUDA 12.x, then bootstrap
 # Check driver supports your target CUDA first:
 #   nvidia-smi | head -n 15   # if driver shows only CUDA 12.x, pin TRT to cuda12
 TRT_CUDA_SERIES=cuda12 bash scripts/install_tensorrt.sh   # optional; skip if TRT already present
@@ -45,15 +42,15 @@ TRT_CUDA_SERIES=cuda12 bash scripts/install_tensorrt.sh   # optional; skip if TR
 
 bash scripts/bootstrap.sh          # sets up venv, downloads models, builds ORT (TRT if available)
 
-# 3) Activate venv and install test deps
+# 2) Activate venv and install test deps
 source .venv/bin/activate
 pip install -r requirements.txt
 
-# 4) Start server (defaults: PORT=8000, MAX_BATCH=12, LOOP_MS=15)
+# 3) Start server (defaults: PORT=8000, MAX_BATCH=12, LOOP_MS=15)
 bash scripts/start_server.sh
 # Logs → ./logs/server.out (optional tail: tail -f logs/server.out | sed -u 's/\r/\n/g')
 
-# 5) Warmup and verify
+# 4) Warmup and verify
 python test/warmup.py --server localhost:8000 --file mid.wav --chunk-ms 120
 cat test/results/warmup.txt
 ```
