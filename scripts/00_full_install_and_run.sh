@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Change to scripts directory to ensure we can find other scripts
+cd "$(dirname "$0")"
+
 bash ./10_bootstrap_system.sh
 bash ./20_python_venv.sh
 bash ./30_install_torch.sh
