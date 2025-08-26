@@ -34,12 +34,10 @@ This repo runs sherpa-onnx's streaming WebSocket server with NVIDIA FastConforme
 bash scripts/bootstrap.sh
 
 # 2) Activate venv and install test deps
-source .venv/bin/activate
-pip install -r requirements.txt
+source .venv/bin/activate && pip install -r requirements.txt
 
 # 3) Start server (defaults: PORT=8000, MAX_BATCH=12, LOOP_MS=15, PROVIDER=cuda)
-bash scripts/start_server.sh
-# Logs → ./logs/server.out (optional tail: tail -f logs/server.out | sed -u 's/\r/\n/g')
+bash scripts/start_server.sh && tail -f logs/server.out
 
 # 4) Warmup and verify
 python test/warmup.py --server localhost:8000 --file mid.wav --chunk-ms 120
