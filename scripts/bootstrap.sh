@@ -67,6 +67,7 @@ if [ -n "$TRT_SO" ]; then
   git submodule update --init --recursive
 
   # infer default paths for CUDA/cuDNN/TRT on Ubuntu 22.04
+  # If you pinned TRT to CUDA 12.x, set CUDA_HOME accordingly (e.g., /usr/local/cuda-12.8)
   CUDA_HOME=${CUDA_HOME:-/usr/local/cuda}
   CUDNN_HOME=${CUDNN_HOME:-/usr/lib/x86_64-linux-gnu}
   # libnvinfer is typically under /usr/lib/x86_64-linux-gnu; tweak if custom

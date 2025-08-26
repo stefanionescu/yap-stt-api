@@ -33,8 +33,16 @@ This repo runs sherpa-onnx’s streaming WebSocket server with NVIDIA FastConfor
 # 1) Make scripts executable
 chmod +x scripts/*.sh
 
-# 2) (Optional) Install TensorRT, then bootstrap to build ORT with TRT EP
-bash scripts/install_tensorrt.sh   # optional; skip if TRT already present
+# 2) (Optional) Install TensorRT pinned to CUDA 12.x, then bootstrap
+# Check driver supports your target CUDA first:
+#   nvidia-smi | head -n 15   # if driver shows only CUDA 12.x, pin TRT to cuda12
+TRT_CUDA_SERIES=cuda12 bash scripts/install_tensorrt.sh   # optional; skip if TRT already present
+
+# If you pinned TRT to CUDA 12.x, export CUDA_HOME before bootstrap (example paths):
+#   export CUDA_HOME=/usr/local/cuda-12.8
+#   export CUDNN_HOME=/usr/lib/x86_64-linux-gnu
+#   export TENSORRT_HOME=/usr/lib/x86_64-linux-gnu
+
 bash scripts/bootstrap.sh          # sets up venv, downloads models, builds ORT (TRT if available)
 
 # 3) Activate venv and install test deps
@@ -59,7 +67,7 @@ PORT=8000 MAX_BATCH=12 LOOP_MS=15 PROVIDER=cuda ./scripts/start_server.sh
 ### Stop and purge
 
 ```bash
-./scripts/stop_and_wipe.sh
+bash scripts/stop_and_wipe.sh
 ```
 
 ### PnC (punctuation + capitalization) — finals only
