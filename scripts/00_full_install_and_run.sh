@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-bash 10_bootstrap_system.sh
-bash 20_python_venv.sh
-bash 30_install_torch.sh
-bash 40_clone_and_requirements.sh
-bash 45_assert_cuda_ok.sh
-bash 50_model_warmup.sh         # GPU warmup only (cuda:0)
-bash 55_optional_enable_amp.sh  # optional; safe to skip
-bash 60_run_server_tmux.sh
+bash ./10_bootstrap_system.sh
+bash ./20_python_venv.sh
+bash ./30_install_torch.sh
+bash ./40_clone_and_requirements.sh
+bash ./45_assert_cuda_ok.sh
+bash ./50_model_warmup.sh         # GPU warmup only (cuda:0)
+bash ./55_optional_enable_amp.sh  # optional; safe to skip
+bash ./60_run_server_tmux.sh
 
 echo
 echo "WS URL:"
