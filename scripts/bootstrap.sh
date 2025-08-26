@@ -32,18 +32,50 @@ if [ ! -d repos/sherpa-onnx ]; then
 fi
 
 # Force TRT EP preference in the streaming WS server if available.
-# Make patch tolerant to whitespace changes: match providers = [provider]
-sed -E -i "s/providers *= *\[provider\]/providers=['TensorrtExecutionProvider',{'trt_fp16_enable':True,'trt_engine_cache_enable':True,'trt_engine_cache_path':'$ROOT\\/trt_cache','trt_max_workspace_size':8589934592}],'CUDAExecutionProvider']/" \
-  "$ROOT/repos/sherpa-onnx/python-api-examples/streaming_server.py" || true
+# Do it via inline Python to avoid sed escaping issues and survive whitespace changes.
+python - <<'PY'
+import pathlib, re
+root = pathlib.Path(__file__).resolve().parents[1]
+srv = root / 'repos' / 'sherpa-onnx' / 'python-api-examples' / 'streaming_server.py'
+try:
+    text = srv.read_text(encoding='utf-8')
+except Exception:
+    print('[patch] streaming_server.py not found; skipping provider patch')
+else:
+    pat = re.compile(r"providers\s*=\s*\[provider\]")
+    rep = "providers=[('TensorrtExecutionProvider', {'trt_fp16_enable': True, 'trt_engine_cache_enable': True, 'trt_engine_cache_path': r'%s/trt_cache', 'trt_max_workspace_size': 8589934592}), 'CUDAExecutionProvider', 'CPUExecutionProvider']" % root.as_posix()
+    new = pat.sub(rep, text, count=1)
+    if new != text:
+        srv.write_text(new, encoding='utf-8')
+        print('[patch] Injected TRT->CUDA->CPU providers into streaming_server.py')
+    else:
+        print('[patch] Pattern not found; file may already be patched or changed. Skipping.')
+PY
 
 echo "[4/8] Download Streaming NeMo CTC 80ms ONNX pack (pre-converted)"
 # These tarballs are the streaming CTC exports (80/480/1040 ms). We use 80ms.
 cd models
 if [ ! -d nemo_ctc_80ms ]; then
   mkdir -p nemo_ctc_80ms && cd nemo_ctc_80ms
-  # Preconverted pack maintained by sherpa-onnx author; contains model.onnx + tokens.txt + test_wavs.
-  curl -L -o pack.tar.bz2 \
-    https://github.com/csukuangfj/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-streaming-fast-conformer-ctc-en-80ms.tar.bz2
+
+  PRIMARY="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-streaming-fast-conformer-ctc-en-80ms.tar.bz2"
+  FALLBACK="https://github.com/csukuangfj/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-streaming-fast-conformer-ctc-en-80ms.tar.bz2"
+
+  fetch() {
+    URL="$1"
+    echo "  -> fetching: $URL"
+    curl -L --retry 4 --retry-all-errors -o pack.tar.bz2 "$URL" || return 1
+    [ -s pack.tar.bz2 ] || return 1
+    tar -tjf pack.tar.bz2 >/dev/null 2>&1 || return 1
+    return 0
+  }
+
+  if ! fetch "$PRIMARY"; then
+    echo "  !! primary failed; trying fallback mirror"
+    rm -f pack.tar.bz2
+    fetch "$FALLBACK" || { echo "  !! failed to download model pack"; exit 2; }
+  fi
+
   tar xf pack.tar.bz2 --strip-components=1
   rm -f pack.tar.bz2
   cd ..
