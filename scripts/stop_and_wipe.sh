@@ -5,17 +5,24 @@ ROOT="${ROOT:-$(pwd)}"
 # Options:
 #   --trt       Purge TensorRT packages installed via install_tensorrt.sh
 #   --trt-all   Also remove cuda-keyring and CUDA repo entries
+#   --build     Remove build deps from bootstrap.sh (git, cmake, ffmpeg, etc.)
+#   --all       Everything: TRT + CUDA repo + build deps
 
 PURGE_TRT=0
 PURGE_CUDA_REPO=0
+PURGE_BUILD_DEPS=0
 for arg in "${@:-}"; do
   case "$arg" in
     --trt) PURGE_TRT=1 ;;
     --trt-all) PURGE_TRT=1; PURGE_CUDA_REPO=1 ;;
+    --build) PURGE_BUILD_DEPS=1 ;;
+    --all) PURGE_TRT=1; PURGE_CUDA_REPO=1; PURGE_BUILD_DEPS=1 ;;
     --help|-h)
-      echo "Usage: $0 [--trt | --trt-all]"
+      echo "Usage: $0 [--trt | --trt-all | --build | --all]"
       echo "  --trt      Purge TensorRT packages (tensorrt, libnvinfer*)"
       echo "  --trt-all  Also remove cuda-keyring and CUDA APT repo entries"
+      echo "  --build    Remove build deps (git, cmake, ffmpeg, ninja, etc.)"
+      echo "  --all      Everything: TRT + CUDA repo + build deps"
       exit 0
       ;;
   esac
@@ -72,6 +79,23 @@ if [ $PURGE_CUDA_REPO -eq 1 ]; then
     $SUDO apt-get update -y || true
     # Also drop apt lists to reclaim disk
     $SUDO rm -rf /var/lib/apt/lists/* || true
+  fi
+fi
+
+if [ $PURGE_BUILD_DEPS -eq 1 ]; then
+  if command -v apt-get >/dev/null 2>&1; then
+    echo "[wipe] Purging build dependencies from bootstrap.sh"
+    # Remove the exact packages installed in bootstrap.sh BATCH_DEPS
+    $SUDO apt-get purge -y git cmake ninja-build build-essential pkg-config libsndfile1 ffmpeg curl || true
+    # Remove common build-related packages that may have been pulled in
+    $SUDO apt-get purge -y gcc g++ make libc6-dev linux-libc-dev || true
+    $SUDO apt-get autoremove -y || true
+    $SUDO apt-get clean || true
+    # Clear more caches
+    $SUDO rm -rf /var/cache/apt/archives/* /var/lib/apt/lists/* || true
+    $SUDO rm -rf /tmp/* /var/tmp/* || true
+  else
+    echo "[warn] apt-get not found; cannot purge build dependencies"
   fi
 fi
 

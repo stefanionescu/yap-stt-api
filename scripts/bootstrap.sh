@@ -23,7 +23,7 @@ echo 'export OMP_NUM_THREADS=1' >> "$ROOT/.venv/bin/activate"
 echo 'ulimit -n 131072 || true' >> "$ROOT/.venv/bin/activate"
 pip install --upgrade pip wheel setuptools
 # CUDA EP first; we may replace with a TRT-EP build later
-pip install "numpy<2.0" onnx==1.18.0 onnxruntime-gpu==1.18.0 fastapi uvicorn websockets soundfile
+pip install "numpy<2.0" onnx==1.18.0 onnxruntime-gpu==1.22.0 fastapi uvicorn websockets soundfile
 
 echo "[3/8] Install sherpa-onnx from PyPI + clone repo for server scripts"
 pip install "sherpa-onnx==1.12.10"
@@ -31,38 +31,8 @@ if [ ! -d repos/sherpa-onnx ]; then
   git clone https://github.com/k2-fsa/sherpa-onnx.git repos/sherpa-onnx
 fi
 
-# Force TRT EP preference in the streaming WS server if available.
-# Do it via inline Python to avoid sed escaping issues and survive whitespace changes.
-python - <<'PY'
-import os, pathlib, re, sys
-root = pathlib.Path(os.getcwd())
-srv = root / 'repos' / 'sherpa-onnx' / 'python-api-examples' / 'streaming_server.py'
-if not srv.exists():
-    print(f"[patch] not found at {srv}")
-    # show candidates to help debug if upstream moved it
-    cand = list((root / 'repos' / 'sherpa-onnx').rglob('streaming_server.py'))
-    if cand:
-        print("[patch] candidates:")
-        for c in cand: print("  -", c)
-    sys.exit(0)
-
-txt = srv.read_text(encoding='utf-8')
-# replace `providers=[provider]` once, keep everything else intact
-new = re.sub(
-    r"providers\s*=\s*\[provider\]",
-    "providers=[('TensorrtExecutionProvider', "
-    "{'trt_fp16_enable': True, 'trt_engine_cache_enable': True, "
-    f"'trt_engine_cache_path': r'{(root/'trt_cache').as_posix()}', "
-    " 'trt_max_workspace_size': 8589934592}), "
-    "'CUDAExecutionProvider', 'CPUExecutionProvider']",
-    txt, count=1
-)
-if new != txt:
-    srv.write_text(new, encoding='utf-8')
-    print("[patch] Injected TRT->CUDA->CPU providers into streaming_server.py")
-else:
-    print("[patch] Pattern not found; file may already be patched or changed. Skipping.")
-PY
+# Add CUDA library paths to venv for runtime
+echo 'export LD_LIBRARY_PATH=/usr/local/cuda-12.8/lib64:/usr/local/cuda/lib64:/usr/local/cuda-12.8/targets/x86_64-linux/lib:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH' >> "$ROOT/.venv/bin/activate"
 
 echo "[4/8] Download Streaming NeMo CTC 80ms ONNX pack (pre-converted)"
 # These tarballs are the streaming CTC exports (80/480/1040 ms). We use 80ms.
@@ -94,51 +64,8 @@ if [ ! -d nemo_ctc_80ms ]; then
 fi
 cd "$ROOT"
 
-echo "[5/8] (Optional) Detect TensorRT and build ONNX Runtime with TRT EP"
-# If TensorRT SDK is installed (libnvinfer.so exists), build ORT with TRT EP and install the wheel
-TRT_SO=$(ldconfig -p | grep -m1 libnvinfer.so || true)
-if [ -n "$TRT_SO" ]; then
-  echo "  -> TensorRT detected: $TRT_SO"
-  echo "     Building ONNX Runtime $ORT_TAG with TensorRT EP..."
-  cd repos
-  if [ ! -d onnxruntime ]; then
-    git clone --recursive https://github.com/microsoft/onnxruntime.git
-  fi
-  cd onnxruntime
-  git fetch --all --tags
-  git checkout $ORT_TAG
-  git submodule update --init --recursive
-
-  # infer default paths for CUDA/cuDNN/TRT on Ubuntu 22.04
-  # Prefer CUDA 12.x if present; override by exporting CUDA_HOME before running
-  if [ -z "${CUDA_HOME:-}" ]; then
-    for C in /usr/local/cuda-12.* /usr/local/cuda; do
-      if [ -d "$C" ]; then CUDA_HOME="$C"; break; fi
-    done
-  fi
-  CUDNN_HOME=${CUDNN_HOME:-/usr/lib/x86_64-linux-gnu}
-  # libnvinfer is typically under /usr/lib/x86_64-linux-gnu; tweak if custom
-  TENSORRT_HOME=${TENSORRT_HOME:-/usr/lib/x86_64-linux-gnu}
-
-  ./build.sh --config Release --build_wheel --parallel --skip_tests \
-    --update --build \
-    --use_tensorrt --tensorrt_home "$TENSORRT_HOME" \
-    --cuda_home "$CUDA_HOME" --cudnn_home "$CUDNN_HOME"
-
-  WHEEL=$(ls build/Linux/Release/dist/onnxruntime_gpu-*.whl | tail -n1)
-  echo "  -> Installing ORT wheel with TRT EP: $WHEEL"
-  pip uninstall -y onnxruntime-gpu || true
-  pip install "$WHEEL"
-
-  # set EP env for runtime
-  echo "export ORT_TENSORRT_ENGINE_CACHE_ENABLE=1"  >> "$ROOT/.venv/bin/activate"
-  echo "export ORT_TENSORRT_CACHE_PATH=$ROOT/trt_cache" >> "$ROOT/.venv/bin/activate"
-  echo "export ORT_TENSORRT_FP16_ENABLE=1"         >> "$ROOT/.venv/bin/activate"
-  echo "export ORT_TENSORRT_MAX_WORKSPACE_SIZE=8589934592" >> "$ROOT/.venv/bin/activate"
-  cd "$ROOT"
-else
-  echo "  -> TensorRT not detected. Using CUDA EP for now. You can apt-install TensorRT and rerun bootstrap."
-fi
+echo "[5/8] Skipping TensorRT EP build (using CUDA EP for simplicity)"
+# TensorRT EP can be added later for additional performance if needed
 
 echo "[6/8] Download PnC model (optional)"
 cd models
@@ -158,7 +85,7 @@ echo "[7/8] Tiny sanity check (load model + list I/O)"
 python - <<'PY'
 import onnxruntime as ort, os
 sess = ort.InferenceSession(os.path.join("models","nemo_ctc_80ms","model.onnx"),
-                            providers=["TensorrtExecutionProvider","CUDAExecutionProvider","CPUExecutionProvider"])
+                            providers=["CUDAExecutionProvider","CPUExecutionProvider"])
 print("Providers:", sess.get_providers())
 print("Inputs:", [i.name for i in sess.get_inputs()])
 print("Outputs:", [o.name for o in sess.get_outputs()])

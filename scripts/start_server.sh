@@ -11,19 +11,14 @@ LOG="$ROOT/logs/server.out"
 MODEL="$ROOT/models/nemo_ctc_80ms/model.onnx"
 TOKENS="$ROOT/models/nemo_ctc_80ms/tokens.txt"
 
-# Prefer TensorRT EP if available; sherpa-onnx maps this to ORT providers internally
-PROVIDER=${PROVIDER:-cuda}          # keep 'cuda' here; TRT EP is forced via ORT providers patch
+# Use CUDA EP (TensorRT EP can be added later if needed)
+PROVIDER=${PROVIDER:-cuda}
 
 # Make logs directory
 mkdir -p "$ROOT/logs"
 
-# Export TRT cache envs (harmless if provider=cuda)
-export ORT_TENSORRT_ENGINE_CACHE_ENABLE=${ORT_TENSORRT_ENGINE_CACHE_ENABLE:-1}
-export ORT_TENSORRT_CACHE_PATH=${ORT_TENSORRT_CACHE_PATH:-$ROOT/trt_cache}
-export ORT_TENSORRT_FP16_ENABLE=${ORT_TENSORRT_FP16_ENABLE:-1}
-export ORT_TENSORRT_MAX_WORKSPACE_SIZE=${ORT_TENSORRT_MAX_WORKSPACE_SIZE:-8589934592}
-
-echo "[diag] TRT cache: enable=$ORT_TENSORRT_ENGINE_CACHE_ENABLE path=$ORT_TENSORRT_CACHE_PATH"
+# Diagnostic: check available providers
+echo "[diag] Checking ONNX Runtime providers:"
 python - <<'PY'
 import onnxruntime as ort
 print("[diag] ORT available providers:", ort.get_available_providers())

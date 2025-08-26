@@ -1,10 +1,10 @@
 ## Sherpa-ONNX Streaming ASR (NVIDIA FastConformer 80 ms CTC) — RunPod
 
-This repo runs sherpa-onnx’s streaming WebSocket server with NVIDIA FastConformer Hybrid Streaming Multi (80 ms, CTC). It supports micro-batching across clients and prefers ONNX Runtime TensorRT EP when available (falls back to CUDA EP).
+This repo runs sherpa-onnx's streaming WebSocket server with NVIDIA FastConformer Hybrid Streaming Multi (80 ms, CTC). It supports micro-batching across clients and uses ONNX Runtime CUDA EP for GPU acceleration (TensorRT EP can be added later for additional performance).
 
 ### What you get
 
-- **bootstrap**: installs deps, sets up venv, downloads the 80 ms ONNX pack, enables TensorRT EP if present, and downloads PnC.
+- **bootstrap**: installs deps, sets up venv, downloads the 80 ms ONNX pack, configures CUDA EP, and downloads PnC.
 - **start**: runs the batching WebSocket server on **port 8000**.
 - **stop+wipe**: kills the server and removes venv/repos/models/logs/TRT cache.
 - **PnC (optional)**: punctuation+capitalization model downloaded; apply on finals only from your gateway.
@@ -30,23 +30,14 @@ This repo runs sherpa-onnx’s streaming WebSocket server with NVIDIA FastConfor
 ### Setup on RunPod (Ubuntu 22.04 / CUDA 12.x)
 
 ```bash
-# 1) (Optional) Install TensorRT pinned to CUDA 12.x, then bootstrap
-# Check driver supports your target CUDA first:
-#   nvidia-smi | head -n 15   # if driver shows only CUDA 12.x, pin TRT to cuda12
-TRT_CUDA_SERIES=cuda12 bash scripts/install_tensorrt.sh   # optional; skip if TRT already present
-
-# If you pinned TRT to CUDA 12.x, export CUDA_HOME before bootstrap (example paths):
-#   export CUDA_HOME=/usr/local/cuda-12.8
-#   export CUDNN_HOME=/usr/lib/x86_64-linux-gnu
-#   export TENSORRT_HOME=/usr/lib/x86_64-linux-gnu
-
-bash scripts/bootstrap.sh          # sets up venv, downloads models, builds ORT (TRT if available)
+# 1) Bootstrap (sets up venv, downloads models, configures CUDA EP)
+bash scripts/bootstrap.sh
 
 # 2) Activate venv and install test deps
 source .venv/bin/activate
 pip install -r requirements.txt
 
-# 3) Start server (defaults: PORT=8000, MAX_BATCH=12, LOOP_MS=15)
+# 3) Start server (defaults: PORT=8000, MAX_BATCH=12, LOOP_MS=15, PROVIDER=cuda)
 bash scripts/start_server.sh
 # Logs → ./logs/server.out (optional tail: tail -f logs/server.out | sed -u 's/\r/\n/g')
 
@@ -54,6 +45,8 @@ bash scripts/start_server.sh
 python test/warmup.py --server localhost:8000 --file mid.wav --chunk-ms 120
 cat test/results/warmup.txt
 ```
+
+**Optional TensorRT EP**: For additional performance, TensorRT EP can be added later by installing TensorRT packages and rebuilding ONNX Runtime from source. The CUDA EP setup above is sufficient for 80-100 concurrent streams on L40/L40S.
 
 You can override at runtime:
 
@@ -87,6 +80,6 @@ Recommended: keep a short rolling context tail (~60 tokens) per session, but onl
 
 - **Micro-batching**: tune `MAX_BATCH` (e.g., 8–16) and `LOOP_MS` (10–20 ms).
 - **Client frames**: send 120–160 ms 16 kHz mono PCM for stable batching.
-- **Provider**: `tensorrt` first, fallback `cuda`.
+- **Provider**: `cuda` (TensorRT can be added later for extra performance).
 - **TRT cache**: engines saved under `./trt_cache` for faster restarts.
 - **Swap model**: replace the 80 ms pack URL in `scripts/bootstrap.sh` to use 480/1040 ms variants.
