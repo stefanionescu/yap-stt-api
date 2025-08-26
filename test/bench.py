@@ -1,30 +1,26 @@
 #!/usr/bin/env python3
 """
-Benchmark gRPC streaming (Riva-compatible) for Parakeet ASR.
+Benchmark WebSocket streaming (sherpa-onnx) for FastConformer CTC.
 
 Streams PCM16@16k from audio files in chunks to simulate realtime voice.
 Measures latency (wall), time-to-first-word, and throughput under concurrency.
 """
+from __future__ import annotations
 import argparse
 import asyncio
+import json
 import os
 import statistics as stats
 import time
-from pathlib import Path
 from datetime import datetime
-from typing import Dict, List
-
-import riva.client  # type: ignore
-import json
-import sys
 from pathlib import Path
-sys.path.append(str(Path(__file__).resolve().parent))
+from typing import Dict, List, Tuple
 
+import websockets  # pip install websockets
+from utils import file_to_pcm16_mono_16k, file_duration_seconds
 
 SAMPLES_DIR = "samples"
 EXTS = {".wav", ".flac", ".ogg", ".mp3"}
-from utils import file_to_pcm16_mono_16k, file_duration_seconds
-
 RESULTS_DIR = Path("test/results")
 ERRORS_FILE = RESULTS_DIR / "bench_errors.txt"
 
@@ -50,8 +46,8 @@ def find_sample_by_name(filename: str) -> str | None:
 
 def _metrics(audio_duration_s: float, wall_s: float, ttfw_s: float | None = None) -> Dict[str, float]:
     rtf = wall_s / audio_duration_s if audio_duration_s > 0 else float("inf")
-    xrt = audio_duration_s / wall_s if wall_s > 0 else 0.0
-    throughput_min_per_min = audio_duration_s / wall_s if wall_s > 0 else 0.0
+    xrt = (audio_duration_s / wall_s) if wall_s > 0 else 0.0
+    throughput_min_per_min = (audio_duration_s / wall_s) if wall_s > 0 else 0.0
     return {
         "wall_s": wall_s,
         "audio_s": audio_duration_s,
@@ -66,18 +62,21 @@ def summarize(title: str, results: List[Dict[str, float]]) -> None:
     if not results:
         print(f"{title}: no results")
         return
+    def p(v: List[float], q: float) -> float:
+        k = max(0, min(len(v)-1, int(round(q*(len(v)-1)))))
+        return sorted(v)[k]
+
     wall = [r["wall_s"] for r in results]
     audio = [r["audio_s"] for r in results]
     rtf = [r["rtf"] for r in results]
     xrt = [r["xrt"] for r in results]
     throughput = [r["throughput_min_per_min"] for r in results]
     ttfw_vals = [r["ttfw_s"] for r in results if "ttfw_s" in r]
-    n = len(results)
-    def p(v: List[float], q: float) -> float:
-        k = max(0, min(len(v)-1, int(round(q*(len(v)-1)))))
-        return sorted(v)[k]
+    fin = [r.get("finalize_ms", 0.0) for r in results if r.get("finalize_ms", 0.0) > 0]
+    gaps = [r.get("avg_partial_gap_ms", 0.0) for r in results if r.get("avg_partial_gap_ms", 0.0) > 0]
+
     print(f"\n== {title} ==")
-    print(f"n={n}")
+    print(f"n={len(results)}")
     print(f"Wall s      | avg={stats.mean(wall):.4f}  p50={stats.median(wall):.4f}  p95={p(wall,0.95):.4f}")
     if ttfw_vals:
         print(f"TTFW s      | avg={stats.mean(ttfw_vals):.4f}  p50={stats.median(ttfw_vals):.4f}  p95={p(ttfw_vals,0.95):.4f}")
@@ -85,125 +84,103 @@ def summarize(title: str, results: List[Dict[str, float]]) -> None:
     print(f"RTF         | avg={stats.mean(rtf):.4f}  p50={stats.median(rtf):.4f}  p95={p(rtf,0.95):.4f}")
     print(f"xRT         | avg={stats.mean(xrt):.4f}")
     print(f"Throughput  | avg={stats.mean(throughput):.2f} min/min")
-
-    # Finalization latency percentiles across streams
-    fin = [r.get("finalize_ms", 0.0) for r in results if r.get("finalize_ms", 0.0) > 0]
     if fin:
         print(f"Finalize ms | avg={stats.mean(fin):.1f}  p50={p(fin,0.50):.1f}  p95={p(fin,0.95):.1f}")
-
-    # Partial cadence (avg gap) percentiles across streams
-    gaps = [r.get("avg_partial_gap_ms", 0.0) for r in results if r.get("avg_partial_gap_ms", 0.0) > 0]
     if gaps:
         print(f"Partial gap | avg={stats.mean(gaps):.1f}  p50={p(gaps,0.50):.1f}  p95={p(gaps,0.95):.1f}")
 
 
-def one_stream(server: str, secure: bool, pcm_bytes: bytes, audio_seconds: float, chunk_ms: int) -> Dict[str, float]:
-    auth = riva.client.Auth(ssl_cert=None, use_ssl=bool(secure), uri=server)
-    asr = riva.client.ASRService(auth)
-    cfg = riva.client.RecognitionConfig(
-        encoding=riva.client.AudioEncoding.LINEAR_PCM,
-        sample_rate_hertz=16000,
-        language_code="en-US",
-        max_alternatives=1,
-        enable_automatic_punctuation=False,
-    )
-    scfg = riva.client.StreamingRecognitionConfig(config=cfg, interim_results=True)
+def _ws_url(server: str, secure: bool) -> str:
+    if server.startswith("ws://") or server.startswith("wss://"):
+        return server
+    scheme = "wss" if secure else "ws"
+    return f"{scheme}://{server}"
+
+
+async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, chunk_ms: int, mode: str) -> Dict[str, float]:
+    """
+    One session over WebSocket. For 'stream', sleeps per chunk to simulate realtime.
+    For 'oneshot', sends with no sleeps.
+    """
+    url = _ws_url(server, secure=False)
+    t0 = time.perf_counter()
+    ttfw = None
+    partial_ts: List[float] = []
+    last_chunk_sent_ts = 0.0
+    final_recv_ts = 0.0
+    last_text = ""
+    final_text = ""
 
     bytes_per_ms = int(16000 * 2 / 1000)
     step = max(1, int(chunk_ms)) * bytes_per_ms
 
-    last_chunk_sent_ts = 0.0
-
-    def audio_iter():
-        nonlocal last_chunk_sent_ts
-        # Yield raw PCM bytes to match warmup.py behavior; config is passed to generator
-        import time as _t
-        for i in range(0, len(pcm_bytes), step):
-            yield pcm_bytes[i : i + step]
-            last_chunk_sent_ts = _t.perf_counter() if hasattr(_t, "perf_counter") else _t.time()
-            _t.sleep(max(0.0, chunk_ms / 1000.0))
-
-    t0 = time.perf_counter()
-    got_first = False
-    ttfw = 0.0
-    partial_ts: list[float] = []
-    partials_count = 0
-    final_len = 0
-    segment_finals: List[str] = []
-    final_recv_ts = 0.0
-    for resp in asr.streaming_response_generator(audio_chunks=audio_iter(), streaming_config=scfg):
-        for r in resp.results:
-            if not r.alternatives:
-                continue
-            alt = r.alternatives[0]
-            if not r.is_final and alt.transcript:
-                partials_count += 1
+    async with websockets.connect(url, max_size=None) as ws:
+        # receiver: JSON partials {"text": "...", "segment": n}; final sentinel is "Done!"
+        async def receiver():
+            nonlocal ttfw, final_recv_ts, final_text, last_text
+            async for msg in ws:
+                if isinstance(msg, (bytes, bytearray)):
+                    # server shouldn't send binary; ignore
+                    continue
+                if msg == "Done!":
+                    final_recv_ts = time.perf_counter()
+                    return
+                try:
+                    j = json.loads(msg)
+                    txt = j.get("text", "")
+                except Exception:
+                    continue
                 now = time.perf_counter()
-                partial_ts.append(now - t0)
-                if not got_first:
-                    ttfw = now - t0
-                    got_first = True
-            elif r.is_final:
-                seg_txt = (alt.transcript or "").strip()
-                if seg_txt:
-                    segment_finals.append(seg_txt)
-                final_len = sum(len(s) for s in segment_finals)
-                final_recv_ts = time.perf_counter()
+                if txt:
+                    if ttfw is None:
+                        ttfw = now - t0
+                    # Only count when it changes to avoid 100s of dup prints
+                    if txt != last_text:
+                        partial_ts.append(now - t0)
+                        last_text = txt
+                    final_text = txt  # keep last as final
+            # socket closed without Done!
+            final_recv_ts = time.perf_counter()
+
+        recv_task = asyncio.create_task(receiver())
+
+        # sender: stream audio
+        if mode == "stream":
+            # realistic streaming
+            for i in range(0, len(pcm_bytes), step):
+                await ws.send(pcm_bytes[i:i+step])
+                last_chunk_sent_ts = time.perf_counter()
+                await asyncio.sleep(chunk_ms / 1000.0)
+        else:
+            # oneshot: no sleeps; still chunk to avoid huge frames
+            big = 64000  # ~2 sec per frame; adjust if you like
+            for i in range(0, len(pcm_bytes), big):
+                await ws.send(pcm_bytes[i:i+big])
+                last_chunk_sent_ts = time.perf_counter()
+
+        # signal end
+        await ws.send("Done")
+        await recv_task
+
     wall = time.perf_counter() - t0
-    metrics = _metrics(audio_seconds, wall, ttfw if got_first else None)
-    # Derive partial cadence metrics
+    metrics = _metrics(audio_seconds, wall, ttfw)
     if len(partial_ts) >= 2:
         gaps = [b - a for a, b in zip(partial_ts[:-1], partial_ts[1:])]
         avg_gap_ms = (sum(gaps) / len(gaps)) * 1000.0
     else:
         avg_gap_ms = 0.0
+
     metrics.update({
-        "partials": float(partials_count),
+        "partials": float(len(partial_ts)),
         "avg_partial_gap_ms": float(avg_gap_ms),
-        "final_len_chars": float(final_len),
+        "final_len_chars": float(len(final_text)),
         "finalize_ms": float(((final_recv_ts - last_chunk_sent_ts) * 1000.0) if (final_recv_ts and last_chunk_sent_ts) else 0.0),
-        "mode": "stream",
+        "mode": mode,
     })
     return metrics
 
 
-def one_oneshot(server: str, secure: bool, pcm_bytes: bytes, audio_seconds: float) -> Dict[str, float]:
-    auth = riva.client.Auth(ssl_cert=None, use_ssl=bool(secure), uri=server)
-    asr = riva.client.ASRService(auth)
-    cfg = riva.client.RecognitionConfig(
-        encoding=riva.client.AudioEncoding.LINEAR_PCM,
-        sample_rate_hertz=16000,
-        language_code="en-US",
-        max_alternatives=1,
-        enable_automatic_punctuation=False,
-    )
-    t0 = time.perf_counter()
-    text = ""
-    try:
-        # Try common method signatures across riva client versions
-        try:
-            resp = asr.offline_recognize(pcm_bytes, cfg)  # type: ignore[arg-type]
-        except TypeError:
-            try:
-                resp = asr.offline_recognize(audio=pcm_bytes, config=cfg)  # type: ignore[call-arg]
-            except AttributeError:
-                resp = asr.recognize(pcm_bytes, cfg)  # type: ignore[arg-type]
-        for r in getattr(resp, "results", []) or []:
-            if getattr(r, "alternatives", None):
-                alt = r.alternatives[0]
-                text = getattr(alt, "transcript", "") or ""
-                break
-    finally:
-        wall = time.perf_counter() - t0
-    metrics = _metrics(audio_seconds, wall, None)
-    metrics.update({
-        "final_len_chars": float(len(text)),
-        "mode": "oneshot",
-    })
-    return metrics
-
-
-async def bench_grpc(server: str, secure: bool, file_path: str, total_reqs: int, concurrency: int, chunk_ms: int, mode: str) -> tuple[List[Dict[str, float]], int, int]:
+async def bench_ws(server: str, file_path: str, total_reqs: int, concurrency: int, chunk_ms: int, mode: str) -> Tuple[List[Dict[str, float]], int, int]:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     try:
         with open(ERRORS_FILE, "w", encoding="utf-8") as ef:
@@ -213,6 +190,7 @@ async def bench_grpc(server: str, secure: bool, file_path: str, total_reqs: int,
 
     sem = asyncio.Semaphore(max(1, concurrency))
     results: List[Dict[str, float]] = []
+    rejected = 0
     errors_total = 0
 
     pcm = file_to_pcm16_mono_16k(file_path)
@@ -222,28 +200,30 @@ async def bench_grpc(server: str, secure: bool, file_path: str, total_reqs: int,
         nonlocal errors_total
         async with sem:
             try:
-                if mode == "stream":
-                    res = await asyncio.to_thread(one_stream, server, secure, pcm, audio_seconds, chunk_ms)
-                else:
-                    res = await asyncio.to_thread(one_oneshot, server, secure, pcm, audio_seconds)
-                results.append(res)
-            except Exception:
+                r = await _ws_one(server, pcm, audio_seconds, chunk_ms, mode)
+                results.append(r)
+            except Exception as e:
                 errors_total += 1
+                try:
+                    with open(ERRORS_FILE, "a", encoding="utf-8") as ef:
+                        ef.write(f"{datetime.utcnow().isoformat()}Z idx={req_idx} err={e}\n")
+                except Exception:
+                    pass
 
     tasks = [asyncio.create_task(worker(i)) for i in range(total_reqs)]
     await asyncio.gather(*tasks, return_exceptions=True)
-    return results[:total_reqs], 0, errors_total
+    return results[:total_reqs], rejected, errors_total
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="gRPC streaming benchmark")
-    ap.add_argument("--server", default="localhost:8000")
-    ap.add_argument("--secure", action="store_true")
-    ap.add_argument("--n", type=int, default=20, help="Total streams")
-    ap.add_argument("--concurrency", type=int, default=5, help="Max concurrent streams")
+    ap = argparse.ArgumentParser(description="WebSocket streaming benchmark (sherpa-onnx)")
+    ap.add_argument("--server", default="localhost:8000", help="host:port or ws://host:port")
+    ap.add_argument("--secure", action="store_true", help="(ignored unless you run wss)")
+    ap.add_argument("--n", type=int, default=20, help="Total sessions")
+    ap.add_argument("--concurrency", type=int, default=5, help="Max concurrent sessions")
     ap.add_argument("--file", type=str, default="mid.wav", help="Audio file from samples/")
-    ap.add_argument("--chunk-ms", type=int, default=50, help="Chunk size in ms for streaming")
-    ap.add_argument("--mode", choices=["stream", "oneshot"], default="stream", help="Run streaming or one-shot ASR")
+    ap.add_argument("--chunk-ms", type=int, default=120, help="Chunk size in ms for streaming")
+    ap.add_argument("--mode", choices=["stream", "oneshot"], default="stream", help="Run streaming or one-shot")
     args = ap.parse_args()
 
     file_path = find_sample_by_name(args.file)
@@ -254,14 +234,16 @@ def main() -> None:
             print(f"Available files: {[os.path.basename(f) for f in available]}")
         return
 
-    print(f"Benchmark → gRPC ({args.mode}) | n={args.n} | concurrency={args.concurrency} | server={args.server}")
+    print(f"Benchmark → WS ({args.mode}) | n={args.n} | concurrency={args.concurrency} | server={args.server}")
     print(f"File: {os.path.basename(file_path)}")
 
     t0 = time.time()
-    results, rejected, errors = asyncio.run(bench_grpc(args.server, args.secure, file_path, args.n, args.concurrency, args.chunk_ms, args.mode))
+    results, rejected, errors = asyncio.run(
+        bench_ws(args.server, file_path, args.n, args.concurrency, args.chunk_ms, args.mode)
+    )
     elapsed = time.time() - t0
 
-    summarize("gRPC Streaming", results)
+    summarize("WebSocket Streaming", results)
     print(f"Rejected: {rejected}")
     print(f"Errors: {errors}")
     print(f"Total elapsed: {elapsed:.4f}s")
@@ -270,7 +252,7 @@ def main() -> None:
         print(f"Total audio processed: {total_audio:.2f}s")
         print(f"Overall throughput: {total_audio/elapsed*60:.2f} sec/min = {total_audio/elapsed:.2f} min/min")
 
-    # Write per-stream metrics JSONL (overwrite each run)
+    # per-stream JSONL (overwrite each run)
     try:
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)
         metrics_path = RESULTS_DIR / "bench_metrics.jsonl"
