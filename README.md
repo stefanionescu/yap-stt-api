@@ -34,15 +34,15 @@ This repo runs sherpa-onnx’s streaming WebSocket server with NVIDIA FastConfor
 chmod +x scripts/*.sh
 
 # 2) (Optional) Install TensorRT, then bootstrap to build ORT with TRT EP
-./scripts/install_tensorrt.sh   # optional; skip if TRT already present
-./scripts/bootstrap.sh          # sets up venv, downloads models, builds ORT (TRT if available)
+bash scripts/install_tensorrt.sh   # optional; skip if TRT already present
+bash scripts/bootstrap.sh          # sets up venv, downloads models, builds ORT (TRT if available)
 
 # 3) Activate venv and install test deps
 source .venv/bin/activate
 pip install -r requirements.txt
 
 # 4) Start server (defaults: PORT=8000, MAX_BATCH=12, LOOP_MS=15)
-./scripts/start_server.sh
+bash scripts/start_server.sh
 # Logs → ./logs/server.out (optional tail: tail -f logs/server.out | sed -u 's/\r/\n/g')
 
 # 5) Warmup and verify

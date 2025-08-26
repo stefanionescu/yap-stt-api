@@ -11,8 +11,10 @@ mkdir -p "$ROOT"/{models,repos,logs,trt_cache}
 cd "$ROOT"
 
 echo "[1/8] Install system packages"
-sudo apt-get update -y
-sudo apt-get install -y $BATCH_DEPS
+SUDO=""
+if command -v sudo >/dev/null 2>&1; then SUDO="sudo"; fi
+$SUDO apt-get update -y
+$SUDO apt-get install -y $BATCH_DEPS
 
 echo "[2/8] Python venv + core wheels"
 $PY -m venv .venv
