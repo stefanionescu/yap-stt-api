@@ -23,7 +23,7 @@ echo 'export OMP_NUM_THREADS=1' >> "$ROOT/.venv/bin/activate"
 echo 'ulimit -n 131072 || true' >> "$ROOT/.venv/bin/activate"
 pip install --upgrade pip wheel setuptools
 # CUDA EP first; we may replace with a TRT-EP build later
-pip install onnx onnxruntime-gpu==1.18.0 fastapi uvicorn websockets soundfile numpy
+pip install "numpy<2.0" onnx==1.18.0 onnxruntime-gpu==1.18.0 fastapi uvicorn websockets soundfile
 
 echo "[3/8] Install sherpa-onnx from PyPI + clone repo for server scripts"
 pip install "sherpa-onnx==1.12.10"
@@ -34,22 +34,34 @@ fi
 # Force TRT EP preference in the streaming WS server if available.
 # Do it via inline Python to avoid sed escaping issues and survive whitespace changes.
 python - <<'PY'
-import pathlib, re
-root = pathlib.Path(__file__).resolve().parents[1]
+import os, pathlib, re, sys
+root = pathlib.Path(os.getcwd())
 srv = root / 'repos' / 'sherpa-onnx' / 'python-api-examples' / 'streaming_server.py'
-try:
-    text = srv.read_text(encoding='utf-8')
-except Exception:
-    print('[patch] streaming_server.py not found; skipping provider patch')
+if not srv.exists():
+    print(f"[patch] not found at {srv}")
+    # show candidates to help debug if upstream moved it
+    cand = list((root / 'repos' / 'sherpa-onnx').rglob('streaming_server.py'))
+    if cand:
+        print("[patch] candidates:")
+        for c in cand: print("  -", c)
+    sys.exit(0)
+
+txt = srv.read_text(encoding='utf-8')
+# replace `providers=[provider]` once, keep everything else intact
+new = re.sub(
+    r"providers\s*=\s*\[provider\]",
+    "providers=[('TensorrtExecutionProvider', "
+    "{'trt_fp16_enable': True, 'trt_engine_cache_enable': True, "
+    f"'trt_engine_cache_path': r'{(root/'trt_cache').as_posix()}', "
+    " 'trt_max_workspace_size': 8589934592}), "
+    "'CUDAExecutionProvider', 'CPUExecutionProvider']",
+    txt, count=1
+)
+if new != txt:
+    srv.write_text(new, encoding='utf-8')
+    print("[patch] Injected TRT->CUDA->CPU providers into streaming_server.py")
 else:
-    pat = re.compile(r"providers\s*=\s*\[provider\]")
-    rep = "providers=[('TensorrtExecutionProvider', {'trt_fp16_enable': True, 'trt_engine_cache_enable': True, 'trt_engine_cache_path': r'%s/trt_cache', 'trt_max_workspace_size': 8589934592}), 'CUDAExecutionProvider', 'CPUExecutionProvider']" % root.as_posix()
-    new = pat.sub(rep, text, count=1)
-    if new != text:
-        srv.write_text(new, encoding='utf-8')
-        print('[patch] Injected TRT->CUDA->CPU providers into streaming_server.py')
-    else:
-        print('[patch] Pattern not found; file may already be patched or changed. Skipping.')
+    print("[patch] Pattern not found; file may already be patched or changed. Skipping.")
 PY
 
 echo "[4/8] Download Streaming NeMo CTC 80ms ONNX pack (pre-converted)"
