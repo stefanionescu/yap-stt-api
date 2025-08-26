@@ -35,20 +35,28 @@ def find_sample_by_name(filename: str) -> str | None:
     return None
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="WebSocket sherpa-onnx client")
-    parser.add_argument("--server", default=os.getenv("RIVA_SERVER", "localhost:8000"),
+    parser = argparse.ArgumentParser(description="WebSocket SenseVoice client")
+    parser.add_argument("--server", default=os.getenv("SENSEVOICE_SERVER", "localhost:8000"),
                         help="host:port or ws://host:port")
     parser.add_argument("--secure", action="store_true", help="Use WSS (requires cert on server)")
     parser.add_argument("--file", type=str, default="mid.wav", help="Audio file from samples/")
-    parser.add_argument("--chunk-ms", type=int, default=120, help="Chunk size in ms for streaming")
+    parser.add_argument("--chunk-ms", type=int, default=100, help="Chunk size in ms for streaming")
     parser.add_argument("--mode", choices=["stream", "oneshot"], default="stream", help="Run streaming or one-shot ASR")
     return parser.parse_args()
 
-def _ws_url(server: str, secure: bool) -> str:
+def _ws_url(server: str, secure: bool, chunk_duration: float = 0.1, vad_threshold: float = 0.5, vad_min_silence_duration_ms: int = 550) -> str:
     if server.startswith("ws://") or server.startswith("wss://"):
-        return server
-    scheme = "wss" if secure else "ws"
-    return f"{scheme}://{server}"
+        base_url = server
+    else:
+        scheme = "wss" if secure else "ws"
+        base_url = f"{scheme}://{server}"
+    
+    # Add SenseVoice API endpoint and parameters
+    if "/api/realtime/ws" not in base_url:
+        base_url = base_url.rstrip("/") + "/api/realtime/ws"
+    
+    params = f"chunk_duration={chunk_duration}&vad_threshold={vad_threshold}&vad_min_silence_duration_ms={vad_min_silence_duration_ms}"
+    return f"{base_url}?{params}"
 
 async def run(args: argparse.Namespace) -> None:
     file_path = find_sample_by_name(args.file)
@@ -62,7 +70,7 @@ async def run(args: argparse.Namespace) -> None:
     pcm = file_to_pcm16_mono_16k(file_path)
     duration = file_duration_seconds(file_path)
 
-    url = _ws_url(args.server, args.secure)
+    url = _ws_url(args.server, args.secure, chunk_duration=args.chunk_ms/1000.0)
     print(f"Connecting to: {url}")
     print(f"File: {os.path.basename(file_path)} ({duration:.2f}s)")
 

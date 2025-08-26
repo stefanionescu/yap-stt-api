@@ -90,11 +90,19 @@ def summarize(title: str, results: List[Dict[str, float]]) -> None:
         print(f"Partial gap | avg={stats.mean(gaps):.1f}  p50={p(gaps,0.50):.1f}  p95={p(gaps,0.95):.1f}")
 
 
-def _ws_url(server: str, secure: bool) -> str:
+def _ws_url(server: str, secure: bool, chunk_duration: float = 0.1, vad_threshold: float = 0.5, vad_min_silence_duration_ms: int = 550) -> str:
     if server.startswith("ws://") or server.startswith("wss://"):
-        return server
-    scheme = "wss" if secure else "ws"
-    return f"{scheme}://{server}"
+        base_url = server
+    else:
+        scheme = "wss" if secure else "ws"
+        base_url = f"{scheme}://{server}"
+    
+    # Add SenseVoice API endpoint and parameters
+    if "/api/realtime/ws" not in base_url:
+        base_url = base_url.rstrip("/") + "/api/realtime/ws"
+    
+    params = f"chunk_duration={chunk_duration}&vad_threshold={vad_threshold}&vad_min_silence_duration_ms={vad_min_silence_duration_ms}"
+    return f"{base_url}?{params}"
 
 
 async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, chunk_ms: int, mode: str) -> Dict[str, float]:
@@ -102,7 +110,7 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, chunk_ms:
     One session over WebSocket. For 'stream', sleeps per chunk to simulate realtime.
     For 'oneshot', sends with no sleeps.
     """
-    url = _ws_url(server, secure=False)
+    url = _ws_url(server, secure=False, chunk_duration=chunk_ms/1000.0)
     t0 = time.perf_counter()
     ttfw = None
     partial_ts: List[float] = []
@@ -216,13 +224,13 @@ async def bench_ws(server: str, file_path: str, total_reqs: int, concurrency: in
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="WebSocket streaming benchmark (sherpa-onnx)")
+    ap = argparse.ArgumentParser(description="WebSocket streaming benchmark (SenseVoice)")
     ap.add_argument("--server", default="localhost:8000", help="host:port or ws://host:port")
     ap.add_argument("--secure", action="store_true", help="(ignored unless you run wss)")
     ap.add_argument("--n", type=int, default=20, help="Total sessions")
     ap.add_argument("--concurrency", type=int, default=5, help="Max concurrent sessions")
     ap.add_argument("--file", type=str, default="mid.wav", help="Audio file from samples/")
-    ap.add_argument("--chunk-ms", type=int, default=120, help="Chunk size in ms for streaming")
+    ap.add_argument("--chunk-ms", type=int, default=100, help="Chunk size in ms for streaming")
     ap.add_argument("--mode", choices=["stream", "oneshot"], default="stream", help="Run streaming or one-shot")
     args = ap.parse_args()
 

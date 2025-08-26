@@ -12,13 +12,22 @@ SAMPLES_DIR = "samples"
 RESULTS_DIR = Path("test/results")
 RESULTS_FILE = RESULTS_DIR / "warmup.txt"
 
-def _ws_url(server: str, secure: bool) -> str:
+def _ws_url(server: str, secure: bool, chunk_duration: float = 0.1, vad_threshold: float = 0.5, vad_min_silence_duration_ms: int = 550) -> str:
     if server.startswith("ws://") or server.startswith("wss://"):
-        return server
-    return f"{'wss' if secure else 'ws'}://{server}"
+        base_url = server
+    else:
+        scheme = "wss" if secure else "ws"
+        base_url = f"{scheme}://{server}"
+    
+    # Add SenseVoice API endpoint and parameters
+    if "/api/realtime/ws" not in base_url:
+        base_url = base_url.rstrip("/") + "/api/realtime/ws"
+    
+    params = f"chunk_duration={chunk_duration}&vad_threshold={vad_threshold}&vad_min_silence_duration_ms={vad_min_silence_duration_ms}"
+    return f"{base_url}?{params}"
 
 async def _run(server: str, pcm_bytes: bytes, chunk_ms: int, mode: str) -> dict:
-    url = _ws_url(server, secure=False)
+    url = _ws_url(server, secure=False, chunk_duration=chunk_ms/1000.0)
     bytes_per_ms = int(16000 * 2 / 1000)
     step = max(1, int(chunk_ms)) * bytes_per_ms
 
@@ -80,11 +89,11 @@ async def _run(server: str, pcm_bytes: bytes, chunk_ms: int, mode: str) -> dict:
     }
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Warmup via sherpa WebSocket streaming (realtime)")
+    parser = argparse.ArgumentParser(description="Warmup via SenseVoice WebSocket streaming (realtime)")
     parser.add_argument("--server", type=str, default="localhost:8000", help="host:port or ws://host:port")
     parser.add_argument("--secure", action="store_true")
     parser.add_argument("--file", type=str, default="mid.wav", help="Filename in samples/ directory")
-    parser.add_argument("--chunk-ms", type=int, default=120, help="Chunk size in ms for streaming")
+    parser.add_argument("--chunk-ms", type=int, default=100, help="Chunk size in ms for streaming")
     parser.add_argument("--mode", choices=["stream", "oneshot"], default="stream", help="Run streaming or one-shot ASR")
     args = parser.parse_args()
 

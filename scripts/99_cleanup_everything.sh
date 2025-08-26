@@ -24,11 +24,12 @@ rm -rf ~/.cache/huggingface
 rm -rf ~/.cache/torch
 echo "  Removed: ModelScope, HuggingFace, and PyTorch caches"
 
-# Remove temporary files
-echo "Removing temporary files..."
+# Remove temporary files and logs
+echo "Removing temporary files and logs..."
 rm -f /tmp/_warmup_gpu.py
 rm -f /tmp/sensevoice_*
-echo "  Removed: temporary files"
+rm -rf ~/sensevoice-logs
+echo "  Removed: temporary files and server logs"
 
 # Remove pip cache
 echo "Removing pip cache..."
@@ -51,6 +52,7 @@ echo "  • Python virtual environment (~/.venvs/sensevoice)"
 echo "  • Cloned repository (~/streaming-sensevoice)" 
 echo "  • Model caches (ModelScope, HuggingFace, PyTorch)"
 echo "  • Tmux session (sensevoice)"
+echo "  • Server logs (~/sensevoice-logs)"
 echo "  • Temporary files and pip cache"
 echo "  • Running server processes"
 echo ""
