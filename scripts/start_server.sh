@@ -4,14 +4,20 @@ ROOT="${ROOT:-$(pwd)}"
 source "$ROOT/.venv/bin/activate"
 
 PORT=${PORT:-8000}
-MAX_BATCH=${MAX_BATCH:-12}          # try 8–16; tune with load
-LOOP_MS=${LOOP_MS:-15}              # batching tick; 10–20 ms is typical
-LOG="$ROOT/logs/server.out"
 
+# Concurrency knobs (tune these):
+MAX_BATCH=${MAX_BATCH:-16}          # 8–24 works well on L40/L40S for 80ms CTC
+NN_POOL=${NN_POOL:-4}               # number of ORT sessions; 3–6 is typical
+LOOP_MS=${LOOP_MS:-15}              # batching tick; 10–20ms
+
+MAX_WAIT_MS=${MAX_WAIT_MS:-15}      # wait to coalesce a batch
+NUM_THREADS=${NUM_THREADS:-1}       # CPU thread hint to ORT
+MAX_ACTIVE=${MAX_ACTIVE:-400}       # connection cap
+MAX_QUEUE=${MAX_QUEUE:-32768}       # per-conn message queue cap
+
+LOG="$ROOT/logs/server.out"
 MODEL="$ROOT/models/nemo_ctc_80ms/model.onnx"
 TOKENS="$ROOT/models/nemo_ctc_80ms/tokens.txt"
-
-# Use CUDA EP (TensorRT EP can be added later if needed)
 PROVIDER=${PROVIDER:-cuda}
 
 # Make logs directory
@@ -29,14 +35,19 @@ PY
 [ -f "$TOKENS" ] || { echo "Missing tokens: $TOKENS"; exit 1; }
 
 # Start server in background and save PID
-echo "[start] sherpa-onnx WS server on :$PORT (provider=$PROVIDER, batch=$MAX_BATCH, loop=${LOOP_MS}ms)"
+echo "[start] sherpa-onnx WS server on :$PORT (provider=$PROVIDER, batch=$MAX_BATCH, pool=$NN_POOL, loop=${LOOP_MS}ms)"
 nohup python "$ROOT/repos/sherpa-onnx/python-api-examples/streaming_server.py" \
   --provider="$PROVIDER" \
   --port="$PORT" \
-  --max-batch-size="$MAX_BATCH" \
-  --loop-interval-ms="$LOOP_MS" \
   --nemo-ctc-model "$MODEL" \
-  --nemo-ctc-tokens "$TOKENS" \
+  --tokens "$TOKENS" \
+  --max-batch-size "$MAX_BATCH" \
+  --nn-pool-size "$NN_POOL" \
+  --loop-interval-ms "$LOOP_MS" \
+  --max-wait-ms "$MAX_WAIT_MS" \
+  --num-threads "$NUM_THREADS" \
+  --max-active-connections "$MAX_ACTIVE" \
+  --max-queue-size "$MAX_QUEUE" \
   > "$LOG" 2>&1 & echo $! > "$ROOT/server.pid"
 
 sleep 1
