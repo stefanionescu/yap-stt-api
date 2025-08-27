@@ -55,7 +55,13 @@ fi
 # 5b. Remove Rust toolchain and cargo cache (installed by 00_prereqs.sh)
 if [ -d "$HOME/.cargo" ]; then
   rm -rf "$HOME/.cargo"
-  echo "[99] ✓ Removed Rust toolchain and cargo cache (~/.cargo)"
+  echo "[99] ✓ Removed Rust cargo cache (~/.cargo)"
+fi
+
+# 5b2. Remove rustup installation directory
+if [ -d "$HOME/.rustup" ]; then
+  rm -rf "$HOME/.rustup"
+  echo "[99] ✓ Removed Rust toolchain (~/.rustup)"
 fi
 
 # 5c. Remove uv installation (installed by 00_prereqs.sh)
@@ -169,7 +175,7 @@ echo "[99]   • System packages (build-essential, cmake, libopus-dev, etc.)"
 echo
 echo "[99] Removed:"
 echo "[99]   • moshi-server binary"
-echo "[99]   • Rust toolchain and cargo cache (~/.cargo)"
+echo "[99]   • Rust toolchain (~/.rustup and ~/.cargo)"
 echo "[99]   • uv tool and ~/.local directory"
 echo "[99]   • All downloaded models and HF cache"
 echo "[99]   • All log files and tmux sessions"
