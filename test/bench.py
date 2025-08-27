@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+import contextlib
 import json
 import os
 import statistics as stats
@@ -147,66 +148,78 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
     async with websockets.connect(url, **ws_options) as ws:
         # Send handshake and wait for Ready
         ready_event = asyncio.Event()
+        done_event = asyncio.Event()
+        final_seen = False
         await ws.send(json.dumps({"type": "StartSTT"}))
         
         # receiver: Handle Moshi JSON message types
         async def receiver():
-            nonlocal ttfw_word, ttfw_text, final_recv_ts, final_text, last_text
-            async for msg in ws:
-                if isinstance(msg, (bytes, bytearray)):
-                    continue  # Skip binary messages
-                
-                try:
-                    j = json.loads(msg)
-                    msg_type = j.get("type", "")
+            nonlocal ttfw_word, ttfw_text, final_recv_ts, final_text, last_text, final_seen
+            try:
+                async for msg in ws:
+                    if isinstance(msg, (bytes, bytearray)):
+                        continue  # Skip binary messages
                     
-                    now = time.perf_counter()
-                    
-                    if msg_type == "Ready":
-                        # Server ready - unblock streaming
-                        ready_event.set()
-                        continue
-                    elif msg_type == "Step":
-                        # Ignore server step messages
-                        continue
-                    elif msg_type == "Word":
-                        # First word for strict TTFW
-                        if ttfw_word is None:
-                            ttfw_word = now - t0
-                    elif msg_type in ("Partial", "Text"):
-                        # Running transcript
-                        txt = j.get("text", "").strip()
-                        if txt:
-                            if ttfw_text is None:
+                    try:
+                        j = json.loads(msg)
+                        msg_type = j.get("type", "")
+                        
+                        now = time.perf_counter()
+                        
+                        if msg_type == "Ready":
+                            # Server ready - unblock streaming
+                            ready_event.set()
+                            continue
+                        elif msg_type == "Step":
+                            # Ignore server step messages
+                            continue
+                        elif msg_type == "Word":
+                            # First word for strict TTFW
+                            if ttfw_word is None:
+                                ttfw_word = now - t0
+                        elif msg_type in ("Partial", "Text"):
+                            # Running transcript
+                            txt = j.get("text", "").strip()
+                            if txt:
+                                if ttfw_text is None:
+                                    ttfw_text = now - t0
+                                if txt != last_text:
+                                    partial_ts.append(now - t0)
+                                    last_text = txt
+                                final_text = txt
+                        elif msg_type in ("Marker", "Final"):
+                            # End-of-utterance
+                            txt = j.get("text", "").strip()
+                            if txt:
+                                final_text = txt
+                            final_seen = True
+                            final_recv_ts = now
+                            done_event.set()
+                            return
+                        elif msg_type == "EndWord":
+                            # Word end event, ignore for metrics
+                            continue
+                        else:
+                            # Unknown message type, treat as potential text
+                            txt = j.get("text", "").strip()
+                            if txt and ttfw_text is None:
                                 ttfw_text = now - t0
-                            if txt != last_text:
+                            if txt and txt != last_text:
                                 partial_ts.append(now - t0)
                                 last_text = txt
-                            final_text = txt
-                    elif msg_type in ("Marker", "Final"):
-                        # End-of-utterance
-                        txt = j.get("text", "").strip()
-                        if txt:
-                            final_text = txt
-                        final_recv_ts = now
-                        return
-                    elif msg_type == "EndWord":
-                        # Word end event, ignore for metrics
+                            if txt:
+                                final_text = txt
+                                
+                    except (json.JSONDecodeError, TypeError):
+                        # Non-JSON message, ignore
                         continue
-                    else:
-                        # Unknown message type, treat as potential text
-                        txt = j.get("text", "").strip()
-                        if txt and ttfw_text is None:
-                            ttfw_text = now - t0
-                        if txt and txt != last_text:
-                            partial_ts.append(now - t0)
-                            last_text = txt
-                        if txt:
-                            final_text = txt
-                            
-                except (json.JSONDecodeError, TypeError):
-                    # Non-JSON message, ignore
-                    continue
+            except websockets.exceptions.ConnectionClosedOK:
+                # graceful close — okay
+                pass
+            except websockets.exceptions.ConnectionClosedError as e:
+                # server closed without a close frame — accept if we already saw final
+                if not final_seen:
+                    raise
                 
             # socket closed
             final_recv_ts = time.perf_counter()
@@ -259,7 +272,21 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
 
         # signal end
         await ws.send(json.dumps({"type": "Flush"}))
-        await recv_task
+        
+        # Wait for server final (avoid indefinite waits)
+        try:
+            await asyncio.wait_for(done_event.wait(), timeout=10.0)
+        except asyncio.TimeoutError:
+            pass
+        
+        # Proactively close; then await receiver task
+        with contextlib.suppress(websockets.exceptions.ConnectionClosed, 
+                                websockets.exceptions.ConnectionClosedError, 
+                                websockets.exceptions.ConnectionClosedOK):
+            await ws.close(code=1000, reason="client done")
+        
+        with contextlib.suppress(Exception):
+            await recv_task
 
     wall = time.perf_counter() - t0
     metrics = _metrics(audio_seconds, wall, ttfw_word, ttfw_text)
@@ -304,7 +331,9 @@ async def bench_ws(server: str, file_path: str, total_reqs: int, concurrency: in
             if req_idx > 0:
                 await asyncio.sleep((req_idx % 8) * 0.010)
             try:
-                r = await _ws_one(server, pcm, audio_seconds, rtf, mode)
+                # Dynamic timeout: audio duration * 2 + 60s buffer (minimum 300s for long streams)
+                timeout = max(300.0, audio_seconds * 2 + 60.0)
+                r = await asyncio.wait_for(_ws_one(server, pcm, audio_seconds, rtf, mode), timeout=timeout)
                 results.append(r)
             except Exception as e:
                 errors_total += 1

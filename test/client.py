@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+import contextlib
 import json
 import os
 import time
@@ -104,64 +105,76 @@ async def run(args: argparse.Namespace) -> None:
     async with websockets.connect(url, **ws_options) as ws:
         # Send handshake and wait for Ready
         ready_event = asyncio.Event()
+        done_event = asyncio.Event()
+        final_seen = False
         await ws.send(json.dumps({"type": "StartSTT"}))
         
         async def receiver():
-            nonlocal final_text, final_recv_ts, last_text
-            async for msg in ws:
-                if isinstance(msg, (bytes, bytearray)):
-                    continue  # Skip binary messages
-                
-                try:
-                    j = json.loads(msg)
-                    msg_type = j.get("type", "")
+            nonlocal final_text, final_recv_ts, last_text, final_seen
+            try:
+                async for msg in ws:
+                    if isinstance(msg, (bytes, bytearray)):
+                        continue  # Skip binary messages
                     
-                    now = time.perf_counter()
-                    
-                    if msg_type == "Ready":
-                        # Server ready - unblock streaming
-                        ready_event.set()
+                    try:
+                        j = json.loads(msg)
+                        msg_type = j.get("type", "")
+                        
+                        now = time.perf_counter()
+                        
+                        if msg_type == "Ready":
+                            # Server ready - unblock streaming
+                            ready_event.set()
+                            continue
+                        elif msg_type == "Step":
+                            # Ignore server step messages
+                            continue
+                        elif msg_type == "Word":
+                            # Word-level events - can print if desired
+                            word = j.get("word", "")
+                            if word:
+                                print(f"WORD: {word}")
+                        elif msg_type in ("Partial", "Text"):
+                            # Running transcript
+                            txt = j.get("text", "").strip()
+                            if txt and txt != last_text:
+                                partial_ts.append(now - t0)
+                                print(f"PART: {txt}")
+                                last_text = txt
+                            if txt:
+                                final_text = txt
+                        elif msg_type in ("Marker", "Final"):
+                            # End-of-utterance
+                            txt = j.get("text", "").strip()
+                            if txt:
+                                final_text = txt
+                            final_seen = True
+                            final_recv_ts = now
+                            done_event.set()
+                            return
+                        elif msg_type == "EndWord":
+                            # Word end event, ignore for display
+                            continue
+                        else:
+                            # Unknown message type, treat as potential text
+                            txt = j.get("text", "").strip()
+                            if txt and txt != last_text:
+                                print(f"UNK: {txt}")
+                                partial_ts.append(now - t0)
+                                last_text = txt
+                            if txt:
+                                final_text = txt
+                                
+                    except (json.JSONDecodeError, TypeError):
+                        # Non-JSON message, ignore
                         continue
-                    elif msg_type == "Step":
-                        # Ignore server step messages
-                        continue
-                    elif msg_type == "Word":
-                        # Word-level events - can print if desired
-                        word = j.get("word", "")
-                        if word:
-                            print(f"WORD: {word}")
-                    elif msg_type in ("Partial", "Text"):
-                        # Running transcript
-                        txt = j.get("text", "").strip()
-                        if txt and txt != last_text:
-                            partial_ts.append(now - t0)
-                            print(f"PART: {txt}")
-                            last_text = txt
-                        if txt:
-                            final_text = txt
-                    elif msg_type in ("Marker", "Final"):
-                        # End-of-utterance
-                        txt = j.get("text", "").strip()
-                        if txt:
-                            final_text = txt
-                        final_recv_ts = now
-                        return
-                    elif msg_type == "EndWord":
-                        # Word end event, ignore for display
-                        continue
-                    else:
-                        # Unknown message type, treat as potential text
-                        txt = j.get("text", "").strip()
-                        if txt and txt != last_text:
-                            print(f"UNK: {txt}")
-                            partial_ts.append(now - t0)
-                            last_text = txt
-                        if txt:
-                            final_text = txt
-                            
-                except (json.JSONDecodeError, TypeError):
-                    # Non-JSON message, ignore
-                    continue
+            except websockets.exceptions.ConnectionClosedOK:
+                # graceful close — okay
+                pass
+            except websockets.exceptions.ConnectionClosedError as e:
+                # server closed without a close frame — accept if we already saw final
+                if not final_seen:
+                    raise
 
         recv_task = asyncio.create_task(receiver())
 
@@ -194,7 +207,21 @@ async def run(args: argparse.Namespace) -> None:
                 last_chunk_sent_ts = time.perf_counter()
 
         await ws.send(json.dumps({"type": "Flush"}))
-        await recv_task
+        
+        # Wait for server final (avoid indefinite waits)
+        try:
+            await asyncio.wait_for(done_event.wait(), timeout=10.0)
+        except asyncio.TimeoutError:
+            pass
+        
+        # Proactively close; then await receiver task
+        with contextlib.suppress(websockets.exceptions.ConnectionClosed, 
+                                websockets.exceptions.ConnectionClosedError, 
+                                websockets.exceptions.ConnectionClosedOK):
+            await ws.close(code=1000, reason="client done")
+        
+        with contextlib.suppress(Exception):
+            await recv_task
 
     if final_text:
         print("\n=== Transcription Result ===")

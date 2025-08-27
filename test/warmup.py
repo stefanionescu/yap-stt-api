@@ -2,6 +2,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+import contextlib
 import json
 import os
 import time
@@ -59,79 +60,95 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
     async with websockets.connect(url, **ws_options) as ws:
         # Send handshake and wait for Ready
         ready_event = asyncio.Event()
+        done_event = asyncio.Event()
+        final_seen = False
         await ws.send(json.dumps({"type": "StartSTT"}))
         if debug:
             print("DEBUG: Sent StartSTT handshake")
 
         async def receiver():
-            nonlocal final_text, final_recv_ts, last_text
-            async for msg in ws:
-                if isinstance(msg, (bytes, bytearray)):
-                    if debug:
-                        print(f"DEBUG: Received binary message (length: {len(msg)})")
-                    continue  # Skip binary messages
-                
-                try:
-                    j = json.loads(msg)
-                    msg_type = j.get("type", "")
-                    
-                    if debug:
-                        print(f"DEBUG: Received {msg_type}: {j}")
-                    
-                    now = time.perf_counter()
-                    
-                    if msg_type == "Ready":
-                        # Server ready - unblock streaming
+            nonlocal final_text, final_recv_ts, last_text, final_seen
+            try:
+                async for msg in ws:
+                    if isinstance(msg, (bytes, bytearray)):
                         if debug:
-                            print("DEBUG: Server Ready received")
-                        ready_event.set()
-                        continue
-                    elif msg_type == "Step":
-                        # Ignore server step messages
-                        continue
-                    elif msg_type == "Word":
-                        # First word for strict TTFW
+                            print(f"DEBUG: Received binary message (length: {len(msg)})")
+                        continue  # Skip binary messages
+                    
+                    try:
+                        j = json.loads(msg)
+                        msg_type = j.get("type", "")
+                        
                         if debug:
-                            word = j.get("word", "")
-                            print(f"DEBUG: Word: {word}")
-                    elif msg_type in ("Partial", "Text"):
-                        # Running transcript
-                        txt = j.get("text", "").strip()
-                        if txt and txt != last_text:
-                            partial_ts.append(now - t0)
-                            last_text = txt
+                            print(f"DEBUG: Received {msg_type}: {j}")
+                        
+                        now = time.perf_counter()
+                        
+                        if msg_type == "Ready":
+                            # Server ready - unblock streaming
                             if debug:
-                                print(f"DEBUG: New partial text: '{txt}'")
-                        if txt:
-                            final_text = txt
-                    elif msg_type in ("Marker", "Final"):
-                        # End-of-utterance
-                        txt = j.get("text", "").strip()
-                        if txt:
-                            final_text = txt
-                        final_recv_ts = now
-                        if debug:
-                            print(f"DEBUG: Final message received, text: '{txt}'")
-                        return
-                    elif msg_type == "EndWord":
-                        # Word end event, ignore for metrics
-                        continue
-                    else:
-                        # Unknown message type, treat as potential text
-                        txt = j.get("text", "").strip()
-                        if txt and txt != last_text:
-                            partial_ts.append(now - t0)
-                            last_text = txt
+                                print("DEBUG: Server Ready received")
+                            ready_event.set()
+                            continue
+                        elif msg_type == "Step":
+                            # Ignore server step messages
+                            continue
+                        elif msg_type == "Word":
+                            # First word for strict TTFW
                             if debug:
-                                print(f"DEBUG: Unknown message type '{msg_type}' with text: '{txt}'")
-                        if txt:
-                            final_text = txt
-                            
-                except (json.JSONDecodeError, TypeError):
-                    # Non-JSON message, ignore
-                    if debug:
-                        print(f"DEBUG: Non-JSON message: {repr(msg)}")
-                    continue
+                                word = j.get("word", "")
+                                print(f"DEBUG: Word: {word}")
+                        elif msg_type in ("Partial", "Text"):
+                            # Running transcript
+                            txt = j.get("text", "").strip()
+                            if txt and txt != last_text:
+                                partial_ts.append(now - t0)
+                                last_text = txt
+                                if debug:
+                                    print(f"DEBUG: New partial text: '{txt}'")
+                            if txt:
+                                final_text = txt
+                        elif msg_type in ("Marker", "Final"):
+                            # End-of-utterance
+                            txt = j.get("text", "").strip()
+                            if txt:
+                                final_text = txt
+                            final_seen = True
+                            final_recv_ts = now
+                            done_event.set()
+                            if debug:
+                                print(f"DEBUG: Final message received, text: '{txt}'")
+                            return
+                        elif msg_type == "EndWord":
+                            # Word end event, ignore for metrics
+                            continue
+                        else:
+                            # Unknown message type, treat as potential text
+                            txt = j.get("text", "").strip()
+                            if txt and txt != last_text:
+                                partial_ts.append(now - t0)
+                                last_text = txt
+                                if debug:
+                                    print(f"DEBUG: Unknown message type '{msg_type}' with text: '{txt}'")
+                            if txt:
+                                final_text = txt
+                                
+                    except (json.JSONDecodeError, TypeError):
+                        # Non-JSON message, ignore
+                        if debug:
+                            print(f"DEBUG: Non-JSON message: {repr(msg)}")
+                        continue
+            except websockets.exceptions.ConnectionClosedOK:
+                # graceful close — okay
+                if debug:
+                    print("DEBUG: Connection closed gracefully")
+                pass
+            except websockets.exceptions.ConnectionClosedError as e:
+                # server closed without a close frame — accept if we already saw final
+                if debug:
+                    print(f"DEBUG: Connection closed with error: {e}")
+                if not final_seen:
+                    raise
 
         recv_task = asyncio.create_task(receiver())
 
@@ -143,7 +160,17 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
         except asyncio.TimeoutError:
             if debug:
                 print("DEBUG: Timeout waiting for server Ready signal")
-            return {"error": "timeout_waiting_for_ready"}
+            elapsed_s = time.perf_counter() - t0
+            return {
+                "text": final_text,
+                "elapsed_s": elapsed_s,
+                "partials": 0,
+                "avg_partial_gap_ms": 0.0,
+                "finalize_ms": 0.0,
+                "mode": mode,
+                "rtf": rtf,
+                "error": "timeout_waiting_for_ready"
+            }
 
         if mode == "stream":
             for i in range(0, len(pcm_bytes), bytes_per_chunk):
@@ -169,7 +196,25 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
         await ws.send(json.dumps({"type": "Flush"}))
         if debug:
             print("DEBUG: Sent Flush")
-        await recv_task
+        
+        # Wait for server final (avoid indefinite waits)
+        try:
+            await asyncio.wait_for(done_event.wait(), timeout=10.0)
+            if debug:
+                print("DEBUG: Final received")
+        except asyncio.TimeoutError:
+            if debug:
+                print("DEBUG: Timeout waiting for Final")
+            pass
+        
+        # Proactively close; then await receiver task
+        with contextlib.suppress(websockets.exceptions.ConnectionClosed, 
+                                websockets.exceptions.ConnectionClosedError, 
+                                websockets.exceptions.ConnectionClosedOK):
+            await ws.close(code=1000, reason="client done")
+        
+        with contextlib.suppress(Exception):
+            await recv_task
 
     elapsed_s = time.perf_counter() - t0
     finalize_ms = ((final_recv_ts - last_chunk_sent_ts) * 1000.0) if (final_recv_ts and last_chunk_sent_ts) else 0.0
@@ -213,15 +258,17 @@ def main() -> int:
 
     res = asyncio.run(_run(args.server, pcm_bytes, args.rtf, args.mode, args.debug))
 
-    print(f"Text: {res['text'][:50]}...")
+    if res.get("error"):
+        print(f"Warmup error: {res['error']}")
+    print(f"Text: {res.get('text', '')[:50]}...")
     print(f"Audio duration: {duration:.4f}s")
-    print(f"Transcription time: {res['elapsed_s']:.4f}s")
-    if duration > 0:
+    print(f"Transcription time: {res.get('elapsed_s', 0.0):.4f}s")
+    if duration > 0 and res.get('elapsed_s', 0.0) > 0:
         rtf = res["elapsed_s"] / duration
         xrt = (1.0/rtf) if rtf > 0 else 0.0
         print(f"RTF: {rtf:.4f}  xRT: {xrt:.2f}x")
     if args.mode == "stream":
-        print(f"Partials: {res['partials']}  Avg partial gap: {res['avg_partial_gap_ms']:.1f} ms  Finalize: {res['finalize_ms']:.1f} ms")
+        print(f"Partials: {res.get('partials', 0)}  Avg partial gap: {res.get('avg_partial_gap_ms', 0.0):.1f} ms  Finalize: {res.get('finalize_ms', 0.0):.1f} ms")
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     with open(RESULTS_FILE, "w", encoding="utf-8") as out:
