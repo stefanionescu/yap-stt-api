@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source "$(dirname "$0")/env.lib.sh"
-echo "[01] Installing moshi-server (CUDA)…"
+echo "[01] Installing moshi-server (CUDA ${CUDA_MM})…"
 
-export PATH="/usr/local/cuda/bin:$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
-export CUDA_HOME CUDA_PATH CUDA_ROOT
+# Ensure versioned CUDA is first
+export PATH="${CUDA_PREFIX}/bin:$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+export CUDA_HOME="${CUDA_PREFIX}"; export CUDA_PATH="${CUDA_PREFIX}"; export CUDA_ROOT="${CUDA_PREFIX}"
 
 if ! command -v nvcc >/dev/null 2>&1; then
-  echo "[01] ERROR: nvcc missing"; exit 1
+  echo "[01] ERROR: nvcc not found in ${CUDA_PREFIX}/bin — check 00_prereqs.sh output." >&2
+  exit 1
 fi
 
 if ! command -v moshi-server >/dev/null 2>&1; then

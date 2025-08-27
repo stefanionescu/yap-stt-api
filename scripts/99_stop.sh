@@ -1,17 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
-# Load env vars if available
-if [ -f "$(dirname "${BASH_SOURCE[0]}")/.env" ]; then
-  set -a; source "$(dirname "${BASH_SOURCE[0]}")/.env"; set +a
-fi
-
-# Set defaults if not loaded from .env
-SESSION="${TMUX_SESSION:-moshi-stt}"
-HF_HOME="${HF_HOME:-/workspace/hf_cache}"
-MOSHI_LOG_DIR="${MOSHI_LOG_DIR:-/workspace/logs}"
-DSM_REPO_DIR="${DSM_REPO_DIR:-/workspace/delayed-streams-modeling}"
-MOSHI_CONFIG="${MOSHI_CONFIG:-/workspace/moshi-stt.toml}"
+source "$(dirname "$0")/env.lib.sh"
 
 echo "[99] Stopping and cleaning up moshi-server installation..."
 echo
@@ -23,11 +12,11 @@ du -sh /workspace/* /root/.* /tmp/* /var/cache/* 2>/dev/null | sort -hr | head -
 echo
 
 # 1. Stop tmux session
-if tmux has-session -t "${SESSION}" 2>/dev/null; then
-  tmux kill-session -t "${SESSION}"
-  echo "[99] ✓ Stopped tmux session '${SESSION}'"
+if tmux has-session -t "${TMUX_SESSION}" 2>/dev/null; then
+  tmux kill-session -t "${TMUX_SESSION}"
+  echo "[99] ✓ Stopped tmux session '${TMUX_SESSION}'"
 else
-  echo "[99] ✓ Session '${SESSION}' was not running"
+  echo "[99] ✓ Session '${TMUX_SESSION}' was not running"
 fi
 
 # 2. Uninstall moshi-server binary
@@ -136,11 +125,21 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
   if command -v apt-get >/dev/null 2>&1; then
     # Remove packages installed by 00_prereqs.sh
     apt-get remove --purge -y cmake libopus-dev build-essential pkg-config libssl-dev ffmpeg tmux jq python3-pip gnupg 2>/dev/null || true
+    # Only remove CUDA if WE installed it (check for our apt source file)
+    if [ -f "/etc/apt/sources.list.d/cuda.list" ]; then
+      echo "[99] Removing CUDA toolkit-${CUDA_MM_PKG} that WE installed..."
+      apt-get remove --purge -y "cuda-toolkit-${CUDA_MM_PKG}" 2>/dev/null || true
+      # Remove CUDA apt source that WE added
+      rm -f /etc/apt/sources.list.d/cuda.list
+      rm -f /usr/share/keyrings/cuda-archive-keyring.gpg
+    else
+      echo "[99] Keeping RunPod's built-in CUDA toolkit (not installed by us)"
+    fi
     apt-get autoremove --purge -y 2>/dev/null || true
     echo "[99] ✓ Removed system packages installed by scripts"
   fi
 else
-  echo "[99] ✓ Keeping system packages (cmake, libopus-dev, etc.)"
+  echo "[99] ✓ Keeping system packages (cmake, libopus-dev, CUDA toolkit, etc.)"
 fi
 
 # 6. Remove file descriptor limits config
@@ -156,16 +155,16 @@ if [ -f ~/.bashrc ]; then
   # Remove PATH additions for cargo and uv
   sed -i '/export PATH="$HOME\/.cargo\/bin:$PATH"/d' ~/.bashrc
   sed -i '/export PATH="$HOME\/.local\/bin:$PATH"/d' ~/.bashrc
-  # Remove CUDA environment variables (handle both versioned and unversioned paths)
-  sed -i '/export PATH=.*cuda.*bin.*\$PATH/d' ~/.bashrc
-  sed -i '/export CUDA_HOME=/d' ~/.bashrc
-  sed -i '/export CUDA_PATH=/d' ~/.bashrc
-  sed -i '/export CUDA_ROOT=/d' ~/.bashrc
+  # Remove CUDA environment variables (handle versioned paths like /usr/local/cuda-12.2)
+  sed -i '/export PATH=.*\/usr\/local\/cuda.*bin.*\$PATH/d' ~/.bashrc
+  sed -i '/export CUDA_HOME=.*\/usr\/local\/cuda/d' ~/.bashrc
+  sed -i '/export CUDA_PATH=.*\/usr\/local\/cuda/d' ~/.bashrc
+  sed -i '/export CUDA_ROOT=.*\/usr\/local\/cuda/d' ~/.bashrc
   echo "[99] ✓ Cleaned up environment variables from ~/.bashrc"
 fi
 
-# 8. Remove the .env file created by main.sh
-ENV_FILE="$(dirname "${BASH_SOURCE[0]}")/.env"
+# 8. Remove the .env file created by master.sh
+ENV_FILE="${ROOT_DIR}/.env"
 if [ -f "${ENV_FILE}" ]; then
   rm -f "${ENV_FILE}"
   echo "[99] ✓ Removed ${ENV_FILE}"
@@ -189,7 +188,7 @@ echo "[99]   • Python pip cache (~/.cache/pip)"
 echo "[99]   • System package caches (apt, debconf, fontconfig)"
 echo "[99]   • All common cache directories"
 echo "[99]   • Large files >50MB (outside git repo)"
-echo "[99]   • Environment variables (Rust, CUDA, HF, uv) from ~/.bashrc"
+echo "[99]   • Environment variables (Rust, versioned CUDA, HF, uv) from ~/.bashrc"
 echo
 echo "[99] === DISK USAGE AFTER CLEANUP ==="
 df -h | head -2
@@ -197,6 +196,6 @@ echo
 echo "[99] === LARGEST REMAINING DIRECTORIES ==="
 du -sh /workspace/* /root/.* /tmp/* /var/cache/* 2>/dev/null | sort -hr | head -10 || true
 echo
-echo "[99] To reinstall: run 'bash scripts/main.sh' again"
+echo "[99] To reinstall: run './master.sh' again"
 echo "[99] For maximum cleanup: run 'bash scripts/99_stop.sh --nuclear'"
 
