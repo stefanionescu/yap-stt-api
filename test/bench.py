@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Benchmark WebSocket streaming (sherpa-onnx) for FastConformer CTC.
+Benchmark WebSocket streaming for Sherpa-ONNX ASR server.
 
 Streams PCM16@16k from audio files in chunks to simulate realtime voice.
 Measures latency (wall), time-to-first-word, and throughput under concurrency.
@@ -90,19 +90,13 @@ def summarize(title: str, results: List[Dict[str, float]]) -> None:
         print(f"Partial gap | avg={stats.mean(gaps):.1f}  p50={p(gaps,0.50):.1f}  p95={p(gaps,0.95):.1f}")
 
 
-def _ws_url(server: str, secure: bool, chunk_duration: float = 0.1, vad_threshold: float = 0.5, vad_min_silence_duration_ms: int = 550) -> str:
+def _ws_url(server: str, secure: bool) -> str:
+    """Generate WebSocket URL for Sherpa-ONNX server (no special endpoints needed)"""
     if server.startswith("ws://") or server.startswith("wss://"):
-        base_url = server
+        return server
     else:
         scheme = "wss" if secure else "ws"
-        base_url = f"{scheme}://{server}"
-    
-    # Add SenseVoice API endpoint and parameters
-    if "/api/realtime/ws" not in base_url:
-        base_url = base_url.rstrip("/") + "/api/realtime/ws"
-    
-    params = f"chunk_duration={chunk_duration}&vad_threshold={vad_threshold}&vad_min_silence_duration_ms={vad_min_silence_duration_ms}"
-    return f"{base_url}?{params}"
+        return f"{scheme}://{server}"
 
 
 async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, chunk_ms: int, mode: str) -> Dict[str, float]:
@@ -110,7 +104,7 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, chunk_ms:
     One session over WebSocket. For 'stream', sleeps per chunk to simulate realtime.
     For 'oneshot', sends with no sleeps.
     """
-    url = _ws_url(server, secure=False, chunk_duration=chunk_ms/1000.0)
+    url = _ws_url(server, secure=False)
     t0 = time.perf_counter()
     ttfw = None
     partial_ts: List[float] = []
@@ -123,21 +117,26 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, chunk_ms:
     step = max(1, int(chunk_ms)) * bytes_per_ms
 
     async with websockets.connect(url, max_size=None) as ws:
-        # receiver: JSON partials {"text": "...", "segment": n}; final sentinel is "Done!"
+        # receiver: Handle both JSON and plain text responses from Sherpa-ONNX
         async def receiver():
             nonlocal ttfw, final_recv_ts, final_text, last_text
             async for msg in ws:
                 if isinstance(msg, (bytes, bytearray)):
-                    # server shouldn't send binary; ignore
-                    continue
-                if msg == "Done!":
+                    continue  # Skip binary messages
+                
+                # Handle end signals
+                if msg in ("Done!", ""):
                     final_recv_ts = time.perf_counter()
                     return
+                
+                # Try to parse as JSON first, fallback to plain text
                 try:
                     j = json.loads(msg)
                     txt = j.get("text", "")
-                except Exception:
-                    continue
+                except (json.JSONDecodeError, TypeError):
+                    # Treat as plain text response
+                    txt = msg.strip()
+                
                 now = time.perf_counter()
                 if txt:
                     if ttfw is None:
@@ -224,7 +223,7 @@ async def bench_ws(server: str, file_path: str, total_reqs: int, concurrency: in
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="WebSocket streaming benchmark (SenseVoice)")
+    ap = argparse.ArgumentParser(description="WebSocket streaming benchmark (Sherpa-ONNX)")
     ap.add_argument("--server", default="localhost:8000", help="host:port or ws://host:port")
     ap.add_argument("--secure", action="store_true", help="(ignored unless you run wss)")
     ap.add_argument("--n", type=int, default=20, help="Total sessions")

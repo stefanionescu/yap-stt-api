@@ -63,13 +63,11 @@ case $choice in
         bash "$(dirname "$0")/07_setup_nginx_gateway.sh"
         
         echo ""
-        echo "Running health check..."
-        bash "$(dirname "$0")/09_health_check.sh"
-        
-        echo ""
         echo "✅ DEPLOYMENT COMPLETE!"
         echo "🌐 Connect clients to: ws://your-server:8000"
         echo "📊 NGINX will automatically round-robin across 3 workers"
+        echo ""
+        echo "💡 To verify status: bash scripts/09_health_check.sh"
         echo ""
         echo "Runpod users: Expose port 8000 only"
         ;;

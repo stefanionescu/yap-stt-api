@@ -277,6 +277,116 @@ ws = websocket.create_connection(f"ws://your-server:{port}")
 - **Format**: 16-bit PCM
 - **Chunk size**: 120-160ms recommended
 
+## 🧪 Testing Your Server
+
+Use the included test utilities to verify your Sherpa-ONNX server is working correctly:
+
+### Prerequisites
+```bash
+# Create and activate virtual environment
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# When done testing, deactivate virtual environment
+deactivate
+```
+
+### 1. Quick Test Client (`test/client.py`)
+**Interactive streaming client - shows real-time partial results**
+```bash
+# Basic test with default settings
+python test/client.py
+
+# Test specific audio file with custom chunk size
+python test/client.py --file short-noisy.wav --chunk-ms 120
+
+# Test against remote server
+python test/client.py --server your-runpod-ip:8000
+
+# One-shot mode (no streaming simulation)  
+python test/client.py --mode oneshot --file mid.wav
+```
+
+### 2. Server Warmup (`test/warmup.py`)
+**Single connection test - good for initial server verification**
+```bash
+# Basic warmup test
+python test/warmup.py
+
+# Test different audio files
+python test/warmup.py --file long.mp3 --chunk-ms 100
+
+# Test against multi-worker setup
+python test/warmup.py --server localhost:8001  # Direct worker connection
+python test/warmup.py --server localhost:8000  # Via NGINX gateway
+```
+
+### 3. Load Testing (`test/bench.py`)
+**Performance benchmarking - concurrent streams and metrics**
+```bash
+# Light load test (5 concurrent streams, 10 total)
+python test/bench.py --n 10 --concurrency 5
+
+# Heavy load test (20 concurrent streams, 100 total)
+python test/bench.py --n 100 --concurrency 20 --file mid.wav
+
+# Performance test against production server
+python test/bench.py --server your-runpod-ip:8000 --n 50 --concurrency 10
+
+# One-shot performance (no streaming delays)
+python test/bench.py --mode oneshot --n 20 --concurrency 5
+```
+
+### Available Test Options
+
+**Common Flags (all test files):**
+- `--server`: Server address (`localhost:8000`, `your-ip:8000`)
+- `--file`: Audio file from `samples/` directory (`mid.wav`, `short-noisy.wav`, `long.mp3`)  
+- `--chunk-ms`: Audio chunk size in milliseconds (default: 100ms)
+- `--mode`: `stream` (realtime simulation) or `oneshot` (fast upload)
+- `--secure`: Use WSS instead of WS (requires SSL setup)
+
+**Benchmark-Specific Flags (`bench.py`):**
+- `--n`: Total number of test sessions (default: 20)
+- `--concurrency`: Max concurrent sessions (default: 5)
+
+**Environment Variables:**
+```bash
+# Set default server for all tests (within activated venv)
+source venv/bin/activate
+export SHERPA_SERVER=your-runpod-ip:8000
+python test/client.py  # Will use the environment variable
+```
+
+### 🔍 Troubleshooting Tests
+
+**Connection Refused:**
+```bash
+# Check server status
+bash scripts/09_health_check.sh
+
+# Check if server is listening  
+ss -tlnp | grep 8000
+```
+
+**Import Errors:**
+```bash
+# Make sure virtual environment is activated
+source venv/bin/activate
+
+# If still failing, reinstall dependencies
+pip install -r requirements.txt
+```
+
+**No Audio Files:**
+```bash
+# Check available test files
+ls -la samples/
+```
+
 ## 📄 License
 
 See LICENSE file for details.

@@ -12,22 +12,16 @@ SAMPLES_DIR = "samples"
 RESULTS_DIR = Path("test/results")
 RESULTS_FILE = RESULTS_DIR / "warmup.txt"
 
-def _ws_url(server: str, secure: bool, chunk_duration: float = 0.1, vad_threshold: float = 0.5, vad_min_silence_duration_ms: int = 550) -> str:
+def _ws_url(server: str, secure: bool) -> str:
+    """Generate WebSocket URL for Sherpa-ONNX server (no special endpoints needed)"""
     if server.startswith("ws://") or server.startswith("wss://"):
-        base_url = server
+        return server
     else:
         scheme = "wss" if secure else "ws"
-        base_url = f"{scheme}://{server}"
-    
-    # Add SenseVoice API endpoint and parameters
-    if "/api/realtime/ws" not in base_url:
-        base_url = base_url.rstrip("/") + "/api/realtime/ws"
-    
-    params = f"chunk_duration={chunk_duration}&vad_threshold={vad_threshold}&vad_min_silence_duration_ms={vad_min_silence_duration_ms}"
-    return f"{base_url}?{params}"
+        return f"{scheme}://{server}"
 
 async def _run(server: str, pcm_bytes: bytes, chunk_ms: int, mode: str) -> dict:
-    url = _ws_url(server, secure=False, chunk_duration=chunk_ms/1000.0)
+    url = _ws_url(server, secure=False)
     bytes_per_ms = int(16000 * 2 / 1000)
     step = max(1, int(chunk_ms)) * bytes_per_ms
 
@@ -42,13 +36,22 @@ async def _run(server: str, pcm_bytes: bytes, chunk_ms: int, mode: str) -> dict:
         async def receiver():
             nonlocal final_text, final_recv_ts, last_text
             async for msg in ws:
-                if msg == "Done!":
+                if isinstance(msg, (bytes, bytearray)):
+                    continue  # Skip binary messages
+                
+                # Handle end signals
+                if msg in ("Done!", ""):
                     final_recv_ts = time.perf_counter()
                     return
+                
+                # Try to parse as JSON first, fallback to plain text
                 try:
-                    j = json.loads(msg); txt = j.get("text","")
-                except Exception:
-                    continue
+                    j = json.loads(msg)
+                    txt = j.get("text", "")
+                except (json.JSONDecodeError, TypeError):
+                    # Treat as plain text response
+                    txt = msg.strip()
+                
                 now = time.perf_counter()
                 if txt and txt != last_text:
                     partial_ts.append(now - t0)
@@ -89,7 +92,7 @@ async def _run(server: str, pcm_bytes: bytes, chunk_ms: int, mode: str) -> dict:
     }
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Warmup via SenseVoice WebSocket streaming (realtime)")
+    parser = argparse.ArgumentParser(description="Warmup via Sherpa-ONNX WebSocket streaming (realtime)")
     parser.add_argument("--server", type=str, default="localhost:8000", help="host:port or ws://host:port")
     parser.add_argument("--secure", action="store_true")
     parser.add_argument("--file", type=str, default="mid.wav", help="Filename in samples/ directory")

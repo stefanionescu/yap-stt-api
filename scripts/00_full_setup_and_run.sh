@@ -76,10 +76,11 @@ echo "" | tee -a "$LOG_FILE"
 echo "Step 4: Optimizing OS limits for high-concurrency streaming..." | tee -a "$LOG_FILE"
 # OS optimization (Linux/Runpod only)
 if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    # Run optimization script and capture output
     if bash "$SCRIPT_DIR/06_sysctl_ulimit.sh" 2>&1 | tee -a "$LOG_FILE"; then
         echo "✓ OS optimization completed successfully" | tee -a "$LOG_FILE"
     else
-        echo "⚠ OS optimization had issues (may need root privileges)" | tee -a "$LOG_FILE"
+        echo "⚠ OS optimization encountered issues" | tee -a "$LOG_FILE"
     fi
 else
     echo "✓ OS optimization skipped (Linux/Runpod deployment only)" | tee -a "$LOG_FILE"
@@ -136,8 +137,7 @@ case $REPLY in
     [Aa])
         echo "Starting multi-worker + NGINX gateway (best for production)..." | tee -a "$LOG_FILE"
         echo "Step 1: Starting 3 workers on ports 8001-8003..." | tee -a "$LOG_FILE"
-        bash "$SCRIPT_DIR/04_run_server_multi_int8.sh" &
-        sleep 5  # Give workers time to start
+        bash "$SCRIPT_DIR/04_run_server_multi_int8.sh" 2>&1 | tee -a "$LOG_FILE"
         
         echo "Step 2: Setting up NGINX gateway on port 8000..." | tee -a "$LOG_FILE"
         bash "$SCRIPT_DIR/07_setup_nginx_gateway.sh" 2>&1 | tee -a "$LOG_FILE"
@@ -146,27 +146,20 @@ case $REPLY in
         echo "✅ Complete! Connect clients to ws://your-server:8000" | tee -a "$LOG_FILE"
         echo "NGINX will automatically round-robin across 3 workers" | tee -a "$LOG_FILE"
         echo "Runpod users: Expose port 8000 only" | tee -a "$LOG_FILE"
-        
-        # Run health check after deployment
         echo "" | tee -a "$LOG_FILE"
-        echo "Running health check..." | tee -a "$LOG_FILE"
-        bash "$SCRIPT_DIR/09_health_check.sh" | tee -a "$LOG_FILE"
+        echo "💡 To verify status: bash scripts/09_health_check.sh" | tee -a "$LOG_FILE"
         ;;
     [Bb])
         echo "Starting multi-worker direct (no NGINX)..." | tee -a "$LOG_FILE"
         echo "Starting 3 workers on ports 8000-8002..." | tee -a "$LOG_FILE"
-        WORKERS=3 BASE_PORT=8000 bash "$SCRIPT_DIR/04_run_server_multi_int8.sh" &
-        sleep 5  # Give workers time to start
+        WORKERS=3 BASE_PORT=8000 bash "$SCRIPT_DIR/04_run_server_multi_int8.sh"
         
         echo "" | tee -a "$LOG_FILE"
         echo "✅ Complete! Connect clients to ports 8000-8002" | tee -a "$LOG_FILE"
         echo "Round-robin these ports in your client code" | tee -a "$LOG_FILE"
         echo "Runpod users: Expose ports 8000,8001,8002" | tee -a "$LOG_FILE"
-        
-        # Run health check after deployment
         echo "" | tee -a "$LOG_FILE"
-        echo "Running health check..." | tee -a "$LOG_FILE"
-        bash "$SCRIPT_DIR/09_health_check.sh" | tee -a "$LOG_FILE"
+        echo "💡 To verify status: bash scripts/09_health_check.sh" | tee -a "$LOG_FILE"
         ;;
     [Cc]|*)
         echo "Setup complete. Use one of the options above to start the server." | tee -a "$LOG_FILE"

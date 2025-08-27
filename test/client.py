@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-Parakeet ASR WebSocket streaming client (sherpa-onnx).
+Sherpa-ONNX WebSocket streaming client.
 
 Streams PCM16@16k from a file to simulate realtime voice and prints partials/final.
 """
 from __future__ import annotations
 import argparse
+import asyncio
 import json
 import os
 import time
@@ -35,8 +36,8 @@ def find_sample_by_name(filename: str) -> str | None:
     return None
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="WebSocket SenseVoice client")
-    parser.add_argument("--server", default=os.getenv("SENSEVOICE_SERVER", "localhost:8000"),
+    parser = argparse.ArgumentParser(description="WebSocket Sherpa-ONNX client")
+    parser.add_argument("--server", default=os.getenv("SHERPA_SERVER", "localhost:8000"),
                         help="host:port or ws://host:port")
     parser.add_argument("--secure", action="store_true", help="Use WSS (requires cert on server)")
     parser.add_argument("--file", type=str, default="mid.wav", help="Audio file from samples/")
@@ -44,19 +45,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mode", choices=["stream", "oneshot"], default="stream", help="Run streaming or one-shot ASR")
     return parser.parse_args()
 
-def _ws_url(server: str, secure: bool, chunk_duration: float = 0.1, vad_threshold: float = 0.5, vad_min_silence_duration_ms: int = 550) -> str:
+def _ws_url(server: str, secure: bool) -> str:
+    """Generate WebSocket URL for Sherpa-ONNX server (no special endpoints needed)"""
     if server.startswith("ws://") or server.startswith("wss://"):
-        base_url = server
+        return server
     else:
         scheme = "wss" if secure else "ws"
-        base_url = f"{scheme}://{server}"
-    
-    # Add SenseVoice API endpoint and parameters
-    if "/api/realtime/ws" not in base_url:
-        base_url = base_url.rstrip("/") + "/api/realtime/ws"
-    
-    params = f"chunk_duration={chunk_duration}&vad_threshold={vad_threshold}&vad_min_silence_duration_ms={vad_min_silence_duration_ms}"
-    return f"{base_url}?{params}"
+        return f"{scheme}://{server}"
 
 async def run(args: argparse.Namespace) -> None:
     file_path = find_sample_by_name(args.file)
@@ -70,7 +65,7 @@ async def run(args: argparse.Namespace) -> None:
     pcm = file_to_pcm16_mono_16k(file_path)
     duration = file_duration_seconds(file_path)
 
-    url = _ws_url(args.server, args.secure, chunk_duration=args.chunk_ms/1000.0)
+    url = _ws_url(args.server, args.secure)
     print(f"Connecting to: {url}")
     print(f"File: {os.path.basename(file_path)} ({duration:.2f}s)")
 
@@ -88,14 +83,22 @@ async def run(args: argparse.Namespace) -> None:
         async def receiver():
             nonlocal final_text, final_recv_ts, last_text
             async for msg in ws:
-                if msg == "Done!":
+                if isinstance(msg, (bytes, bytearray)):
+                    continue  # Skip binary messages
+                
+                # Handle end signal
+                if msg in ("Done!", ""):
                     final_recv_ts = time.perf_counter()
                     return
+                
+                # Try to parse as JSON first, fallback to plain text
                 try:
                     j = json.loads(msg)
                     txt = j.get("text", "")
-                except Exception:
-                    continue
+                except (json.JSONDecodeError, TypeError):
+                    # Treat as plain text response
+                    txt = msg.strip()
+                
                 now = time.perf_counter()
                 if txt and txt != last_text:
                     partial_ts.append(now - t0)
