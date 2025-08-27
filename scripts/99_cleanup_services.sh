@@ -91,17 +91,17 @@ rm -rf /opt/sherpa-logs || true
 echo "7. Removing Python packages..."
 python3 -m pip uninstall -y websockets soundfile numpy onnxruntime-gpu onnxruntime 2>/dev/null || true
 
-# 8. Remove build dependencies (optional - commented out by default)
-echo "8. Removing build dependencies..."
-echo "   Removing sherpa-specific packages..."
+# 8. Remove build dependencies (selective - keep essential tools)
+echo "8. Removing sherpa-specific build dependencies..."
+echo "   Removing audio/build libraries (keeping git, python3, curl, wget)..."
 apt-get remove -y --autoremove \
-    build-essential git cmake pkg-config \
+    cmake pkg-config \
     libssl-dev zlib1g-dev libsndfile1 libsndfile1-dev libasound2-dev \
     numactl psmisc 2>/dev/null || true
 
-echo "   Note: Keeping common packages (wget, curl, python3, tmux, nginx)"
-echo "   Uncomment lines below to remove these too if needed"
-# apt-get remove -y --autoremove wget curl python3 python3-pip python3-venv tmux nginx || true
+echo "   Note: Keeping essential tools (git, build-essential, python3, curl, wget, tmux, nginx)"
+echo "   Uncomment lines below to remove build-essential and other core tools if needed"
+# apt-get remove -y --autoremove build-essential || true
 
 # 9. Clean package caches
 echo "9. Cleaning package caches..."
@@ -133,7 +133,7 @@ echo ""
 echo "Removed:"
 echo "✓ All sherpa processes and services"
 echo "✓ All models and data (~5GB+ freed)"
-echo "✓ All build dependencies"
+echo "✓ Sherpa-specific build dependencies (kept essential tools)"
 echo "✓ All configuration files"
 echo "✓ All logs and caches"
 echo "✓ All Python packages"
