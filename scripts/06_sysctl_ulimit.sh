@@ -3,8 +3,19 @@ set -euo pipefail
 
 # OS/socket limits optimization for high-concurrency WebSocket streaming
 # Run this once during system setup or before starting high-load servers
+# Optimized for Linux/Ubuntu (Runpod)
 
 echo "=== Optimizing OS limits for high-concurrency WebSocket streaming ==="
+
+# Detect OS - these optimizations are for Linux only (Runpod/Ubuntu)
+if [[ "$OSTYPE" != "linux-gnu"* ]]; then
+    echo "⚠ Skipping network optimizations - Linux/Ubuntu required (current: $OSTYPE)"
+    echo "  These settings are for Runpod deployment only"
+    echo "✓ ulimit settings still applied for current session"
+    echo ""
+    ulimit -n 1048576 2>/dev/null || echo "⚠ Could not set ulimit (may need root)"
+    exit 0
+fi
 
 # Raise open files limit for current session
 echo "Setting ulimit -n 1048576 for current session..."

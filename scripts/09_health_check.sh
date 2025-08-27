@@ -46,14 +46,19 @@ for port in 8000 8001 8002 8003; do
 done
 echo ""
 
-# 4. Show recent server logs (not errors)
+# 4. Show recent server logs (filtering out normal connection test artifacts)
 echo "4. Recent server activity (last 20 lines from each worker)..."
 echo ""
 for port in 8001 8002 8003; do
     LOG_FILE="/opt/sherpa-logs/server_${port}.log"
     if [ -f "$LOG_FILE" ]; then
         echo "=== Worker on port $port ==="
-        tail -20 "$LOG_FILE" 2>/dev/null || echo "No logs yet"
+        # Filter out normal WebSocket handshake errors from health checks
+        if [ -s "$LOG_FILE" ]; then
+            tail -20 "$LOG_FILE" 2>/dev/null | grep -v "handle_read_handshake error: websocketpp.transport:7 (End of File)" || echo "No significant activity"
+        else
+            echo "No logs yet"
+        fi
         echo ""
     else
         echo "❌ Log file not found: $LOG_FILE"

@@ -38,7 +38,6 @@ echo "Step 3: Running offline INT8 smoke test..." | tee -a "$LOG_FILE"
 # Find a test audio file - prefer downloaded, fallback to local samples
 TEST_WAV=""
 POSSIBLE_WAVS=(
-    "/opt/sherpa-models/zh-en-zipformer-2023-02-20/test_wavs/4.wav"
     "/opt/sherpa-models/zh-en-zipformer-2023-02-20/test_wavs/0.wav"
     "$SCRIPT_DIR/../samples/short-noisy.wav"
     "$SCRIPT_DIR/../samples/mid.wav"
@@ -75,10 +74,16 @@ echo "" | tee -a "$LOG_FILE"
 
 # Step 4: Optimize OS limits for high-concurrency (optional but recommended)
 echo "Step 4: Optimizing OS limits for high-concurrency streaming..." | tee -a "$LOG_FILE"
-if bash "$SCRIPT_DIR/06_sysctl_ulimit.sh" 2>&1 | tee -a "$LOG_FILE"; then
-    echo "✓ OS optimization completed successfully" | tee -a "$LOG_FILE"
+# OS optimization (Linux/Runpod only)
+if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    if bash "$SCRIPT_DIR/06_sysctl_ulimit.sh" 2>&1 | tee -a "$LOG_FILE"; then
+        echo "✓ OS optimization completed successfully" | tee -a "$LOG_FILE"
+    else
+        echo "⚠ OS optimization had issues (may need root privileges)" | tee -a "$LOG_FILE"
+    fi
 else
-    echo "⚠ OS optimization had issues (may need root privileges)" | tee -a "$LOG_FILE"
+    echo "✓ OS optimization skipped (Linux/Runpod deployment only)" | tee -a "$LOG_FILE"
+    bash "$SCRIPT_DIR/06_sysctl_ulimit.sh" >> "$LOG_FILE" 2>&1
 fi
 echo "" | tee -a "$LOG_FILE"
 
