@@ -163,7 +163,7 @@ if [ -f ~/.bashrc ]; then
   echo "[99] ✓ Cleaned up environment variables from ~/.bashrc"
 fi
 
-# 8. Remove the .env file created by master.sh
+# 8. Remove the .env file created by main.sh
 ENV_FILE="${ROOT_DIR}/.env"
 if [ -f "${ENV_FILE}" ]; then
   rm -f "${ENV_FILE}"
@@ -196,6 +196,6 @@ echo
 echo "[99] === LARGEST REMAINING DIRECTORIES ==="
 du -sh /workspace/* /root/.* /tmp/* /var/cache/* 2>/dev/null | sort -hr | head -10 || true
 echo
-echo "[99] To reinstall: run './master.sh' again"
+echo "[99] To reinstall: run './main.sh' again"
 echo "[99] For maximum cleanup: run 'bash scripts/99_stop.sh --nuclear'"
 

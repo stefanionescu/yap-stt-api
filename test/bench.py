@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-Benchmark WebSocket streaming for Sherpa-ONNX ASR server.
+Benchmark WebSocket streaming for Moshi ASR server.
 
-Streams PCM16@16k from audio files in chunks to simulate realtime voice.
+Streams PCM16@24k from audio files in JSON frames to simulate realtime voice.
 Measures latency (wall), time-to-first-word, and throughput under concurrency.
 """
 from __future__ import annotations
 import argparse
 import asyncio
+import base64
 import json
 import os
 import statistics as stats
@@ -17,7 +18,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 import websockets  # pip install websockets
-from utils import file_to_pcm16_mono_16k, file_duration_seconds
+from utils import file_to_pcm16_mono_24k, file_duration_seconds
 
 SAMPLES_DIR = "samples"
 EXTS = {".wav", ".flac", ".ogg", ".mp3"}
@@ -44,7 +45,7 @@ def find_sample_by_name(filename: str) -> str | None:
     return None
 
 
-def _metrics(audio_duration_s: float, wall_s: float, ttfw_s: float | None = None) -> Dict[str, float]:
+def _metrics(audio_duration_s: float, wall_s: float, ttfw_word_s: float | None = None, ttfw_text_s: float | None = None) -> Dict[str, float]:
     rtf = wall_s / audio_duration_s if audio_duration_s > 0 else float("inf")
     xrt = (audio_duration_s / wall_s) if wall_s > 0 else 0.0
     throughput_min_per_min = (audio_duration_s / wall_s) if wall_s > 0 else 0.0
@@ -54,7 +55,8 @@ def _metrics(audio_duration_s: float, wall_s: float, ttfw_s: float | None = None
         "rtf": rtf,
         "xrt": xrt,
         "throughput_min_per_min": throughput_min_per_min,
-        **({"ttfw_s": float(ttfw_s)} if ttfw_s is not None else {}),
+        **({"ttfw_word_s": float(ttfw_word_s)} if ttfw_word_s is not None else {}),
+        **({"ttfw_text_s": float(ttfw_text_s)} if ttfw_text_s is not None else {}),
     }
 
 
@@ -71,15 +73,18 @@ def summarize(title: str, results: List[Dict[str, float]]) -> None:
     rtf = [r["rtf"] for r in results]
     xrt = [r["xrt"] for r in results]
     throughput = [r["throughput_min_per_min"] for r in results]
-    ttfw_vals = [r["ttfw_s"] for r in results if "ttfw_s" in r]
+    ttfw_word_vals = [r["ttfw_word_s"] for r in results if "ttfw_word_s" in r]
+    ttfw_text_vals = [r["ttfw_text_s"] for r in results if "ttfw_text_s" in r]
     fin = [r.get("finalize_ms", 0.0) for r in results if r.get("finalize_ms", 0.0) > 0]
     gaps = [r.get("avg_partial_gap_ms", 0.0) for r in results if r.get("avg_partial_gap_ms", 0.0) > 0]
 
     print(f"\n== {title} ==")
     print(f"n={len(results)}")
     print(f"Wall s      | avg={stats.mean(wall):.4f}  p50={stats.median(wall):.4f}  p95={p(wall,0.95):.4f}")
-    if ttfw_vals:
-        print(f"TTFW s      | avg={stats.mean(ttfw_vals):.4f}  p50={stats.median(ttfw_vals):.4f}  p95={p(ttfw_vals,0.95):.4f}")
+    if ttfw_word_vals:
+        print(f"TTFW(word)  | avg={stats.mean(ttfw_word_vals):.4f}  p50={stats.median(ttfw_word_vals):.4f}  p95={p(ttfw_word_vals,0.95):.4f}")
+    if ttfw_text_vals:
+        print(f"TTFW(text)  | avg={stats.mean(ttfw_text_vals):.4f}  p50={stats.median(ttfw_text_vals):.4f}  p95={p(ttfw_text_vals,0.95):.4f}")
     print(f"Audio s     | avg={stats.mean(audio):.4f}")
     print(f"RTF         | avg={stats.mean(rtf):.4f}  p50={stats.median(rtf):.4f}  p95={p(rtf,0.95):.4f}")
     print(f"xRT         | avg={stats.mean(xrt):.4f}")
@@ -91,7 +96,7 @@ def summarize(title: str, results: List[Dict[str, float]]) -> None:
 
 
 def _ws_url(server: str, secure: bool) -> str:
-    """Generate WebSocket URL for Sherpa-ONNX server (no special endpoints needed)"""
+    """Generate WebSocket URL for Moshi server (no special endpoints needed)"""
     if server.startswith("ws://") or server.startswith("wss://"):
         return server
     else:
@@ -99,81 +104,130 @@ def _ws_url(server: str, secure: bool) -> str:
         return f"{scheme}://{server}"
 
 
-async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, chunk_ms: int, mode: str) -> Dict[str, float]:
+async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: float, mode: str) -> Dict[str, float]:
     """
-    One session over WebSocket. For 'stream', sleeps per chunk to simulate realtime.
+    One session over WebSocket using Moshi protocol. For 'stream', sleeps per chunk to simulate realtime.
     For 'oneshot', sends with no sleeps.
+    rtf: Real-time factor for throttling (1.0 for realtime, higher for faster)
     """
     url = _ws_url(server, secure=False)
     t0 = time.perf_counter()
-    ttfw = None
+    ttfw_word = None
+    ttfw_text = None
     partial_ts: List[float] = []
     last_chunk_sent_ts = 0.0
     final_recv_ts = 0.0
     last_text = ""
     final_text = ""
 
-    bytes_per_ms = int(16000 * 2 / 1000)
-    step = max(1, int(chunk_ms)) * bytes_per_ms
+    # Moshi uses 24kHz, 80ms chunks
+    samples_per_chunk = int(24000 * 0.080)  # 1920 samples
+    bytes_per_chunk = samples_per_chunk * 2  # 3840 bytes
+    chunk_ms = 80.0
 
-    async with websockets.connect(url, max_size=None) as ws:
-        # receiver: Handle both JSON and plain text responses from Sherpa-ONNX
+    ws_options = {
+        "max_size": None,
+        "compression": None,
+        "ping_interval": 20,
+        "ping_timeout": 20,
+        "max_queue": 4,
+        "write_limit": 2**22
+    }
+
+    async with websockets.connect(url, **ws_options) as ws:
+        # Send handshake
+        await ws.send(json.dumps({"type": "StartSTT"}))
+        
+        # receiver: Handle Moshi JSON message types
         async def receiver():
-            nonlocal ttfw, final_recv_ts, final_text, last_text
+            nonlocal ttfw_word, ttfw_text, final_recv_ts, final_text, last_text
             async for msg in ws:
                 if isinstance(msg, (bytes, bytearray)):
                     continue  # Skip binary messages
                 
-                # Handle end signals (various formats Sherpa-ONNX might use)
-                if msg.lower().strip() in ("done", "done!", "", "end"):
-                    final_recv_ts = time.perf_counter()
-                    return
-                
-                # Extract text from message (try multiple JSON formats)
                 try:
                     j = json.loads(msg)
-                    # Try different possible text fields
-                    txt = (j.get("text", "") or 
-                           j.get("result", {}).get("text", "") if isinstance(j.get("result"), dict) else "" or
-                           j.get("alternatives", [{}])[0].get("transcript", "") if j.get("alternatives") else "")
+                    msg_type = j.get("type", "")
+                    
+                    now = time.perf_counter()
+                    
+                    if msg_type in ("Ready", "Step"):
+                        # Ignore server status messages
+                        continue
+                    elif msg_type == "Word":
+                        # First word for strict TTFW
+                        if ttfw_word is None:
+                            ttfw_word = now - t0
+                    elif msg_type in ("Partial", "Text"):
+                        # Running transcript
+                        txt = j.get("text", "").strip()
+                        if txt:
+                            if ttfw_text is None:
+                                ttfw_text = now - t0
+                            if txt != last_text:
+                                partial_ts.append(now - t0)
+                                last_text = txt
+                            final_text = txt
+                    elif msg_type in ("Marker", "Final"):
+                        # End-of-utterance
+                        txt = j.get("text", "").strip()
+                        if txt:
+                            final_text = txt
+                        final_recv_ts = now
+                        return
+                    elif msg_type == "EndWord":
+                        # Word end event, ignore for metrics
+                        continue
+                    else:
+                        # Unknown message type, treat as potential text
+                        txt = j.get("text", "").strip()
+                        if txt and ttfw_text is None:
+                            ttfw_text = now - t0
+                        if txt and txt != last_text:
+                            partial_ts.append(now - t0)
+                            last_text = txt
+                        if txt:
+                            final_text = txt
+                            
                 except (json.JSONDecodeError, TypeError):
-                    # Treat as plain text response
-                    txt = msg.strip()
+                    # Non-JSON message, ignore
+                    continue
                 
-                now = time.perf_counter()
-                if txt:
-                    if ttfw is None:
-                        ttfw = now - t0
-                    # Only count when it changes to avoid 100s of dup prints
-                    if txt != last_text:
-                        partial_ts.append(now - t0)
-                        last_text = txt
-                    final_text = txt  # keep last as final
-            # socket closed without Done!
+            # socket closed
             final_recv_ts = time.perf_counter()
 
         recv_task = asyncio.create_task(receiver())
 
-        # sender: stream audio
+        # sender: stream audio in JSON frames
         if mode == "stream":
-            # realistic streaming
-            for i in range(0, len(pcm_bytes), step):
-                await ws.send(pcm_bytes[i:i+step])
+            # realistic streaming with RTF control
+            for i in range(0, len(pcm_bytes), bytes_per_chunk):
+                chunk = pcm_bytes[i:i+bytes_per_chunk]
+                audio_frame = {
+                    "type": "Audio",
+                    "audio": base64.b64encode(chunk).decode('ascii')
+                }
+                await ws.send(json.dumps(audio_frame))
                 last_chunk_sent_ts = time.perf_counter()
-                await asyncio.sleep(chunk_ms / 1000.0)
+                await asyncio.sleep(chunk_ms / 1000.0 / rtf)
         else:
-            # oneshot: no sleeps; still chunk to avoid huge frames
-            big = 64000  # ~2 sec per frame; adjust if you like
+            # oneshot: no sleeps; still chunk for reasonable frame sizes
+            big = 48000  # ~2 sec of 24k audio per frame
             for i in range(0, len(pcm_bytes), big):
-                await ws.send(pcm_bytes[i:i+big])
+                chunk = pcm_bytes[i:i+big]
+                audio_frame = {
+                    "type": "Audio",
+                    "audio": base64.b64encode(chunk).decode('ascii')
+                }
+                await ws.send(json.dumps(audio_frame))
                 last_chunk_sent_ts = time.perf_counter()
 
         # signal end
-        await ws.send("Done")
+        await ws.send(json.dumps({"type": "Flush"}))
         await recv_task
 
     wall = time.perf_counter() - t0
-    metrics = _metrics(audio_seconds, wall, ttfw)
+    metrics = _metrics(audio_seconds, wall, ttfw_word, ttfw_text)
     if len(partial_ts) >= 2:
         gaps = [b - a for a, b in zip(partial_ts[:-1], partial_ts[1:])]
         avg_gap_ms = (sum(gaps) / len(gaps)) * 1000.0
@@ -186,11 +240,12 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, chunk_ms:
         "final_len_chars": float(len(final_text)),
         "finalize_ms": float(((final_recv_ts - last_chunk_sent_ts) * 1000.0) if (final_recv_ts and last_chunk_sent_ts) else 0.0),
         "mode": mode,
+        "rtf": float(rtf),
     })
     return metrics
 
 
-async def bench_ws(server: str, file_path: str, total_reqs: int, concurrency: int, chunk_ms: int, mode: str) -> Tuple[List[Dict[str, float]], int, int]:
+async def bench_ws(server: str, file_path: str, total_reqs: int, concurrency: int, rtf: float, mode: str) -> Tuple[List[Dict[str, float]], int, int]:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     try:
         with open(ERRORS_FILE, "w", encoding="utf-8") as ef:
@@ -203,14 +258,18 @@ async def bench_ws(server: str, file_path: str, total_reqs: int, concurrency: in
     rejected = 0
     errors_total = 0
 
-    pcm = file_to_pcm16_mono_16k(file_path)
+    # Use 24k PCM for Moshi, precompute once
+    pcm = file_to_pcm16_mono_24k(file_path)
     audio_seconds = file_duration_seconds(file_path)
 
     async def worker(req_idx: int):
         nonlocal errors_total
         async with sem:
+            # Stagger stream starts by 80ms to avoid synchronization
+            if req_idx > 0:
+                await asyncio.sleep(0.080 * (req_idx % 10) / 10.0)
             try:
-                r = await _ws_one(server, pcm, audio_seconds, chunk_ms, mode)
+                r = await _ws_one(server, pcm, audio_seconds, rtf, mode)
                 results.append(r)
             except Exception as e:
                 errors_total += 1
@@ -226,13 +285,13 @@ async def bench_ws(server: str, file_path: str, total_reqs: int, concurrency: in
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="WebSocket streaming benchmark (Sherpa-ONNX)")
+    ap = argparse.ArgumentParser(description="WebSocket streaming benchmark (Moshi)")
     ap.add_argument("--server", default="localhost:8000", help="host:port or ws://host:port")
     ap.add_argument("--secure", action="store_true", help="(ignored unless you run wss)")
     ap.add_argument("--n", type=int, default=20, help="Total sessions")
     ap.add_argument("--concurrency", type=int, default=5, help="Max concurrent sessions")
     ap.add_argument("--file", type=str, default="mid.wav", help="Audio file from samples/")
-    ap.add_argument("--chunk-ms", type=int, default=100, help="Chunk size in ms for streaming")
+    ap.add_argument("--rtf", type=float, default=1.0, help="Real-time factor (1.0=realtime, higher=faster)")
     ap.add_argument("--mode", choices=["stream", "oneshot"], default="stream", help="Run streaming or one-shot")
     args = ap.parse_args()
 
@@ -244,12 +303,12 @@ def main() -> None:
             print(f"Available files: {[os.path.basename(f) for f in available]}")
         return
 
-    print(f"Benchmark → WS ({args.mode}) | n={args.n} | concurrency={args.concurrency} | server={args.server}")
+    print(f"Benchmark → WS ({args.mode}) | n={args.n} | concurrency={args.concurrency} | rtf={args.rtf} | server={args.server}")
     print(f"File: {os.path.basename(file_path)}")
 
     t0 = time.time()
     results, rejected, errors = asyncio.run(
-        bench_ws(args.server, file_path, args.n, args.concurrency, args.chunk_ms, args.mode)
+        bench_ws(args.server, file_path, args.n, args.concurrency, args.rtf, args.mode)
     )
     elapsed = time.time() - t0
 

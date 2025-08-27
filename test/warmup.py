@@ -1,29 +1,33 @@
 from __future__ import annotations
 import argparse
 import asyncio
+import base64
 import json
 import time
 from pathlib import Path
 import websockets
 
-from utils import file_to_pcm16_mono_16k, file_duration_seconds
+from utils import file_to_pcm16_mono_24k, file_duration_seconds
 
 SAMPLES_DIR = "samples"
 RESULTS_DIR = Path("test/results")
 RESULTS_FILE = RESULTS_DIR / "warmup.txt"
 
 def _ws_url(server: str, secure: bool) -> str:
-    """Generate WebSocket URL for Sherpa-ONNX server (no special endpoints needed)"""
+    """Generate WebSocket URL for Moshi server (no special endpoints needed)"""
     if server.startswith("ws://") or server.startswith("wss://"):
         return server
     else:
         scheme = "wss" if secure else "ws"
         return f"{scheme}://{server}"
 
-async def _run(server: str, pcm_bytes: bytes, chunk_ms: int, mode: str, debug: bool = False) -> dict:
+async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool = False) -> dict:
     url = _ws_url(server, secure=False)
-    bytes_per_ms = int(16000 * 2 / 1000)
-    step = max(1, int(chunk_ms)) * bytes_per_ms
+    
+    # Moshi uses 24kHz, 80ms chunks
+    samples_per_chunk = int(24000 * 0.080)  # 1920 samples
+    bytes_per_chunk = samples_per_chunk * 2  # 3840 bytes
+    chunk_ms = 80.0
 
     partial_ts = []
     last_chunk_sent_ts = 0.0
@@ -31,30 +35,22 @@ async def _run(server: str, pcm_bytes: bytes, chunk_ms: int, mode: str, debug: b
     final_text = ""
     last_text = ""
 
+    ws_options = {
+        "max_size": None,
+        "compression": None,
+        "ping_interval": 20,
+        "ping_timeout": 20,
+        "max_queue": 4,
+        "write_limit": 2**22
+    }
+
     t0 = time.perf_counter()
-    async with websockets.connect(url, max_size=None) as ws:
-        # Send an initial config/start message so the server knows our audio format
-        # Keys are chosen to be broadly compatible across sherpa-onnx versions.
-        start_cfg = {
-            "type": "start",
-            "config": {
-                "sample_rate": 16000,
-                "channels": 1,
-                "bits_per_sample": 16,
-                "format": "s16le",
-                # Decoding hints (ignored if unsupported)
-                "decoding_method": "greedy_search",
-                "max_active_paths": 4,
-            }
-        }
-        try:
-            await ws.send(json.dumps(start_cfg))
-            if debug:
-                print(f"DEBUG: Sent start config: {start_cfg}")
-        except Exception:
-            # Older servers may not expect a start message; ignore failures
-            if debug:
-                print("DEBUG: Start config not accepted (ignored)")
+    async with websockets.connect(url, **ws_options) as ws:
+        # Send handshake
+        await ws.send(json.dumps({"type": "StartSTT"}))
+        if debug:
+            print("DEBUG: Sent StartSTT handshake")
+
         async def receiver():
             nonlocal final_text, final_recv_ts, last_text
             async for msg in ws:
@@ -63,58 +59,88 @@ async def _run(server: str, pcm_bytes: bytes, chunk_ms: int, mode: str, debug: b
                         print(f"DEBUG: Received binary message (length: {len(msg)})")
                     continue  # Skip binary messages
                 
-                if debug:
-                    print(f"DEBUG: Received message: {repr(msg)}")
-                
-                # Handle end signals (various formats Sherpa-ONNX might use)
-                if msg.lower().strip() in ("done", "done!", "", "end"):
-                    if debug:
-                        print("DEBUG: Received end signal")
-                    final_recv_ts = time.perf_counter()
-                    return
-                
-                # Extract text from message (try multiple JSON formats)
-                txt = ""
                 try:
                     j = json.loads(msg)
-                    # Try different possible text fields
-                    txt = (j.get("text", "") or 
-                           j.get("result", {}).get("text", "") if isinstance(j.get("result"), dict) else "" or
-                           j.get("alternatives", [{}])[0].get("transcript", "") if j.get("alternatives") else "")
+                    msg_type = j.get("type", "")
                     
-                    if debug and j:
-                        print(f"DEBUG: Parsed JSON: {j}")
-                        print(f"DEBUG: Extracted text: '{txt}'")
-                        
+                    if debug:
+                        print(f"DEBUG: Received {msg_type}: {j}")
+                    
+                    now = time.perf_counter()
+                    
+                    if msg_type in ("Ready", "Step"):
+                        # Ignore server status messages
+                        continue
+                    elif msg_type == "Word":
+                        # First word for strict TTFW
+                        if debug:
+                            word = j.get("word", "")
+                            print(f"DEBUG: Word: {word}")
+                    elif msg_type in ("Partial", "Text"):
+                        # Running transcript
+                        txt = j.get("text", "").strip()
+                        if txt and txt != last_text:
+                            partial_ts.append(now - t0)
+                            last_text = txt
+                            if debug:
+                                print(f"DEBUG: New partial text: '{txt}'")
+                        if txt:
+                            final_text = txt
+                    elif msg_type in ("Marker", "Final"):
+                        # End-of-utterance
+                        txt = j.get("text", "").strip()
+                        if txt:
+                            final_text = txt
+                        final_recv_ts = now
+                        if debug:
+                            print(f"DEBUG: Final message received, text: '{txt}'")
+                        return
+                    elif msg_type == "EndWord":
+                        # Word end event, ignore for metrics
+                        continue
+                    else:
+                        # Unknown message type, treat as potential text
+                        txt = j.get("text", "").strip()
+                        if txt and txt != last_text:
+                            partial_ts.append(now - t0)
+                            last_text = txt
+                            if debug:
+                                print(f"DEBUG: Unknown message type '{msg_type}' with text: '{txt}'")
+                        if txt:
+                            final_text = txt
+                            
                 except (json.JSONDecodeError, TypeError):
-                    # Treat as plain text response
-                    txt = msg.strip()
+                    # Non-JSON message, ignore
                     if debug:
-                        print(f"DEBUG: Treating as plain text: '{txt}'")
-                
-                now = time.perf_counter()
-                if txt and txt != last_text:
-                    partial_ts.append(now - t0)
-                    last_text = txt
-                    if debug:
-                        print(f"DEBUG: New partial text: '{txt}'")
-                if txt:
-                    final_text = txt
+                        print(f"DEBUG: Non-JSON message: {repr(msg)}")
+                    continue
 
         recv_task = asyncio.create_task(receiver())
 
         if mode == "stream":
-            for i in range(0, len(pcm_bytes), step):
-                await ws.send(pcm_bytes[i:i+step])
+            for i in range(0, len(pcm_bytes), bytes_per_chunk):
+                chunk = pcm_bytes[i:i+bytes_per_chunk]
+                audio_frame = {
+                    "type": "Audio",
+                    "audio": base64.b64encode(chunk).decode('ascii')
+                }
+                await ws.send(json.dumps(audio_frame))
                 last_chunk_sent_ts = time.perf_counter()
-                await asyncio.sleep(chunk_ms/1000.0)
+                await asyncio.sleep(chunk_ms / 1000.0 / rtf)
         else:
-            big = 64000
+            big = 48000  # ~2 sec of 24k audio per frame
             for i in range(0, len(pcm_bytes), big):
-                await ws.send(pcm_bytes[i:i+big])
+                chunk = pcm_bytes[i:i+big]
+                audio_frame = {
+                    "type": "Audio",
+                    "audio": base64.b64encode(chunk).decode('ascii')
+                }
+                await ws.send(json.dumps(audio_frame))
                 last_chunk_sent_ts = time.perf_counter()
 
-        await ws.send("Done")
+        await ws.send(json.dumps({"type": "Flush"}))
+        if debug:
+            print("DEBUG: Sent Flush")
         await recv_task
 
     elapsed_s = time.perf_counter() - t0
@@ -131,14 +157,15 @@ async def _run(server: str, pcm_bytes: bytes, chunk_ms: int, mode: str, debug: b
         "avg_partial_gap_ms": avg_gap_ms if mode == "stream" else 0.0,
         "finalize_ms": finalize_ms if mode == "stream" else 0.0,
         "mode": mode,
+        "rtf": rtf,
     }
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Warmup via Sherpa-ONNX WebSocket streaming (realtime)")
+    parser = argparse.ArgumentParser(description="Warmup via Moshi WebSocket streaming")
     parser.add_argument("--server", type=str, default="localhost:8000", help="host:port or ws://host:port")
     parser.add_argument("--secure", action="store_true")
     parser.add_argument("--file", type=str, default="mid.wav", help="Audio file. Absolute path or name in samples/")
-    parser.add_argument("--chunk-ms", type=int, default=100, help="Chunk size in ms for streaming")
+    parser.add_argument("--rtf", type=float, default=1000.0, help="Real-time factor (1000=fast warmup, 1.0=realtime)")
     parser.add_argument("--mode", choices=["stream", "oneshot"], default="stream", help="Run streaming or one-shot ASR")
     parser.add_argument("--debug", action="store_true", help="Print debug info including raw server messages")
     args = parser.parse_args()
@@ -153,10 +180,10 @@ def main() -> int:
         print(f"Audio not found: {audio_path}")
         return 2
 
-    pcm_bytes = file_to_pcm16_mono_16k(str(audio_path))
+    pcm_bytes = file_to_pcm16_mono_24k(str(audio_path))
     duration = file_duration_seconds(str(audio_path))
 
-    res = asyncio.run(_run(args.server, pcm_bytes, args.chunk_ms, args.mode, args.debug))
+    res = asyncio.run(_run(args.server, pcm_bytes, args.rtf, args.mode, args.debug))
 
     print(f"Text: {res['text'][:50]}...")
     print(f"Audio duration: {duration:.4f}s")

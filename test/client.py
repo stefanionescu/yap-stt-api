@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 """
-Sherpa-ONNX WebSocket streaming client.
+Moshi WebSocket streaming client.
 
-Streams PCM16@16k from a file to simulate realtime voice and prints partials/final.
+Streams PCM16@24k from a file to simulate realtime voice and prints partials/final.
 """
 from __future__ import annotations
 import argparse
 import asyncio
+import base64
 import json
 import os
 import time
 from pathlib import Path
 import websockets
 
-from utils import file_to_pcm16_mono_16k, file_duration_seconds
+from utils import file_to_pcm16_mono_24k, file_duration_seconds
 
 SAMPLES_DIR = "samples"
 EXTS = {".wav", ".flac", ".ogg", ".mp3"}
@@ -36,17 +37,17 @@ def find_sample_by_name(filename: str) -> str | None:
     return None
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="WebSocket Sherpa-ONNX client")
-    parser.add_argument("--server", default=os.getenv("SHERPA_SERVER", "localhost:8000"),
+    parser = argparse.ArgumentParser(description="WebSocket Moshi client")
+    parser.add_argument("--server", default=os.getenv("MOSHI_SERVER", "localhost:8000"),
                         help="host:port or ws://host:port")
     parser.add_argument("--secure", action="store_true", help="Use WSS (requires cert on server)")
     parser.add_argument("--file", type=str, default="mid.wav", help="Audio file from samples/")
-    parser.add_argument("--chunk-ms", type=int, default=100, help="Chunk size in ms for streaming")
+    parser.add_argument("--rtf", type=float, default=1.0, help="Real-time factor (1.0=realtime, higher=faster)")
     parser.add_argument("--mode", choices=["stream", "oneshot"], default="stream", help="Run streaming or one-shot ASR")
     return parser.parse_args()
 
 def _ws_url(server: str, secure: bool) -> str:
-    """Generate WebSocket URL for Sherpa-ONNX server (no special endpoints needed)"""
+    """Generate WebSocket URL for Moshi server (no special endpoints needed)"""
     if server.startswith("ws://") or server.startswith("wss://"):
         return server
     else:
@@ -62,15 +63,17 @@ async def run(args: argparse.Namespace) -> None:
             print(f"Available files: {[os.path.basename(f) for f in available]}")
         return
 
-    pcm = file_to_pcm16_mono_16k(file_path)
+    pcm = file_to_pcm16_mono_24k(file_path)
     duration = file_duration_seconds(file_path)
 
     url = _ws_url(args.server, args.secure)
     print(f"Connecting to: {url}")
     print(f"File: {os.path.basename(file_path)} ({duration:.2f}s)")
 
-    bytes_per_ms = int(16000 * 2 / 1000)
-    step = max(1, int(args.chunk_ms)) * bytes_per_ms
+    # Moshi uses 24kHz, 80ms chunks
+    samples_per_chunk = int(24000 * 0.080)  # 1920 samples
+    bytes_per_chunk = samples_per_chunk * 2  # 3840 bytes
+    chunk_ms = 80.0
 
     partial_ts: list[float] = []
     last_chunk_sent_ts = 0.0
@@ -78,52 +81,97 @@ async def run(args: argparse.Namespace) -> None:
     final_text = ""
     last_text = ""
 
+    ws_options = {
+        "max_size": None,
+        "compression": None,
+        "ping_interval": 20,
+        "ping_timeout": 20,
+        "max_queue": 4,
+        "write_limit": 2**22
+    }
+
     t0 = time.perf_counter()
-    async with websockets.connect(url, max_size=None) as ws:
+    async with websockets.connect(url, **ws_options) as ws:
+        # Send handshake
+        await ws.send(json.dumps({"type": "StartSTT"}))
+        
         async def receiver():
             nonlocal final_text, final_recv_ts, last_text
             async for msg in ws:
                 if isinstance(msg, (bytes, bytearray)):
                     continue  # Skip binary messages
                 
-                # Handle end signals (various formats Sherpa-ONNX might use)
-                if msg.lower().strip() in ("done", "done!", "", "end"):
-                    final_recv_ts = time.perf_counter()
-                    return
-                
-                # Extract text from message (try multiple JSON formats)
                 try:
                     j = json.loads(msg)
-                    # Try different possible text fields
-                    txt = (j.get("text", "") or 
-                           j.get("result", {}).get("text", "") if isinstance(j.get("result"), dict) else "" or
-                           j.get("alternatives", [{}])[0].get("transcript", "") if j.get("alternatives") else "")
+                    msg_type = j.get("type", "")
+                    
+                    now = time.perf_counter()
+                    
+                    if msg_type in ("Ready", "Step"):
+                        # Ignore server status messages
+                        continue
+                    elif msg_type == "Word":
+                        # Word-level events - can print if desired
+                        word = j.get("word", "")
+                        if word:
+                            print(f"WORD: {word}")
+                    elif msg_type in ("Partial", "Text"):
+                        # Running transcript
+                        txt = j.get("text", "").strip()
+                        if txt and txt != last_text:
+                            partial_ts.append(now - t0)
+                            print(f"PART: {txt}")
+                            last_text = txt
+                        if txt:
+                            final_text = txt
+                    elif msg_type in ("Marker", "Final"):
+                        # End-of-utterance
+                        txt = j.get("text", "").strip()
+                        if txt:
+                            final_text = txt
+                        final_recv_ts = now
+                        return
+                    elif msg_type == "EndWord":
+                        # Word end event, ignore for display
+                        continue
+                    else:
+                        # Unknown message type, treat as potential text
+                        txt = j.get("text", "").strip()
+                        if txt and txt != last_text:
+                            print(f"UNK: {txt}")
+                            partial_ts.append(now - t0)
+                            last_text = txt
+                        if txt:
+                            final_text = txt
+                            
                 except (json.JSONDecodeError, TypeError):
-                    # Treat as plain text response
-                    txt = msg.strip()
-                
-                now = time.perf_counter()
-                if txt and txt != last_text:
-                    partial_ts.append(now - t0)
-                    print("PART:", txt)
-                    last_text = txt
-                if txt:
-                    final_text = txt
+                    # Non-JSON message, ignore
+                    continue
 
         recv_task = asyncio.create_task(receiver())
 
         if args.mode == "stream":
-            for i in range(0, len(pcm), step):
-                await ws.send(pcm[i : i + step])
+            for i in range(0, len(pcm), bytes_per_chunk):
+                chunk = pcm[i:i+bytes_per_chunk]
+                audio_frame = {
+                    "type": "Audio",
+                    "audio": base64.b64encode(chunk).decode('ascii')
+                }
+                await ws.send(json.dumps(audio_frame))
                 last_chunk_sent_ts = time.perf_counter()
-                await asyncio.sleep(args.chunk_ms / 1000.0)
+                await asyncio.sleep(chunk_ms / 1000.0 / args.rtf)
         else:
-            big = 64000
+            big = 48000  # ~2 sec of 24k audio per frame
             for i in range(0, len(pcm), big):
-                await ws.send(pcm[i : i + big])
+                chunk = pcm[i:i+big]
+                audio_frame = {
+                    "type": "Audio",
+                    "audio": base64.b64encode(chunk).decode('ascii')
+                }
+                await ws.send(json.dumps(audio_frame))
                 last_chunk_sent_ts = time.perf_counter()
 
-        await ws.send("Done")
+        await ws.send(json.dumps({"type": "Flush"}))
         await recv_task
 
     if final_text:

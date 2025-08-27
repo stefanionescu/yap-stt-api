@@ -23,7 +23,7 @@ TMUX_SESSION=moshi-stt
 # Optional: real-time factor for smoke test (1 = realtime, 1000 = as fast as possible)
 SMOKETEST_RTF=1000
 EOF
-  echo "[master] Wrote default .env"
+  echo "[main] Wrote default .env"
   set -a; source "${BASE_DIR}/.env"; set +a
 fi
 
