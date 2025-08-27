@@ -283,11 +283,14 @@ Use the included test utilities to verify your Sherpa-ONNX server is working cor
 
 ### Prerequisites
 ```bash
+# Install system dependencies (required for audio processing)
+apt-get update && apt-get install -y ffmpeg
+
 # Create and activate virtual environment
 python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate
 
-# Install dependencies
+# Install Python dependencies
 pip install -r requirements.txt
 
 # When done testing, deactivate virtual environment
@@ -379,6 +382,15 @@ source venv/bin/activate
 
 # If still failing, reinstall dependencies
 pip install -r requirements.txt
+```
+
+**FFmpeg Not Found:**
+```bash
+# Install ffmpeg for audio format conversion
+apt-get update && apt-get install -y ffmpeg
+
+# Then retry your test
+python test/warmup.py
 ```
 
 **No Audio Files:**
