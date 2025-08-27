@@ -67,27 +67,68 @@ echo "" | tee -a "$LOG_FILE"
 echo "Option 1 - Single worker (simple, port 8000):" | tee -a "$LOG_FILE"
 echo "  bash $SCRIPT_DIR/03_run_server_single_int8.sh" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
-echo "Option 2 - Multi-worker (RECOMMENDED for 100+ streams, ports 8000-8002):" | tee -a "$LOG_FILE"
+echo "Option 2 - Multi-worker (RECOMMENDED for 100+ streams, ports 8001-8003):" | tee -a "$LOG_FILE"
 echo "  bash $SCRIPT_DIR/04_run_server_multi_int8.sh" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
-echo "Option 3 - Run in tmux session:" | tee -a "$LOG_FILE"
+echo "Option 3 - Multi-worker + NGINX gateway (BEST - single port 8000):" | tee -a "$LOG_FILE"
+echo "  bash $SCRIPT_DIR/04_run_server_multi_int8.sh" | tee -a "$LOG_FILE"
+echo "  bash $SCRIPT_DIR/07_setup_nginx_gateway.sh" | tee -a "$LOG_FILE"
+echo "" | tee -a "$LOG_FILE"
+echo "Option 4 - Run in tmux session:" | tee -a "$LOG_FILE"
 echo "  bash $SCRIPT_DIR/05_tmux.sh" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
-echo "Option 4 - Install as systemd service:" | tee -a "$LOG_FILE"
+echo "Option 5 - Install as systemd service (single worker, port 8000):" | tee -a "$LOG_FILE"
 echo "  sudo cp $SCRIPT_DIR/sherpa-asr.service /etc/systemd/system/"
 echo "  sudo systemctl daemon-reload"
 echo "  sudo systemctl enable --now sherpa-asr.service"
 echo "" | tee -a "$LOG_FILE"
-echo "Option 5 - Load test (120 concurrent clients):" | tee -a "$LOG_FILE"
-echo "  bash $SCRIPT_DIR/07_load_test_120_clients.sh" | tee -a "$LOG_FILE"
+echo "Option 6 - Install as systemd service (multi-worker + NGINX):" | tee -a "$LOG_FILE"
+echo "  sudo cp $SCRIPT_DIR/sherpa-asr-multi.service /etc/systemd/system/"
+echo "  sudo systemctl daemon-reload"
+echo "  sudo systemctl enable --now sherpa-asr-multi.service"
+echo "  # Then run: sudo bash $SCRIPT_DIR/07_setup_nginx_gateway.sh"
+echo "" | tee -a "$LOG_FILE"
+echo "⚠️  NOTE: Don't run both services - they conflict on port 8000!" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
 
-# Prompt user for immediate action
-read -p "Would you like to start the multi-worker server now? (Y/n): " -n 1 -r
+# Prompt user for deployment choice
+echo "" | tee -a "$LOG_FILE"
+echo "🚀 Ready to deploy! Choose your setup:" | tee -a "$LOG_FILE"
+echo "A) Multi-worker + NGINX (RECOMMENDED - single port 8000)" | tee -a "$LOG_FILE"
+echo "B) Multi-worker direct (ports 8000-8002, no NGINX)" | tee -a "$LOG_FILE"
+echo "C) Manual setup (choose from options above)" | tee -a "$LOG_FILE"
+echo "" | tee -a "$LOG_FILE"
+read -p "Enter choice (A/B/C): " -n 1 -r
 echo
-if [[ $REPLY =~ ^[Nn]$ ]]; then
-    echo "Setup complete. Use one of the options above to start the server." | tee -a "$LOG_FILE"
-else
-    echo "Starting multi-worker server (recommended for high concurrency)..." | tee -a "$LOG_FILE"
-    exec bash "$SCRIPT_DIR/04_run_server_multi_int8.sh"
-fi
+
+case $REPLY in
+    [Aa])
+        echo "Starting multi-worker + NGINX gateway (best for production)..." | tee -a "$LOG_FILE"
+        echo "Step 1: Starting 3 workers on ports 8001-8003..." | tee -a "$LOG_FILE"
+        bash "$SCRIPT_DIR/04_run_server_multi_int8.sh" &
+        sleep 5  # Give workers time to start
+        
+        echo "Step 2: Setting up NGINX gateway on port 8000..." | tee -a "$LOG_FILE"
+        bash "$SCRIPT_DIR/07_setup_nginx_gateway.sh" 2>&1 | tee -a "$LOG_FILE"
+        
+        echo "" | tee -a "$LOG_FILE"
+        echo "✅ Complete! Connect clients to ws://your-server:8000" | tee -a "$LOG_FILE"
+        echo "NGINX will automatically round-robin across 3 workers" | tee -a "$LOG_FILE"
+        echo "Runpod users: Expose port 8000 only" | tee -a "$LOG_FILE"
+        ;;
+    [Bb])
+        echo "Starting multi-worker direct (no NGINX)..." | tee -a "$LOG_FILE"
+        echo "Starting 3 workers on ports 8000-8002..." | tee -a "$LOG_FILE"
+        WORKERS=3 BASE_PORT=8000 exec bash "$SCRIPT_DIR/04_run_server_multi_int8.sh"
+        
+        echo "" | tee -a "$LOG_FILE"
+        echo "✅ Complete! Connect clients to ports 8000-8002" | tee -a "$LOG_FILE"
+        echo "Round-robin these ports in your client code" | tee -a "$LOG_FILE"
+        echo "Runpod users: Expose ports 8000,8001,8002" | tee -a "$LOG_FILE"
+        ;;
+    [Cc]|*)
+        echo "Setup complete. Use one of the options above to start the server." | tee -a "$LOG_FILE"
+        echo "" | tee -a "$LOG_FILE"
+        echo "💡 TIP: Run ./08_deployment_chooser.sh for interactive deployment" | tee -a "$LOG_FILE"
+        ;;
+esac

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 WORKERS=${WORKERS:-3}            # Try 3–4 on an L40S
-BASE_PORT=${BASE_PORT:-8000}
+BASE_PORT=${BASE_PORT:-8001}     # Start at 8001 (8000 reserved for NGINX gateway)
 BIN=/opt/sherpa-onnx/build/bin/sherpa-onnx-online-websocket-server
 MOD=/opt/sherpa-models/zh-en-zipformer-2023-02-20
 LOG=/opt/sherpa-logs
@@ -47,4 +47,8 @@ echo "=== Multi-worker server started ==="
 echo "Workers: $WORKERS"
 echo "Ports: $BASE_PORT-$((BASE_PORT + WORKERS - 1))"
 echo "Logs: $LOG/"
-echo "Round-robin clients across these ports for best performance"
+echo ""
+echo "Next steps:"
+echo "1. Setup NGINX gateway: bash 07_setup_nginx_gateway.sh"
+echo "2. Connect clients to: ws://your-server:8000 (NGINX will round-robin)"
+echo "   OR connect directly to: $BASE_PORT-$((BASE_PORT + WORKERS - 1)) (manual round-robin)"

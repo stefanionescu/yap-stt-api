@@ -1,5 +1,5 @@
 [Unit]
-Description=Sherpa-ONNX Streaming ASR (zh/en, INT8)
+Description=Sherpa-ONNX Streaming ASR (zh/en, INT8) - Single Worker
 After=network-online.target
 
 [Service]
@@ -13,3 +13,9 @@ LimitNOFILE=1048576
 
 [Install]
 WantedBy=multi-user.target
+
+# NOTE: This service uses port 8000 directly
+# Do NOT run simultaneously with sherpa-asr-multi.service + NGINX
+# Choose ONE approach:
+# - Single worker: this service
+# - Multi-worker + NGINX: sherpa-asr-multi.service
