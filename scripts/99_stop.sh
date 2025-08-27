@@ -45,6 +45,32 @@ fi
 # 5. Remove HuggingFace cache
 [ -d "${HF_HOME}" ] && rm -rf "${HF_HOME}" && echo "[99] ✓ Removed HF cache ${HF_HOME}"
 
+# 5b. Remove Rust toolchain and cargo cache (installed by 00_prereqs.sh)
+if [ -d "$HOME/.cargo" ]; then
+  rm -rf "$HOME/.cargo"
+  echo "[99] ✓ Removed Rust toolchain and cargo cache (~/.cargo)"
+fi
+
+# 5c. Remove uv installation (installed by 00_prereqs.sh)
+if [ -d "$HOME/.local/bin" ] && [ -f "$HOME/.local/bin/uv" ]; then
+  rm -rf "$HOME/.local"
+  echo "[99] ✓ Removed uv and ~/.local directory"
+fi
+
+# 5d. Remove any temporary cargo build directories
+find /tmp -name "cargo-install*" -type d -exec rm -rf {} + 2>/dev/null || true
+find /tmp -name "rustc-*" -type d -exec rm -rf {} + 2>/dev/null || true
+echo "[99] ✓ Cleaned up temporary build directories"
+
+# 5e. Remove any downloaded model files that might be cached elsewhere
+find /workspace -name "*.bin" -o -name "*.safetensors" -o -name "*.onnx" | while read -r model_file; do
+  # Only remove large model files (>10MB) to avoid deleting random binaries
+  if [ -f "$model_file" ] && [ "$(stat -f%z "$model_file" 2>/dev/null || stat -c%s "$model_file" 2>/dev/null)" -gt 10485760 ]; then
+    rm -f "$model_file"
+    echo "[99] ✓ Removed model file: $model_file"
+  fi
+done 2>/dev/null || true
+
 # 6. Remove file descriptor limits config
 if [ -f "/etc/security/limits.d/moshi-nofile.conf" ]; then
   rm -f "/etc/security/limits.d/moshi-nofile.conf"
@@ -73,13 +99,13 @@ echo
 echo "[99] ===== CLEANUP COMPLETE ====="
 echo "[99] Preserved:"
 echo "[99]   • Git repository and your code"
-echo "[99]   • System packages (build-essential, cmake, etc.)"
-echo "[99]   • Rust toolchain (~/.cargo) - in case you want to use it"
-echo "[99]   • uv tool (~/.local/bin) - in case you want to use it"
+echo "[99]   • System packages (build-essential, cmake, libopus-dev, etc.)"
 echo
 echo "[99] Removed:"
 echo "[99]   • moshi-server binary"
-echo "[99]   • All downloaded models and cache"
+echo "[99]   • Rust toolchain and cargo cache (~/.cargo)"
+echo "[99]   • uv tool and ~/.local directory"
+echo "[99]   • All downloaded models and HF cache"
 echo "[99]   • All log files and tmux sessions"
 echo "[99]   • Configuration files and cloned repos"
 echo "[99]   • Environment variable exports from ~/.bashrc"
