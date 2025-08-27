@@ -29,21 +29,33 @@ export PYTORCH_CUDA_ALLOC_CONF="max_split_size_mb:64,expandable_segments:True"
 mkdir -p "${LOG_DIR}"
 TS="$(date +%Y%m%d_%H%M%S)"
 LOG_FILE="${LOG_DIR}/server_${TS}.log"
+# ensure the file exists so tail never fails
+: > "${LOG_FILE}"
 ln -sfn "${LOG_FILE}" "${LOG_DIR}/current.log"
 
-# rotate old logs
-ls -1t "${LOG_DIR}"/server_*.log 2>/dev/null | tail -n +$((KEEP_LOGS+1)) | xargs -r rm -f
+# --- safe log rotation (no pipefail issues) ---
+shopt -s nullglob
+LOGS=( "${LOG_DIR}"/server_*.log )
+if (( ${#LOGS[@]} > KEEP_LOGS )); then
+  # sort descending by name (timestamps are lexicographically sortable)
+  IFS=$'\n' read -r -d '' -a SORTED < <(printf '%s\n' "${LOGS[@]}" | sort -r && printf '\0') || true
+  TO_DELETE=( "${SORTED[@]:KEEP_LOGS}" )
+  if (( ${#TO_DELETE[@]} )); then
+    rm -f -- "${TO_DELETE[@]}"
+  fi
+fi
+shopt -u nullglob
 
-# pick server module: prefer no-VAD file if present
 cd "${REPO}"
+
+# Prefer no-VAD server if present
 if [ -f "${REPO}/realtime_ws_server_novad.py" ]; then
   SERVER_MODULE="realtime_ws_server_novad"
 else
   SERVER_MODULE="realtime_ws_server_demo"
 fi
 
-# build uvicorn cmd (import module:app so we get env-based config)
-UVICORN_CMD="python -m uvicorn ${SERVER_MODULE}:app --host ${HOST} --port ${PORT} --log-level info"
+UVICORN_CMD="python -m uvicorn ${SERVER_MODULE}:app --host ${HOST} --port ${PORT} --log-level info --access-log"
 
 # write a tiny runner so tmux can tee logs cleanly
 RUN_SH="${LOG_DIR}/run_${TS}.sh"
@@ -58,10 +70,9 @@ exec stdbuf -oL -eL ${UVICORN_CMD} 2>&1 | tee -a "${LOG_FILE}"
 EOS
 chmod +x "${RUN_SH}"
 
-# export vars for the runner
 export LOG_FILE UVICORN_CMD
 
-# kill any stale session and start fresh
+# restart tmux session
 tmux kill-session -t "${SESSION}" 2>/dev/null || true
 tmux new-session -d -s "${SESSION}" "bash -lc '${RUN_SH}'"
 
