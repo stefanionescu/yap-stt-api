@@ -10,11 +10,11 @@ echo "=== Setting up NGINX WebSocket Gateway ==="
 echo "Installing NGINX..."
 apt-get update && apt-get install -y nginx
 
-# Backup default config if it exists
-if [ -f /etc/nginx/sites-enabled/default ]; then
-    echo "Backing up default NGINX config..."
-    mv /etc/nginx/sites-enabled/default /etc/nginx/sites-enabled/default.bak || true
-fi
+# Clean up any existing configs that might conflict
+echo "Cleaning up existing NGINX configs..."
+rm -f /etc/nginx/sites-enabled/default || true
+rm -f /etc/nginx/sites-enabled/default.bak || true
+rm -f /etc/nginx/sites-enabled/sherpa-ws.conf || true
 
 # Create sherpa WebSocket gateway configuration
 echo "Creating NGINX configuration for WebSocket gateway..."
@@ -49,8 +49,15 @@ server {
 }
 NGINX_CONF
 
-# Enable the configuration
+# Enable the configuration and ensure sites-enabled is included
 ln -sf /etc/nginx/sites-available/sherpa-ws.conf /etc/nginx/sites-enabled/sherpa-ws.conf
+
+# Ensure sites-enabled directory is included in main nginx.conf
+if ! grep -q "sites-enabled" /etc/nginx/nginx.conf; then
+    echo "Adding sites-enabled include to nginx.conf..."
+    # Add include line in the http block, before the last closing brace
+    sed -i '/^[[:space:]]*}[[:space:]]*$/i\    include /etc/nginx/sites-enabled/*;' /etc/nginx/nginx.conf
+fi
 
 # Test NGINX configuration
 echo "Testing NGINX configuration..."
@@ -63,19 +70,27 @@ fi
 
 # Start/restart NGINX (detect systemd availability)
 echo "Starting NGINX..."
+# Always stop any existing nginx processes first
+pkill nginx || true
+sleep 3
+
+# Test configuration before starting
+if ! nginx -t; then
+    echo "✗ NGINX configuration test failed"
+    echo "Showing config error details..."
+    nginx -t 2>&1
+    exit 1
+fi
+
 if systemctl is-system-running >/dev/null 2>&1 || [ -d /run/systemd/system ]; then
     # systemd is available
     echo "Using systemd to manage NGINX..."
     systemctl enable nginx
-    systemctl restart nginx
+    systemctl start nginx
 else
     # No systemd, start nginx directly
     echo "systemd not available, starting NGINX directly..."
-    # Stop any existing nginx processes
-    pkill nginx || true
-    sleep 2
-    # Start nginx in daemon mode
-    nginx -t && nginx
+    nginx
     echo "NGINX started in daemon mode"
 fi
 

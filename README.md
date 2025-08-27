@@ -93,6 +93,12 @@ bash scripts/03_run_server_single_int8.sh
 bash scripts/08_deployment_chooser.sh
 ```
 
+### Health Check
+```bash
+# Verify all servers and services are working
+bash scripts/09_health_check.sh
+```
+
 ### Starting Servers
 
 #### tmux Sessions (Survives SSH Disconnect)
@@ -207,6 +213,7 @@ yap-stt-api/
 │   ├── 06_sysctl_ulimit.sh             # OS optimization
 │   ├── 07_setup_nginx_gateway.sh       # NGINX gateway
 │   ├── 08_deployment_chooser.sh        # Interactive chooser
+│   ├── 09_health_check.sh              # Health check & diagnostics
 │   ├── 99_cleanup_services.sh          # Complete cleanup
 │   ├── sherpa-asr.service              # Single worker systemd
 │   └── sherpa-asr-multi.service        # Multi-worker systemd
@@ -222,9 +229,13 @@ yap-stt-api/
 - **GPU not detected**: Verify with `nvidia-smi`
 - **systemd fails**: Fall back to tmux sessions
 - **High P99 latency**: Increase endpointing rules or reduce batch size
+- **Server not responding**: Run `09_health_check.sh` for diagnostics
 
 ### Monitoring
 ```bash
+# Complete health check (processes, ports, connections, logs)
+bash scripts/09_health_check.sh
+
 # Check server logs
 tail -f /opt/sherpa-logs/server*.log
 

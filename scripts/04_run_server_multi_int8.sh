@@ -13,10 +13,22 @@ if command -v nvidia-cuda-mps-control >/dev/null 2>&1; then
   nvidia-cuda-mps-control -d || true
 fi
 
+# Kill any existing sherpa processes first
+echo "Cleaning up any existing sherpa processes..."
+pkill -f "sherpa-onnx-online-websocket-server" || true
+sleep 3
+
 echo "Starting $WORKERS workers on ports $BASE_PORT-$((BASE_PORT + WORKERS - 1))"
 
 for i in $(seq 0 $((WORKERS-1))); do
   PORT=$((BASE_PORT + i))
+  
+  # Check if port is already in use
+  if ss -tulpn | grep -q ":${PORT} "; then
+    echo "Warning: Port $PORT is already in use, killing processes on that port..."
+    fuser -k ${PORT}/tcp 2>/dev/null || true
+    sleep 2
+  fi
   
   # Enhanced environment for better GPU scheduling
   CUDA_DEVICE_MAX_CONNECTIONS=32 \
@@ -38,8 +50,16 @@ for i in $(seq 0 $((WORKERS-1))); do
     --log-file="$LOG/server_${PORT}.log" \
     >"$LOG/stdout_${PORT}.log" 2>&1 &
   
-  echo "Started sherpa worker on port ${PORT} (PID $!)"
-  sleep 1  # Brief delay between worker starts
+  WORKER_PID=$!
+  echo "Started sherpa worker on port ${PORT} (PID $WORKER_PID)"
+  
+  # Verify the worker actually started
+  sleep 2
+  if ! kill -0 $WORKER_PID 2>/dev/null; then
+    echo "ERROR: Worker on port $PORT failed to start. Check logs:"
+    echo "  tail -20 $LOG/stdout_${PORT}.log"
+    echo "  tail -20 $LOG/server_${PORT}.log"
+  fi
 done
 
 echo ""
