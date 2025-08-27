@@ -158,7 +158,6 @@ if [ -f "/etc/security/limits.d/moshi-nofile.conf" ]; then
   rm -f "/etc/security/limits.d/moshi-nofile.conf"
   echo "[99] ✓ Removed file descriptor limits config"
 fi
-
 # 7. Clean up environment variables from ~/.bashrc
 if [ -f ~/.bashrc ]; then
   # Remove HF_HOME and HF_HUB_ENABLE_HF_TRANSFER exports
@@ -210,3 +209,4 @@ du -sh /workspace/* /root/.* /tmp/* /var/cache/* 2>/dev/null | sort -hr | head -
 echo
 echo "[99] To reinstall: run 'bash scripts/main.sh' again"
 echo "[99] For maximum cleanup: run 'bash scripts/99_stop.sh --nuclear'"
+
