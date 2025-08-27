@@ -29,7 +29,7 @@ bash scripts/main.sh
 6. Show you connection details and management commands
 
 **After ~5-10 minutes, you'll have:**
-- Moshi STT server running on `ws://0.0.0.0:8000`
+- Moshi STT server running on `ws://0.0.0.0:8000/api/asr-streaming`
 - GPU-accelerated speech recognition
 - Production tmux session with logging
 - Ready for client connections
@@ -95,7 +95,7 @@ bash scripts/04_smoke_test.sh
    cd yap-stt-api
    bash scripts/main.sh
    ```
-4. **Connect**: Your server will be at `ws://your-runpod-ip:8000`
+4. **Connect**: Your server will be at `ws://your-runpod-ip:8000/api/asr-streaming`
 
 ### Runpod Configuration
 
@@ -170,7 +170,7 @@ pip install -r requirements.txt
 python test/client.py --server localhost:8000
 
 # Connect to Runpod server  
-python test/client.py --server your-runpod-ip:8000
+python test/client.py --server your-runpod-ip:8000/api/asr-streaming
 
 # Test with specific audio file
 python test/client.py --file samples/mid.wav --rtf 1.0
@@ -196,7 +196,7 @@ python test/bench.py --n 20 --concurrency 5
 python test/bench.py --n 100 --concurrency 20
 
 # Production server stress test
-python test/bench.py --server your-runpod-ip:8000 --n 200 --concurrency 50
+python test/bench.py --server your-runpod-ip:8000/api/asr-streaming --n 200 --concurrency 50
 
 # Real-time vs throughput testing
 python test/bench.py --rtf 1.0 --mode stream     # Real-time simulation
@@ -264,6 +264,11 @@ Your deployed server speaks the native Moshi Rust protocol:
 - **Chunk Size**: 80ms (1920 samples, 3840 bytes)
 - **Encoding**: Base64 encoded in JSON frames
 
+### WebSocket Endpoint
+- **Path**: `/api/asr-streaming` (not root `/`)
+- **Full URL**: `ws://host:port/api/asr-streaming`
+- **SSL**: `wss://host:port/api/asr-streaming`
+
 ### Connection Settings
 ```python
 # Optimized WebSocket settings (used by test suite)
@@ -278,6 +283,20 @@ websocket_options = {
 ```
 
 ## 🐛 Troubleshooting
+
+### WebSocket 404 Errors
+**Problem**: Connection refused or 404 during WebSocket handshake  
+**Cause**: Connecting to wrong path (root `/` instead of `/api/asr-streaming`)
+
+```bash
+# ❌ Wrong - will get 404
+python test/client.py --server localhost:8000
+
+# ✅ Correct - will connect successfully  
+python test/client.py --server localhost:8000/api/asr-streaming
+```
+
+**Solution**: Always use the full path `/api/asr-streaming` in your WebSocket URLs.
 
 ### Server Won't Start
 ```bash
@@ -314,8 +333,8 @@ bash scripts/main.sh     # Fresh install
 # Check port binding
 ss -tlnp | grep 8000
 
-# Test WebSocket connectivity
-python -c "import websockets, asyncio; asyncio.run(websockets.connect('ws://localhost:8000'))"
+# Test WebSocket connectivity  
+python -c "import websockets, asyncio; asyncio.run(websockets.connect('ws://localhost:8000/api/asr-streaming'))"
 
 # Check firewall (Runpod)
 # Ensure port 8000 is exposed in Runpod dashboard

@@ -38,8 +38,8 @@ def find_sample_by_name(filename: str) -> str | None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="WebSocket Moshi client")
-    parser.add_argument("--server", default=os.getenv("MOSHI_SERVER", "localhost:8000"),
-                        help="host:port or ws://host:port")
+    parser.add_argument("--server", default=os.getenv("MOSHI_SERVER", "localhost:8000/api/asr-streaming"),
+                        help="host:port or ws://host:port or full URL")
     parser.add_argument("--secure", action="store_true", help="Use WSS (requires cert on server)")
     parser.add_argument("--file", type=str, default="mid.wav", help="Audio file from samples/")
     parser.add_argument("--rtf", type=float, default=1.0, help="Real-time factor (1.0=realtime, higher=faster)")
@@ -47,11 +47,16 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 def _ws_url(server: str, secure: bool) -> str:
-    """Generate WebSocket URL for Moshi server (no special endpoints needed)"""
+    """Generate WebSocket URL for Moshi server with proper /api/asr-streaming path"""
     if server.startswith("ws://") or server.startswith("wss://"):
         return server
     else:
         scheme = "wss" if secure else "ws"
+        # Handle host:port format - add path if missing
+        if "/" not in server:
+            server = f"{server}/api/asr-streaming"
+        elif not server.endswith("/api/asr-streaming"):
+            server = f"{server}/api/asr-streaming"
         return f"{scheme}://{server}"
 
 async def run(args: argparse.Namespace) -> None:

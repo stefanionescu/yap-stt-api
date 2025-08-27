@@ -96,11 +96,16 @@ def summarize(title: str, results: List[Dict[str, float]]) -> None:
 
 
 def _ws_url(server: str, secure: bool) -> str:
-    """Generate WebSocket URL for Moshi server (no special endpoints needed)"""
+    """Generate WebSocket URL for Moshi server with proper /api/asr-streaming path"""
     if server.startswith("ws://") or server.startswith("wss://"):
         return server
     else:
         scheme = "wss" if secure else "ws"
+        # Handle host:port format - add path if missing
+        if "/" not in server:
+            server = f"{server}/api/asr-streaming"
+        elif not server.endswith("/api/asr-streaming"):
+            server = f"{server}/api/asr-streaming"
         return f"{scheme}://{server}"
 
 
@@ -265,9 +270,9 @@ async def bench_ws(server: str, file_path: str, total_reqs: int, concurrency: in
     async def worker(req_idx: int):
         nonlocal errors_total
         async with sem:
-            # Stagger stream starts by 80ms to avoid synchronization
+            # Stagger stream starts by ~80ms to avoid thundering-herd
             if req_idx > 0:
-                await asyncio.sleep(0.080 * (req_idx % 10) / 10.0)
+                await asyncio.sleep((req_idx % 8) * 0.010)
             try:
                 r = await _ws_one(server, pcm, audio_seconds, rtf, mode)
                 results.append(r)
@@ -286,7 +291,7 @@ async def bench_ws(server: str, file_path: str, total_reqs: int, concurrency: in
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="WebSocket streaming benchmark (Moshi)")
-    ap.add_argument("--server", default="localhost:8000", help="host:port or ws://host:port")
+    ap.add_argument("--server", default="localhost:8000/api/asr-streaming", help="host:port or ws://host:port or full URL")
     ap.add_argument("--secure", action="store_true", help="(ignored unless you run wss)")
     ap.add_argument("--n", type=int, default=20, help="Total sessions")
     ap.add_argument("--concurrency", type=int, default=5, help="Max concurrent sessions")
