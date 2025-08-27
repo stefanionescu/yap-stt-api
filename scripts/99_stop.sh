@@ -136,16 +136,6 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
   if command -v apt-get >/dev/null 2>&1; then
     # Remove packages installed by 00_prereqs.sh
     apt-get remove --purge -y cmake libopus-dev build-essential pkg-config libssl-dev ffmpeg tmux jq python3-pip gnupg 2>/dev/null || true
-    # Only remove CUDA if WE installed it (check for our apt source file)
-    if [ -f "/etc/apt/sources.list.d/cuda.list" ]; then
-      echo "[99] Removing CUDA toolkit that WE installed (not RunPod's built-in CUDA)..."
-      apt-get remove --purge -y 'cuda-toolkit-12-8' 'cuda-toolkit-12-4' 2>/dev/null || true
-      # Remove CUDA apt source that WE added
-      rm -f /etc/apt/sources.list.d/cuda.list
-      rm -f /usr/share/keyrings/cuda-archive-keyring.gpg
-    else
-      echo "[99] Keeping RunPod's built-in CUDA toolkit (not installed by us)"
-    fi
     apt-get autoremove --purge -y 2>/dev/null || true
     echo "[99] ✓ Removed system packages installed by scripts"
   fi

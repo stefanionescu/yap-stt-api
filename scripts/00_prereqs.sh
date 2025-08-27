@@ -10,25 +10,6 @@ apt-get install -y --no-install-recommends \
   python3 python3-venv python3-pip ffmpeg tmux jq gnupg \
   cmake libopus-dev
 
-# CUDA toolkit (nvcc) for cudarc
-if ! command -v nvcc >/dev/null 2>&1; then
-  echo "[00] Installing CUDA toolkit 12.4…"
-  curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/3bf863cc.pub \
-    | gpg --dearmor -o /usr/share/keyrings/cuda-archive-keyring.gpg
-  echo "deb [signed-by=/usr/share/keyrings/cuda-archive-keyring.gpg] https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/ /" \
-    > /etc/apt/sources.list.d/cuda.list
-  apt-get update -y
-  apt-get install -y --no-install-recommends cuda-toolkit-12-4
-fi
-export PATH="/usr/local/cuda/bin:$PATH"
-export CUDA_HOME="/usr/local/cuda"
-export CUDA_PATH="/usr/local/cuda"
-export CUDA_ROOT="/usr/local/cuda"
-grep -q 'cuda/bin' ~/.bashrc || echo 'export PATH="/usr/local/cuda/bin:$PATH"' >> ~/.bashrc
-grep -q 'CUDA_HOME=' ~/.bashrc || echo 'export CUDA_HOME=/usr/local/cuda' >> ~/.bashrc
-grep -q 'CUDA_PATH=' ~/.bashrc || echo 'export CUDA_PATH=/usr/local/cuda' >> ~/.bashrc
-grep -q 'CUDA_ROOT=' ~/.bashrc || echo 'export CUDA_ROOT=/usr/local/cuda' >> ~/.bashrc
-
 # Rust + uv
 if ! command -v cargo >/dev/null 2>&1; then
   curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable
