@@ -137,13 +137,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Warmup via Sherpa-ONNX WebSocket streaming (realtime)")
     parser.add_argument("--server", type=str, default="localhost:8000", help="host:port or ws://host:port")
     parser.add_argument("--secure", action="store_true")
-    parser.add_argument("--file", type=str, default="mid.wav", help="Filename in samples/ directory")
+    parser.add_argument("--file", type=str, default="mid.wav", help="Audio file. Absolute path or name in samples/")
     parser.add_argument("--chunk-ms", type=int, default=100, help="Chunk size in ms for streaming")
     parser.add_argument("--mode", choices=["stream", "oneshot"], default="stream", help="Run streaming or one-shot ASR")
     parser.add_argument("--debug", action="store_true", help="Print debug info including raw server messages")
     args = parser.parse_args()
 
-    audio_path = Path(SAMPLES_DIR) / args.file
+    # Resolve path: allow absolute path; otherwise look under samples/
+    candidate = Path(args.file)
+    if candidate.is_absolute() and candidate.exists():
+        audio_path = candidate
+    else:
+        audio_path = Path(SAMPLES_DIR) / args.file
     if not audio_path.exists():
         print(f"Audio not found: {audio_path}")
         return 2
