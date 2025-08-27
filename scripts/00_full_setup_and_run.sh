@@ -141,20 +141,32 @@ case $REPLY in
         echo "✅ Complete! Connect clients to ws://your-server:8000" | tee -a "$LOG_FILE"
         echo "NGINX will automatically round-robin across 3 workers" | tee -a "$LOG_FILE"
         echo "Runpod users: Expose port 8000 only" | tee -a "$LOG_FILE"
+        
+        # Run health check after deployment
+        echo "" | tee -a "$LOG_FILE"
+        echo "Running health check..." | tee -a "$LOG_FILE"
+        bash "$SCRIPT_DIR/09_health_check.sh" | tee -a "$LOG_FILE"
         ;;
     [Bb])
         echo "Starting multi-worker direct (no NGINX)..." | tee -a "$LOG_FILE"
         echo "Starting 3 workers on ports 8000-8002..." | tee -a "$LOG_FILE"
-        WORKERS=3 BASE_PORT=8000 exec bash "$SCRIPT_DIR/04_run_server_multi_int8.sh"
+        WORKERS=3 BASE_PORT=8000 bash "$SCRIPT_DIR/04_run_server_multi_int8.sh" &
+        sleep 5  # Give workers time to start
         
         echo "" | tee -a "$LOG_FILE"
         echo "✅ Complete! Connect clients to ports 8000-8002" | tee -a "$LOG_FILE"
         echo "Round-robin these ports in your client code" | tee -a "$LOG_FILE"
         echo "Runpod users: Expose ports 8000,8001,8002" | tee -a "$LOG_FILE"
+        
+        # Run health check after deployment
+        echo "" | tee -a "$LOG_FILE"
+        echo "Running health check..." | tee -a "$LOG_FILE"
+        bash "$SCRIPT_DIR/09_health_check.sh" | tee -a "$LOG_FILE"
         ;;
     [Cc]|*)
         echo "Setup complete. Use one of the options above to start the server." | tee -a "$LOG_FILE"
         echo "" | tee -a "$LOG_FILE"
         echo "💡 TIP: Run ./08_deployment_chooser.sh for interactive deployment" | tee -a "$LOG_FILE"
+        echo "💡 TIP: Run ./09_health_check.sh to verify server status" | tee -a "$LOG_FILE"
         ;;
 esac
