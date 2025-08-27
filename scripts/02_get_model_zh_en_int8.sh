@@ -12,9 +12,21 @@ wget -q --show-progress -O encoder-epoch-99-avg-1.int8.onnx    "$BASE/encoder-ep
 wget -q --show-progress -O decoder-epoch-99-avg-1.onnx         "$BASE/decoder-epoch-99-avg-1.onnx"
 wget -q --show-progress -O joiner-epoch-99-avg-1.int8.onnx     "$BASE/joiner-epoch-99-avg-1.int8.onnx"
 
-# Optional test audio
+# Optional test audio (these may fail to download - not critical)
 mkdir -p test_wavs
-wget -q --show-progress -O test_wavs/0.wav                     "$BASE/test_wavs/0.wav" || true
-wget -q --show-progress -O test_wavs/4.wav                     "$BASE/test_wavs/4.wav" || true
+echo "Downloading test audio files (optional)..."
+wget -q --show-progress -O test_wavs/0.wav "$BASE/test_wavs/0.wav" || echo "  ⚠ test_wavs/0.wav download failed"
+wget -q --show-progress -O test_wavs/4.wav "$BASE/test_wavs/4.wav" || echo "  ⚠ test_wavs/4.wav download failed"
+
+# Verify downloaded files
+for wav in test_wavs/*.wav; do
+    if [ -f "$wav" ]; then
+        # Check if file is a valid WAV (has RIFF header)
+        if ! head -c 4 "$wav" 2>/dev/null | grep -q "RIFF"; then
+            echo "  ⚠ $wav appears corrupted, removing"
+            rm -f "$wav"
+        fi
+    fi
+done
 
 echo "Model ready at $ROOT"
