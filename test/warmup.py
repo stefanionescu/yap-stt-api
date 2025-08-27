@@ -33,6 +33,28 @@ async def _run(server: str, pcm_bytes: bytes, chunk_ms: int, mode: str, debug: b
 
     t0 = time.perf_counter()
     async with websockets.connect(url, max_size=None) as ws:
+        # Send an initial config/start message so the server knows our audio format
+        # Keys are chosen to be broadly compatible across sherpa-onnx versions.
+        start_cfg = {
+            "type": "start",
+            "config": {
+                "sample_rate": 16000,
+                "channels": 1,
+                "bits_per_sample": 16,
+                "format": "s16le",
+                # Decoding hints (ignored if unsupported)
+                "decoding_method": "greedy_search",
+                "max_active_paths": 4,
+            }
+        }
+        try:
+            await ws.send(json.dumps(start_cfg))
+            if debug:
+                print(f"DEBUG: Sent start config: {start_cfg}")
+        except Exception:
+            # Older servers may not expect a start message; ignore failures
+            if debug:
+                print("DEBUG: Start config not accepted (ignored)")
         async def receiver():
             nonlocal final_text, final_recv_ts, last_text
             async for msg in ws:

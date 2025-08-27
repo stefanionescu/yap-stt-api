@@ -319,6 +319,9 @@ python test/client.py --mode oneshot --file mid.wav
 # Basic warmup test
 python test/warmup.py
 
+# Debug mode
+python test/warmup.py --debug
+
 # Test different audio files
 python test/warmup.py --file long.mp3 --chunk-ms 100
 
