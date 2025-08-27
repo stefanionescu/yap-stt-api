@@ -14,6 +14,13 @@ DSM_REPO_DIR="${DSM_REPO_DIR:-/workspace/delayed-streams-modeling}"
 MOSHI_CONFIG="${MOSHI_CONFIG:-/workspace/moshi-stt.toml}"
 
 echo "[99] Stopping and cleaning up moshi-server installation..."
+echo
+echo "[99] === DISK USAGE BEFORE CLEANUP ==="
+df -h | head -2
+echo
+echo "[99] === LARGEST DIRECTORIES (before cleanup) ==="
+du -sh /workspace/* /root/.* /tmp/* /var/cache/* 2>/dev/null | sort -hr | head -10 || true
+echo
 
 # 1. Stop tmux session
 if tmux has-session -t "${SESSION}" 2>/dev/null; then
@@ -110,6 +117,26 @@ find /workspace /tmp /root -type f -size +50M 2>/dev/null | while read -r large_
   fi
 done
 
+# 5j. NUCLEAR OPTION: Remove even the system packages we installed
+echo
+if [[ "${1:-}" == "--nuclear" ]]; then
+  REPLY="y"
+  echo "[99] --nuclear flag detected, removing system packages..."
+else
+  read -p "[99] Also remove system packages installed by scripts (cmake, libopus-dev, etc.)? [y/N]: " -n 1 -r
+  echo
+fi
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+  if command -v apt-get >/dev/null 2>&1; then
+    # Remove packages installed by 00_prereqs.sh
+    apt-get remove --purge -y cmake libopus-dev build-essential pkg-config libssl-dev ffmpeg tmux jq python3-pip 2>/dev/null || true
+    apt-get autoremove --purge -y 2>/dev/null || true
+    echo "[99] ✓ Removed system packages installed by scripts"
+  fi
+else
+  echo "[99] ✓ Keeping system packages (cmake, libopus-dev, etc.)"
+fi
+
 # 6. Remove file descriptor limits config
 if [ -f "/etc/security/limits.d/moshi-nofile.conf" ]; then
   rm -f "/etc/security/limits.d/moshi-nofile.conf"
@@ -153,4 +180,11 @@ echo "[99]   • All common cache directories"
 echo "[99]   • Large files >50MB (outside git repo)"
 echo "[99]   • Environment variable exports from ~/.bashrc"
 echo
+echo "[99] === DISK USAGE AFTER CLEANUP ==="
+df -h | head -2
+echo
+echo "[99] === LARGEST REMAINING DIRECTORIES ==="
+du -sh /workspace/* /root/.* /tmp/* /var/cache/* 2>/dev/null | sort -hr | head -10 || true
+echo
 echo "[99] To reinstall: run 'bash scripts/main.sh' again"
+echo "[99] For maximum cleanup: run 'bash scripts/99_stop.sh --nuclear'"
