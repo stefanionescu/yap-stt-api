@@ -28,18 +28,18 @@ EOF
 fi
 
 # Ensure scripts are executable
-chmod +x "${BASE_DIR}"/scripts/*.sh
+chmod +x "${BASE_DIR}"/*.sh
 
 # Run each phase
-"${BASE_DIR}/scripts/00_prereqs.sh"
-"${BASE_DIR}/scripts/01_install_moshi_server.sh"
-"${BASE_DIR}/scripts/02_fetch_configs.sh"
-"${BASE_DIR}/scripts/03_start_server.sh"
+"${BASE_DIR}/00_prereqs.sh"
+"${BASE_DIR}/01_install_moshi_server.sh"
+"${BASE_DIR}/02_fetch_configs.sh"
+"${BASE_DIR}/03_start_server.sh"
 sleep 10
-"${BASE_DIR}/scripts/05_status.sh"
-"${BASE_DIR}/scripts/04_smoke_test.sh"
+"${BASE_DIR}/05_status.sh"
+"${BASE_DIR}/04_smoke_test.sh"
 
 echo
 echo "=== All done. Server is running in tmux session '${TMUX_SESSION}' on ${MOSHI_ADDR}:${MOSHI_PORT} ==="
 echo "Use: scripts/05_status.sh   (tail logs, health)"
-echo "Use: scripts/06_stop.sh     (stop and clean session)"
+echo "Use: scripts/99_stop.sh     (stop and clean session)"
