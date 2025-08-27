@@ -136,16 +136,21 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
   if command -v apt-get >/dev/null 2>&1; then
     # Remove packages installed by 00_prereqs.sh
     apt-get remove --purge -y cmake libopus-dev build-essential pkg-config libssl-dev ffmpeg tmux jq python3-pip gnupg 2>/dev/null || true
-    # Remove CUDA toolkit (can be several GB) - handles both 12.8 and fallback versions
-    apt-get remove --purge -y 'cuda-toolkit-12-8' 'cuda-toolkit-12-4' 'cuda-toolkit-*' 'cuda-*' 2>/dev/null || true
+    # Only remove CUDA if WE installed it (check for our apt source file)
+    if [ -f "/etc/apt/sources.list.d/cuda.list" ]; then
+      echo "[99] Removing CUDA toolkit that WE installed (not RunPod's built-in CUDA)..."
+      apt-get remove --purge -y 'cuda-toolkit-12-8' 'cuda-toolkit-12-4' 2>/dev/null || true
+      # Remove CUDA apt source that WE added
+      rm -f /etc/apt/sources.list.d/cuda.list
+      rm -f /usr/share/keyrings/cuda-archive-keyring.gpg
+    else
+      echo "[99] Keeping RunPod's built-in CUDA toolkit (not installed by us)"
+    fi
     apt-get autoremove --purge -y 2>/dev/null || true
-    # Remove CUDA apt source
-    rm -f /etc/apt/sources.list.d/cuda.list
-    rm -f /usr/share/keyrings/cuda-archive-keyring.gpg
-    echo "[99] ✓ Removed system packages installed by scripts (including CUDA toolkit)"
+    echo "[99] ✓ Removed system packages installed by scripts"
   fi
 else
-  echo "[99] ✓ Keeping system packages (cmake, libopus-dev, CUDA toolkit, etc.)"
+  echo "[99] ✓ Keeping system packages (cmake, libopus-dev, etc.)"
 fi
 
 # 6. Remove file descriptor limits config
@@ -181,7 +186,8 @@ echo
 echo "[99] ===== CLEANUP COMPLETE ====="
 echo "[99] Preserved:"
 echo "[99]   • Git repository and your code"
-echo "[99]   • System packages (build-essential, cmake, libopus-dev, CUDA toolkit, etc.)"
+echo "[99]   • RunPod's built-in CUDA toolkit (if not installed by scripts)"
+echo "[99]   • System packages that came with RunPod image"
 echo
 echo "[99] Removed:"
 echo "[99]   • moshi-server binary"
