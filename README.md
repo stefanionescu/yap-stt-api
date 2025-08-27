@@ -264,29 +264,54 @@ Your deployed server speaks the native Moshi Rust protocol:
 - **Chunk Size**: 80ms (1920 samples, 3840 bytes)
 - **Encoding**: Base64 encoded in JSON frames
 
-### WebSocket Endpoint
+### WebSocket Endpoint  
 - **Path**: `/api/asr-streaming` (not root `/`)
 - **Full URL**: `ws://host:port/api/asr-streaming`
 - **SSL**: `wss://host:port/api/asr-streaming`
+- **Auth**: Requires `kyutai-api-key` header (set via `MOSHI_API_KEY` env var)
+
+### Environment Variables
+```bash
+# Set default server for all tests
+export MOSHI_SERVER=localhost:8000/api/asr-streaming
+python test/client.py  # Uses environment variable
+
+# Set API key (defaults to "public_token" for local testing)
+export MOSHI_API_KEY=your-secret-key
+python test/client.py
+
+# Both together for production testing
+export MOSHI_SERVER=prod-server:8000/api/asr-streaming
+export MOSHI_API_KEY=production-key
+python test/bench.py --n 100 --concurrency 20
+```
 
 ### Connection Settings
 ```python
 # Optimized WebSocket settings (used by test suite)
+import os
+API_KEY = os.getenv("MOSHI_API_KEY", "public_token")
+headers = [("kyutai-api-key", API_KEY)]
+
 websocket_options = {
     "max_size": None,           # No frame size limit
     "compression": None,        # Disable compression  
     "ping_interval": 20,        # Keep-alive
     "ping_timeout": 20,         
     "max_queue": 4,            # Send queue limit
-    "write_limit": 2**22       # Write buffer size
+    "write_limit": 2**22,      # Write buffer size
+    "extra_headers": headers   # API key authentication
 }
 ```
 
 ## 🐛 Troubleshooting
 
-### WebSocket 404 Errors
-**Problem**: Connection refused or 404 during WebSocket handshake  
-**Cause**: Connecting to wrong path (root `/` instead of `/api/asr-streaming`)
+### WebSocket 401/404 Errors
+**Problem**: Connection refused, 401 Unauthorized, or 404 during WebSocket handshake  
+
+**Common Causes:**
+1. **Wrong path**: Connecting to root `/` instead of `/api/asr-streaming` 
+2. **Missing API key**: Server expects `kyutai-api-key` header
 
 ```bash
 # ❌ Wrong - will get 404
@@ -294,9 +319,15 @@ python test/client.py --server localhost:8000
 
 # ✅ Correct - will connect successfully  
 python test/client.py --server localhost:8000/api/asr-streaming
+
+# ✅ With custom API key
+export MOSHI_API_KEY=your-secret-key
+python test/client.py --server localhost:8000/api/asr-streaming
 ```
 
-**Solution**: Always use the full path `/api/asr-streaming` in your WebSocket URLs.
+**Solutions**: 
+- Always use the full path `/api/asr-streaming` 
+- Set `MOSHI_API_KEY` env var (defaults to `"public_token"` for local testing)
 
 ### Server Won't Start
 ```bash

@@ -86,18 +86,24 @@ async def run(args: argparse.Namespace) -> None:
     final_text = ""
     last_text = ""
 
+    # API key header for Moshi server authentication
+    API_KEY = os.getenv("MOSHI_API_KEY", "public_token")
+    headers = [("kyutai-api-key", API_KEY)]
+    
     ws_options = {
         "max_size": None,
         "compression": None,
         "ping_interval": 20,
         "ping_timeout": 20,
         "max_queue": 4,
-        "write_limit": 2**22
+        "write_limit": 2**22,
+        "extra_headers": headers
     }
 
     t0 = time.perf_counter()
     async with websockets.connect(url, **ws_options) as ws:
-        # Send handshake
+        # Send handshake and wait for Ready
+        ready_event = asyncio.Event()
         await ws.send(json.dumps({"type": "StartSTT"}))
         
         async def receiver():
@@ -112,8 +118,12 @@ async def run(args: argparse.Namespace) -> None:
                     
                     now = time.perf_counter()
                     
-                    if msg_type in ("Ready", "Step"):
-                        # Ignore server status messages
+                    if msg_type == "Ready":
+                        # Server ready - unblock streaming
+                        ready_event.set()
+                        continue
+                    elif msg_type == "Step":
+                        # Ignore server step messages
                         continue
                     elif msg_type == "Word":
                         # Word-level events - can print if desired
@@ -154,6 +164,13 @@ async def run(args: argparse.Namespace) -> None:
                     continue
 
         recv_task = asyncio.create_task(receiver())
+
+        # Wait for server Ready before streaming audio
+        try:
+            await asyncio.wait_for(ready_event.wait(), timeout=10.0)
+        except asyncio.TimeoutError:
+            print("Timeout waiting for server Ready signal")
+            return
 
         if args.mode == "stream":
             for i in range(0, len(pcm), bytes_per_chunk):
