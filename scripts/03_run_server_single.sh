@@ -16,8 +16,9 @@ exec "$SRV" \
   --encoder="$MOD/encoder-epoch-99-avg-1.onnx" \
   --decoder="$MOD/decoder-epoch-99-avg-1.onnx" \
   --joiner="$MOD/joiner-epoch-99-avg-1.onnx" \
-  --decoding-method=greedy_search \
-  --enable-endpoint=true \
+  --decoding-method=modified_beam_search \
+  --max-active-paths=4 \
+  --enable-endpoint=false \
   --rule1-min-trailing-silence=0.12 \
   --rule2-min-trailing-silence=0.15 \
   --rule3-min-trailing-silence=0.00 \

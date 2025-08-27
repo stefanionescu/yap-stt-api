@@ -36,6 +36,16 @@ else
 fi
 echo ""
 
+echo "Binary version:"
+"$BIN" --help | head -n 1 || true
+echo ""
+
+echo "Server flags preview (from scripts):"
+grep -E "--(tokens|encoder|decoder|joiner|decoding-method|max-active-paths|enable-endpoint)" -n \
+  "$(dirname "$0")/03_run_server_single.sh" \
+  "$(dirname "$0")/04_run_server_multi.sh" || true
+echo ""
+
 echo "3. Checking running processes..."
 if pgrep -f "sherpa-onnx-online-websocket-server" >/dev/null; then
     echo "✅ Sherpa processes running:"
