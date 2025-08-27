@@ -52,12 +52,16 @@ NGINX_CONF
 # Enable the configuration and ensure sites-enabled is included
 ln -sf /etc/nginx/sites-available/sherpa-ws.conf /etc/nginx/sites-enabled/sherpa-ws.conf
 
-# Ensure sites-enabled directory is included in main nginx.conf
-if ! grep -q "sites-enabled" /etc/nginx/nginx.conf; then
-    echo "Adding sites-enabled include to nginx.conf..."
-    # Add include line in the http block, before the last closing brace
-    sed -i '/^[[:space:]]*}[[:space:]]*$/i\    include /etc/nginx/sites-enabled/*;' /etc/nginx/nginx.conf
-fi
+# Fix nginx.conf to include sites-enabled in the correct location (inside http block)
+echo "Ensuring sites-enabled is included in the http block..."
+# First remove any existing include lines to avoid duplicates
+sed -i '/include.*sites-enabled/d' /etc/nginx/nginx.conf
+
+# Add the include line inside the http block, before its closing brace
+# Look for the end of the http block and add our include before it
+sed -i '/^http[[:space:]]*{/,/^}[[:space:]]*$/ { 
+    /^}[[:space:]]*$/ i\    include /etc/nginx/sites-enabled/*;
+}' /etc/nginx/nginx.conf
 
 # Test NGINX configuration
 echo "Testing NGINX configuration..."
