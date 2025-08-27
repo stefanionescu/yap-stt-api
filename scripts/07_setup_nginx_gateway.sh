@@ -61,10 +61,38 @@ else
     exit 1
 fi
 
-# Start/restart NGINX
+# Start/restart NGINX (detect systemd availability)
 echo "Starting NGINX..."
-systemctl enable nginx
-systemctl restart nginx
+if systemctl is-system-running >/dev/null 2>&1 || [ -d /run/systemd/system ]; then
+    # systemd is available
+    echo "Using systemd to manage NGINX..."
+    systemctl enable nginx
+    systemctl restart nginx
+else
+    # No systemd, start nginx directly
+    echo "systemd not available, starting NGINX directly..."
+    # Stop any existing nginx processes
+    pkill nginx || true
+    sleep 2
+    # Start nginx in daemon mode
+    nginx -t && nginx
+    echo "NGINX started in daemon mode"
+fi
+
+# Verify NGINX is running
+echo "Verifying NGINX is running..."
+sleep 2
+if pgrep nginx >/dev/null 2>&1; then
+    echo "✓ NGINX is running"
+    echo "✓ Listening on port 8000"
+else
+    echo "✗ NGINX failed to start"
+    echo "Troubleshooting:"
+    echo "  - Check logs: tail -f /var/log/nginx/error.log"
+    echo "  - Test config: nginx -t"
+    echo "  - Manual start: nginx"
+    exit 1
+fi
 
 echo ""
 echo "=== NGINX Gateway Configuration Complete ==="
@@ -73,9 +101,17 @@ echo "Backend workers: 127.0.0.1:8001, 8002, 8003"
 echo "Load balancing: least_conn (least connections)"
 echo ""
 echo "Usage:"
-echo "1. Start workers with: WORKERS=3 BASE_PORT=8001 bash 04_run_server_multi_int8.sh"
+echo "1. Workers already started on ports 8001-8003"
 echo "2. Connect clients to: ws://your-server:8000"
 echo "3. NGINX will automatically distribute connections across workers"
 echo ""
-echo "Check status: systemctl status nginx"
-echo "Check logs: tail -f /var/log/nginx/error.log"
+echo "Management:"
+if systemctl is-system-running >/dev/null 2>&1 || [ -d /run/systemd/system ]; then
+    echo "  Check status: systemctl status nginx"
+    echo "  Stop/start: systemctl stop/start nginx"
+else
+    echo "  Check status: pgrep nginx"
+    echo "  Stop: pkill nginx"  
+    echo "  Start: nginx"
+fi
+echo "  Check logs: tail -f /var/log/nginx/error.log"
