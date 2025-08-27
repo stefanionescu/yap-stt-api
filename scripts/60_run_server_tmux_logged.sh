@@ -8,7 +8,7 @@ SESSION="sensevoice"
 HOST="0.0.0.0"
 PORT="${PORT:-8000}"
 LOG_DIR="${HOME}/sensevoice-logs"
-KEEP_LOGS=7  # keep last N logs
+KEEP_LOGS=7
 
 # ---- env ----
 source "${VENV}/bin/activate"
@@ -16,7 +16,6 @@ export PYTHONPATH="${REPO}:${PYTHONPATH:-}"
 export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
 export DEVICE="cuda:0"
 export SENSEVOICE_MODEL_PATH="${SENSEVOICE_MODEL_PATH:-iic/SenseVoiceSmall}"
-# No server VAD; Pipecat does segmentation
 export CHUNK_DURATION="${CHUNK_DURATION:-0.10}"
 export VAD_THRESHOLD="0"
 export VAD_MIN_SILENCE_DURATION_MS="0"
@@ -29,26 +28,20 @@ export PYTORCH_CUDA_ALLOC_CONF="max_split_size_mb:64,expandable_segments:True"
 mkdir -p "${LOG_DIR}"
 TS="$(date +%Y%m%d_%H%M%S)"
 LOG_FILE="${LOG_DIR}/server_${TS}.log"
-# ensure the file exists so tail never fails
 : > "${LOG_FILE}"
 ln -sfn "${LOG_FILE}" "${LOG_DIR}/current.log"
 
-# --- safe log rotation (no pipefail issues) ---
+# rotate logs safely
 shopt -s nullglob
 LOGS=( "${LOG_DIR}"/server_*.log )
 if (( ${#LOGS[@]} > KEEP_LOGS )); then
-  # sort descending by name (timestamps are lexicographically sortable)
   IFS=$'\n' read -r -d '' -a SORTED < <(printf '%s\n' "${LOGS[@]}" | sort -r && printf '\0') || true
   TO_DELETE=( "${SORTED[@]:KEEP_LOGS}" )
-  if (( ${#TO_DELETE[@]} )); then
-    rm -f -- "${TO_DELETE[@]}"
-  fi
+  (( ${#TO_DELETE[@]} )) && rm -f -- "${TO_DELETE[@]}"
 fi
 shopt -u nullglob
 
 cd "${REPO}"
-
-# Prefer no-VAD server if present
 if [ -f "${REPO}/realtime_ws_server_novad.py" ]; then
   SERVER_MODULE="realtime_ws_server_novad"
 else
@@ -57,22 +50,21 @@ fi
 
 UVICORN_CMD="python -m uvicorn ${SERVER_MODULE}:app --host ${HOST} --port ${PORT} --log-level info --access-log"
 
-# write a tiny runner so tmux can tee logs cleanly
+# --- runner that cds into repo and forces PYTHONPATH ---
 RUN_SH="${LOG_DIR}/run_${TS}.sh"
 cat > "${RUN_SH}" <<'EOS'
 #!/usr/bin/env bash
 set -euo pipefail
 ulimit -n 65536 || true
-# shellcheck disable=SC2154
+cd "${REPO}"
 echo "[boot] $(date -Is) starting: ${UVICORN_CMD}" | tee -a "${LOG_FILE}"
-# line-buffered stdout/stderr -> tee
-exec stdbuf -oL -eL ${UVICORN_CMD} 2>&1 | tee -a "${LOG_FILE}"
+# Force PYTHONPATH in case tmux drops env (some environments do)
+exec env PYTHONPATH="${REPO}:${PYTHONPATH:-}" stdbuf -oL -eL ${UVICORN_CMD} 2>&1 | tee -a "${LOG_FILE}"
 EOS
 chmod +x "${RUN_SH}"
 
-export LOG_FILE UVICORN_CMD
+export LOG_FILE UVICORN_CMD REPO
 
-# restart tmux session
 tmux kill-session -t "${SESSION}" 2>/dev/null || true
 tmux new-session -d -s "${SESSION}" "bash -lc '${RUN_SH}'"
 
