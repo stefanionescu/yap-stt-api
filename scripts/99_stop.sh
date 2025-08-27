@@ -71,6 +71,45 @@ find /workspace -name "*.bin" -o -name "*.safetensors" -o -name "*.onnx" | while
   fi
 done 2>/dev/null || true
 
+# 5f. Clean Python pip cache (can be huge)
+if [ -d "$HOME/.cache/pip" ]; then
+  rm -rf "$HOME/.cache/pip"
+  echo "[99] ✓ Removed pip cache (~/.cache/pip)"
+fi
+
+# 5g. Clean apt package cache
+if command -v apt-get >/dev/null 2>&1; then
+  apt-get clean
+  apt-get autoclean
+  echo "[99] ✓ Cleaned apt package cache"
+fi
+
+# 5h. Remove common cache directories
+for cache_dir in "$HOME/.cache" "/root/.cache" "/var/cache" "/tmp/pip*" "/tmp/tmp*"; do
+  if [ -d "$cache_dir" ] && [ "$cache_dir" != "/var/cache" ]; then # Keep /var/cache but clean its contents
+    rm -rf "$cache_dir"
+    echo "[99] ✓ Removed cache directory: $cache_dir"
+  fi
+done
+
+# Clean specific /var/cache subdirs that are safe to remove
+for var_cache in "/var/cache/apt" "/var/cache/debconf" "/var/cache/fontconfig"; do
+  if [ -d "$var_cache" ]; then
+    rm -rf "$var_cache"/*
+    echo "[99] ✓ Cleaned $var_cache"
+  fi
+done
+
+# 5i. Find and remove any remaining large files (>50MB) in /workspace, /tmp, /root
+echo "[99] Scanning for large files (>50MB)..."
+find /workspace /tmp /root -type f -size +50M 2>/dev/null | while read -r large_file; do
+  # Skip files in our git repo
+  if [[ "$large_file" != *"/yap-stt-api/"* ]] || [[ "$large_file" == *".git/"* ]]; then
+    rm -f "$large_file"
+    echo "[99] ✓ Removed large file: $large_file"
+  fi
+done
+
 # 6. Remove file descriptor limits config
 if [ -f "/etc/security/limits.d/moshi-nofile.conf" ]; then
   rm -f "/etc/security/limits.d/moshi-nofile.conf"
@@ -108,6 +147,10 @@ echo "[99]   • uv tool and ~/.local directory"
 echo "[99]   • All downloaded models and HF cache"
 echo "[99]   • All log files and tmux sessions"
 echo "[99]   • Configuration files and cloned repos"
+echo "[99]   • Python pip cache (~/.cache/pip)"
+echo "[99]   • System package caches (apt, debconf, fontconfig)"
+echo "[99]   • All common cache directories"
+echo "[99]   • Large files >50MB (outside git repo)"
 echo "[99]   • Environment variable exports from ~/.bashrc"
 echo
 echo "[99] To reinstall: run 'bash scripts/main.sh' again"
