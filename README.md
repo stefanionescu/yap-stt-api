@@ -17,7 +17,7 @@ Production-ready streaming WebSocket ASR server using **sherpa-onnx** with **INT
 ### One-Command Setup (Recommended)
 ```bash
 # Complete automated setup + deployment
-sudo bash scripts/00_full_setup_and_run.sh
+bash scripts/00_full_setup_and_run.sh
 ```
 
 This will:
@@ -29,13 +29,13 @@ This will:
 ### Manual Setup
 ```bash
 # 1. Build sherpa-onnx
-sudo bash scripts/01_setup_sherpa_onnx.sh
+bash scripts/01_setup_sherpa_onnx.sh
 
 # 2. Download model
-sudo bash scripts/02_get_model_zh_en_int8.sh
+bash scripts/02_get_model_zh_en_int8.sh
 
 # 3. Optimize system
-sudo bash scripts/06_sysctl_ulimit.sh
+bash scripts/06_sysctl_ulimit.sh
 
 # 4. Choose deployment method (see below)
 ```
@@ -47,8 +47,8 @@ sudo bash scripts/06_sysctl_ulimit.sh
 
 ```bash
 # Start 3 workers + NGINX gateway
-sudo bash scripts/04_run_server_multi_int8.sh &
-sudo bash scripts/07_setup_nginx_gateway.sh
+bash scripts/04_run_server_multi_int8.sh &
+bash scripts/07_setup_nginx_gateway.sh
 ```
 
 **Configuration:**
@@ -77,7 +77,7 @@ WORKERS=3 BASE_PORT=8000 bash scripts/04_run_server_multi_int8.sh
 
 ```bash
 # Start single worker
-sudo bash scripts/03_run_server_single_int8.sh
+bash scripts/03_run_server_single_int8.sh
 ```
 
 **Configuration:**
@@ -90,7 +90,7 @@ sudo bash scripts/03_run_server_single_int8.sh
 ### Interactive Deployment Chooser
 ```bash
 # Guided menu for deployment options
-sudo bash scripts/08_deployment_chooser.sh
+bash scripts/08_deployment_chooser.sh
 ```
 
 ### Starting Servers
@@ -110,15 +110,15 @@ tmux attach -t sherpa
 #### systemd Services (Production)
 ```bash
 # Single worker service
-sudo cp scripts/sherpa-asr.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now sherpa-asr.service
+cp scripts/sherpa-asr.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now sherpa-asr.service
 
 # Multi-worker service
-sudo cp scripts/sherpa-asr-multi.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now sherpa-asr-multi.service
-# Then: sudo bash scripts/07_setup_nginx_gateway.sh
+cp scripts/sherpa-asr-multi.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now sherpa-asr-multi.service
+# Then: bash scripts/07_setup_nginx_gateway.sh
 ```
 
 ### Stopping Servers
@@ -126,18 +126,18 @@ sudo systemctl enable --now sherpa-asr-multi.service
 #### Kill Processes
 ```bash
 # Stop all sherpa processes
-sudo pkill -f "sherpa-onnx"
+pkill -f "sherpa-onnx"
 
 # Stop specific services
-sudo systemctl stop sherpa-asr
-sudo systemctl stop sherpa-asr-multi
+systemctl stop sherpa-asr
+systemctl stop sherpa-asr-multi
 ```
 
 #### Complete Cleanup (Nuclear Option)
 ```bash
 # Remove EVERYTHING (models, deps, configs, logs)
 # ⚠️ WARNING: This removes ~7GB+ data
-sudo bash scripts/99_cleanup_services.sh
+bash scripts/99_cleanup_services.sh
 # Type "YES" to confirm
 ```
 
@@ -148,7 +148,7 @@ sudo bash scripts/99_cleanup_services.sh
 2. **Expose Port**: `8000` only
 3. **Run Setup**: 
    ```bash
-   sudo bash scripts/00_full_setup_and_run.sh
+   bash scripts/00_full_setup_and_run.sh
    # Choose "A" for NGINX setup
    ```
 4. **Connect Clients**: `ws://your-runpod-ip:8000`
@@ -163,10 +163,12 @@ sudo bash scripts/99_cleanup_services.sh
 4. **Client Load Balancing**: Round-robin ports `[8000,8001,8002]`
 
 ### Runpod-Specific Notes
+- **Root access**: No `sudo` needed (you're already root in Runpod)
 - **Systemd**: Works on bare-metal instances
 - **Docker containers**: Use tmux option if systemd unavailable
 - **Persistence**: Save as Runpod template after setup
 - **Port exposure**: Configure in Runpod dashboard before starting
+- **All commands**: Run directly without `sudo` prefix
 
 ## ⚙️ Configuration & Performance
 
@@ -227,7 +229,7 @@ yap-stt-api/
 tail -f /opt/sherpa-logs/server*.log
 
 # Check system status
-sudo systemctl status sherpa-asr-multi
+systemctl status sherpa-asr-multi
 ss -lntp | grep 800  # Check listening ports
 
 # Monitor GPU usage
