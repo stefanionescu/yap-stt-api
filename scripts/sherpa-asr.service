@@ -1,0 +1,15 @@
+[Unit]
+Description=Sherpa-ONNX Streaming ASR (zh/en, INT8)
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+Environment=CUDA_DEVICE_MAX_CONNECTIONS=32
+ExecStart=/bin/bash /opt/03_run_server_single_int8.sh
+Restart=always
+RestartSec=2
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
