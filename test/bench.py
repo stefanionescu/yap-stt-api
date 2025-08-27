@@ -8,7 +8,7 @@ Measures latency (wall), time-to-first-word, and throughput under concurrency.
 from __future__ import annotations
 import argparse
 import asyncio
-import base64
+
 import contextlib
 import json
 import os
@@ -97,16 +97,14 @@ def summarize(title: str, results: List[Dict[str, float]]) -> None:
 
 
 def _ws_url(server: str, secure: bool) -> str:
-    """Generate WebSocket URL for Moshi server with proper /api/asr-streaming path"""
+    """Generate WebSocket URL for Moshi server at root path"""
     if server.startswith("ws://") or server.startswith("wss://"):
         return server
     else:
         scheme = "wss" if secure else "ws"
-        # Handle host:port format - add path if missing
-        if "/" not in server:
-            server = f"{server}/api/asr-streaming"
-        elif not server.endswith("/api/asr-streaming"):
-            server = f"{server}/api/asr-streaming"
+        # Strip any existing paths - moshi server uses root path
+        if "/" in server:
+            server = server.split("/")[0]  # Keep only host:port
         return f"{scheme}://{server}"
 
 
@@ -131,26 +129,20 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
     bytes_per_chunk = samples_per_chunk * 2  # 3840 bytes
     chunk_ms = 80.0
 
-    # API key header for Moshi server authentication
-    API_KEY = os.getenv("MOSHI_API_KEY", "public_token")
-    headers = [("kyutai-api-key", API_KEY)]
-    
+    # Moshi server doesn't need authentication headers
     ws_options = {
         "max_size": None,
         "compression": None,
         "ping_interval": 20,
         "ping_timeout": 20,
         "max_queue": 4,
-        "write_limit": 2**22,
-        "extra_headers": headers
+        "write_limit": 2**22
     }
 
     async with websockets.connect(url, **ws_options) as ws:
-        # Send handshake and wait for Ready
-        ready_event = asyncio.Event()
+        # No handshake needed - start streaming immediately
         done_event = asyncio.Event()
         final_seen = False
-        await ws.send(json.dumps({"type": "StartSTT"}))
         
         # receiver: Handle Moshi JSON message types
         async def receiver():
@@ -166,11 +158,7 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
                         
                         now = time.perf_counter()
                         
-                        if msg_type == "Ready":
-                            # Server ready - unblock streaming
-                            ready_event.set()
-                            continue
-                        elif msg_type == "Step":
+                        if msg_type == "Step":
                             # Ignore server step messages
                             continue
                         elif msg_type == "Word":
@@ -226,36 +214,14 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
 
         recv_task = asyncio.create_task(receiver())
 
-        # Wait for server Ready before streaming audio
-        try:
-            await asyncio.wait_for(ready_event.wait(), timeout=10.0)
-        except asyncio.TimeoutError:
-            # Return error metrics instead of crashing
-            return {
-                "wall_s": 0.0,
-                "audio_s": audio_seconds,
-                "rtf": float("inf"),
-                "xrt": 0.0,
-                "throughput_min_per_min": 0.0,
-                "partials": 0.0,
-                "avg_partial_gap_ms": 0.0,
-                "final_len_chars": 0.0,
-                "finalize_ms": 0.0,
-                "mode": mode,
-                "rtf": float(rtf),
-                "error": "timeout_waiting_for_ready"
-            }
+        # Start streaming immediately - no handshake needed
 
         # sender: stream audio in JSON frames
         if mode == "stream":
             # realistic streaming with RTF control
             for i in range(0, len(pcm_bytes), bytes_per_chunk):
                 chunk = pcm_bytes[i:i+bytes_per_chunk]
-                audio_frame = {
-                    "type": "Audio",
-                    "audio": base64.b64encode(chunk).decode('ascii')
-                }
-                await ws.send(json.dumps(audio_frame))
+                await ws.send(chunk)  # Send raw PCM bytes
                 last_chunk_sent_ts = time.perf_counter()
                 await asyncio.sleep(chunk_ms / 1000.0 / rtf)
         else:
@@ -263,15 +229,11 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
             big = 48000  # ~2 sec of 24k audio per frame
             for i in range(0, len(pcm_bytes), big):
                 chunk = pcm_bytes[i:i+big]
-                audio_frame = {
-                    "type": "Audio",
-                    "audio": base64.b64encode(chunk).decode('ascii')
-                }
-                await ws.send(json.dumps(audio_frame))
+                await ws.send(chunk)  # Send raw PCM bytes
                 last_chunk_sent_ts = time.perf_counter()
 
         # signal end
-        await ws.send(json.dumps({"type": "Flush"}))
+        await ws.send("Done")
         
         # Wait for server final (avoid indefinite waits)
         try:
@@ -350,7 +312,7 @@ async def bench_ws(server: str, file_path: str, total_reqs: int, concurrency: in
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="WebSocket streaming benchmark (Moshi)")
-    ap.add_argument("--server", default="localhost:8000/api/asr-streaming", help="host:port or ws://host:port or full URL")
+    ap.add_argument("--server", default="localhost:8000", help="host:port or ws://host:port or full URL")
     ap.add_argument("--secure", action="store_true", help="(ignored unless you run wss)")
     ap.add_argument("--n", type=int, default=20, help="Total sessions")
     ap.add_argument("--concurrency", type=int, default=5, help="Max concurrent sessions")

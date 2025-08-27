@@ -1,7 +1,6 @@
 from __future__ import annotations
 import argparse
 import asyncio
-import base64
 import contextlib
 import json
 import os
@@ -16,16 +15,14 @@ RESULTS_DIR = Path("test/results")
 RESULTS_FILE = RESULTS_DIR / "warmup.txt"
 
 def _ws_url(server: str, secure: bool) -> str:
-    """Generate WebSocket URL for Moshi server with proper /api/asr-streaming path"""
+    """Generate WebSocket URL for Moshi server at root path"""
     if server.startswith("ws://") or server.startswith("wss://"):
         return server
     else:
         scheme = "wss" if secure else "ws"
-        # Handle host:port format - add path if missing
-        if "/" not in server:
-            server = f"{server}/api/asr-streaming"
-        elif not server.endswith("/api/asr-streaming"):
-            server = f"{server}/api/asr-streaming"
+        # Strip any existing paths - moshi server uses root path
+        if "/" in server:
+            server = server.split("/")[0]  # Keep only host:port
         return f"{scheme}://{server}"
 
 async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool = False) -> dict:
@@ -42,29 +39,21 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
     final_text = ""
     last_text = ""
 
-    # API key header for Moshi server authentication
-    API_KEY = os.getenv("MOSHI_API_KEY", "public_token")
-    headers = [("kyutai-api-key", API_KEY)]
-    
+    # Moshi server doesn't need authentication headers
     ws_options = {
         "max_size": None,
         "compression": None,
         "ping_interval": 20,
         "ping_timeout": 20,
         "max_queue": 4,
-        "write_limit": 2**22,
-        "extra_headers": headers
+        "write_limit": 2**22
     }
 
     t0 = time.perf_counter()
     async with websockets.connect(url, **ws_options) as ws:
-        # Send handshake and wait for Ready
-        ready_event = asyncio.Event()
+        # No handshake needed - start streaming immediately
         done_event = asyncio.Event()
         final_seen = False
-        await ws.send(json.dumps({"type": "StartSTT"}))
-        if debug:
-            print("DEBUG: Sent StartSTT handshake")
 
         async def receiver():
             nonlocal final_text, final_recv_ts, last_text, final_seen
@@ -84,13 +73,7 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
                         
                         now = time.perf_counter()
                         
-                        if msg_type == "Ready":
-                            # Server ready - unblock streaming
-                            if debug:
-                                print("DEBUG: Server Ready received")
-                            ready_event.set()
-                            continue
-                        elif msg_type == "Step":
+                        if msg_type == "Step":
                             # Ignore server step messages
                             continue
                         elif msg_type == "Word":
@@ -152,50 +135,26 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
 
         recv_task = asyncio.create_task(receiver())
 
-        # Wait for server Ready before streaming audio
-        try:
-            await asyncio.wait_for(ready_event.wait(), timeout=10.0)
-            if debug:
-                print("DEBUG: Ready received, starting audio stream")
-        except asyncio.TimeoutError:
-            if debug:
-                print("DEBUG: Timeout waiting for server Ready signal")
-            elapsed_s = time.perf_counter() - t0
-            return {
-                "text": final_text,
-                "elapsed_s": elapsed_s,
-                "partials": 0,
-                "avg_partial_gap_ms": 0.0,
-                "finalize_ms": 0.0,
-                "mode": mode,
-                "rtf": rtf,
-                "error": "timeout_waiting_for_ready"
-            }
+        # Start streaming immediately - no handshake needed
+        if debug:
+            print("DEBUG: Starting audio stream")
 
         if mode == "stream":
             for i in range(0, len(pcm_bytes), bytes_per_chunk):
                 chunk = pcm_bytes[i:i+bytes_per_chunk]
-                audio_frame = {
-                    "type": "Audio",
-                    "audio": base64.b64encode(chunk).decode('ascii')
-                }
-                await ws.send(json.dumps(audio_frame))
+                await ws.send(chunk)  # Send raw PCM bytes
                 last_chunk_sent_ts = time.perf_counter()
                 await asyncio.sleep(chunk_ms / 1000.0 / rtf)
         else:
             big = 48000  # ~2 sec of 24k audio per frame
             for i in range(0, len(pcm_bytes), big):
                 chunk = pcm_bytes[i:i+big]
-                audio_frame = {
-                    "type": "Audio",
-                    "audio": base64.b64encode(chunk).decode('ascii')
-                }
-                await ws.send(json.dumps(audio_frame))
+                await ws.send(chunk)  # Send raw PCM bytes
                 last_chunk_sent_ts = time.perf_counter()
 
-        await ws.send(json.dumps({"type": "Flush"}))
+        await ws.send("Done")
         if debug:
-            print("DEBUG: Sent Flush")
+            print("DEBUG: Sent Done")
         
         # Wait for server final (avoid indefinite waits)
         try:
@@ -235,7 +194,7 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Warmup via Moshi WebSocket streaming")
-    parser.add_argument("--server", type=str, default="localhost:8000/api/asr-streaming", help="host:port or ws://host:port or full URL")
+    parser.add_argument("--server", type=str, default="localhost:8000", help="host:port or ws://host:port or full URL")
     parser.add_argument("--secure", action="store_true")
     parser.add_argument("--file", type=str, default="mid.wav", help="Audio file. Absolute path or name in samples/")
     parser.add_argument("--rtf", type=float, default=1000.0, help="Real-time factor (1000=fast warmup, 1.0=realtime)")

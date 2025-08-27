@@ -7,7 +7,7 @@ Streams PCM16@24k from a file to simulate realtime voice and prints partials/fin
 from __future__ import annotations
 import argparse
 import asyncio
-import base64
+
 import contextlib
 import json
 import os
@@ -39,7 +39,7 @@ def find_sample_by_name(filename: str) -> str | None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="WebSocket Moshi client")
-    parser.add_argument("--server", default=os.getenv("MOSHI_SERVER", "localhost:8000/api/asr-streaming"),
+    parser.add_argument("--server", default=os.getenv("MOSHI_SERVER", "localhost:8000"),
                         help="host:port or ws://host:port or full URL")
     parser.add_argument("--secure", action="store_true", help="Use WSS (requires cert on server)")
     parser.add_argument("--file", type=str, default="mid.wav", help="Audio file from samples/")
@@ -48,16 +48,14 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 def _ws_url(server: str, secure: bool) -> str:
-    """Generate WebSocket URL for Moshi server with proper /api/asr-streaming path"""
+    """Generate WebSocket URL for Moshi server at root path"""
     if server.startswith("ws://") or server.startswith("wss://"):
         return server
     else:
         scheme = "wss" if secure else "ws"
-        # Handle host:port format - add path if missing
-        if "/" not in server:
-            server = f"{server}/api/asr-streaming"
-        elif not server.endswith("/api/asr-streaming"):
-            server = f"{server}/api/asr-streaming"
+        # Strip any existing paths - moshi server uses root path
+        if "/" in server:
+            server = server.split("/")[0]  # Keep only host:port
         return f"{scheme}://{server}"
 
 async def run(args: argparse.Namespace) -> None:
@@ -87,27 +85,21 @@ async def run(args: argparse.Namespace) -> None:
     final_text = ""
     last_text = ""
 
-    # API key header for Moshi server authentication
-    API_KEY = os.getenv("MOSHI_API_KEY", "public_token")
-    headers = [("kyutai-api-key", API_KEY)]
-    
+    # Moshi server doesn't need authentication headers
     ws_options = {
         "max_size": None,
         "compression": None,
         "ping_interval": 20,
         "ping_timeout": 20,
         "max_queue": 4,
-        "write_limit": 2**22,
-        "extra_headers": headers
+        "write_limit": 2**22
     }
 
     t0 = time.perf_counter()
     async with websockets.connect(url, **ws_options) as ws:
-        # Send handshake and wait for Ready
-        ready_event = asyncio.Event()
+        # No handshake needed - start streaming immediately
         done_event = asyncio.Event()
         final_seen = False
-        await ws.send(json.dumps({"type": "StartSTT"}))
         
         async def receiver():
             nonlocal final_text, final_recv_ts, last_text, final_seen
@@ -122,11 +114,7 @@ async def run(args: argparse.Namespace) -> None:
                         
                         now = time.perf_counter()
                         
-                        if msg_type == "Ready":
-                            # Server ready - unblock streaming
-                            ready_event.set()
-                            continue
-                        elif msg_type == "Step":
+                        if msg_type == "Step":
                             # Ignore server step messages
                             continue
                         elif msg_type == "Word":
@@ -178,35 +166,22 @@ async def run(args: argparse.Namespace) -> None:
 
         recv_task = asyncio.create_task(receiver())
 
-        # Wait for server Ready before streaming audio
-        try:
-            await asyncio.wait_for(ready_event.wait(), timeout=10.0)
-        except asyncio.TimeoutError:
-            print("Timeout waiting for server Ready signal")
-            return
+        # Start streaming immediately - no handshake needed
 
         if args.mode == "stream":
             for i in range(0, len(pcm), bytes_per_chunk):
                 chunk = pcm[i:i+bytes_per_chunk]
-                audio_frame = {
-                    "type": "Audio",
-                    "audio": base64.b64encode(chunk).decode('ascii')
-                }
-                await ws.send(json.dumps(audio_frame))
+                await ws.send(chunk)  # Send raw PCM bytes
                 last_chunk_sent_ts = time.perf_counter()
                 await asyncio.sleep(chunk_ms / 1000.0 / args.rtf)
         else:
             big = 48000  # ~2 sec of 24k audio per frame
             for i in range(0, len(pcm), big):
                 chunk = pcm[i:i+big]
-                audio_frame = {
-                    "type": "Audio",
-                    "audio": base64.b64encode(chunk).decode('ascii')
-                }
-                await ws.send(json.dumps(audio_frame))
+                await ws.send(chunk)  # Send raw PCM bytes
                 last_chunk_sent_ts = time.perf_counter()
 
-        await ws.send(json.dumps({"type": "Flush"}))
+        await ws.send("Done")
         
         # Wait for server final (avoid indefinite waits)
         try:
