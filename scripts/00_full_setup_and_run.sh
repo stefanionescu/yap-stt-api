@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Full setup and run script for Sherpa-ONNX with Zipformer INT8 model
+# Full setup and run script for Sherpa-ONNX with Zipformer bilingual model
 # This script orchestrates the complete setup process
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_FILE="/opt/sherpa-logs/setup.log"
 mkdir -p /opt/sherpa-logs
 
-echo "=== Sherpa-ONNX Zipformer INT8 Setup ===" | tee -a "$LOG_FILE"
+echo "=== Sherpa-ONNX Zipformer Bilingual Setup ===" | tee -a "$LOG_FILE"
 echo "Started at: $(date)" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
 
@@ -22,9 +22,9 @@ else
 fi
 echo "" | tee -a "$LOG_FILE"
 
-# Step 2: Download INT8 bilingual zh/en model
-echo "Step 2: Downloading INT8 bilingual zh/en model..." | tee -a "$LOG_FILE"
-if bash "$SCRIPT_DIR/02_get_model_zh_en_int8.sh" 2>&1 | tee -a "$LOG_FILE"; then
+# Step 2: Download bilingual zh/en model
+echo "Step 2: Downloading bilingual zh/en model..." | tee -a "$LOG_FILE"
+if bash "$SCRIPT_DIR/02_get_model_zh_en.sh" 2>&1 | tee -a "$LOG_FILE"; then
     echo "✓ Model download completed successfully" | tee -a "$LOG_FILE"
 else
     echo "✗ Model download failed" | tee -a "$LOG_FILE"
@@ -33,12 +33,12 @@ fi
 echo "" | tee -a "$LOG_FILE"
 
 # Step 3: Offline smoke test to verify everything works
-echo "Step 3: Running offline INT8 smoke test..." | tee -a "$LOG_FILE"
+echo "Step 3: Running offline smoke test..." | tee -a "$LOG_FILE"
 
 # Find a test audio file - prefer downloaded, fallback to local samples
 TEST_WAV=""
 POSSIBLE_WAVS=(
-    "/opt/sherpa-models/zh-en-zipformer-2023-02-20/test_wavs/0.wav"
+    "/opt/sherpa-models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20/test_wavs/0.wav"
     "$SCRIPT_DIR/../samples/short-noisy.wav"
     "$SCRIPT_DIR/../samples/mid.wav"
 )
@@ -56,10 +56,10 @@ done
 
 if [ -n "$TEST_WAV" ]; then
     if timeout 30 /opt/sherpa-onnx/build/bin/sherpa-onnx \
-      --tokens=/opt/sherpa-models/zh-en-zipformer-2023-02-20/tokens.txt \
-      --encoder=/opt/sherpa-models/zh-en-zipformer-2023-02-20/encoder-epoch-99-avg-1.int8.onnx \
-      --decoder=/opt/sherpa-models/zh-en-zipformer-2023-02-20/decoder-epoch-99-avg-1.onnx \
-      --joiner=/opt/sherpa-models/zh-en-zipformer-2023-02-20/joiner-epoch-99-avg-1.int8.onnx \
+      --tokens=/opt/sherpa-models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20/tokens.txt \
+      --encoder=/opt/sherpa-models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20/encoder-epoch-99-avg-1.onnx \
+      --decoder=/opt/sherpa-models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20/decoder-epoch-99-avg-1.onnx \
+      --joiner=/opt/sherpa-models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20/joiner-epoch-99-avg-1.onnx \
       "$TEST_WAV" >/dev/null 2>&1; then
         echo "✓ Offline smoke test completed successfully" | tee -a "$LOG_FILE"
     else
@@ -97,13 +97,13 @@ echo "=== Next Steps ===" | tee -a "$LOG_FILE"
 echo "Choose how to run the server:" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
 echo "Option 1 - Single worker (simple, port 8000):" | tee -a "$LOG_FILE"
-echo "  bash $SCRIPT_DIR/03_run_server_single_int8.sh" | tee -a "$LOG_FILE"
+echo "  bash $SCRIPT_DIR/03_run_server_single.sh" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
 echo "Option 2 - Multi-worker (RECOMMENDED for 100+ streams, ports 8001-8003):" | tee -a "$LOG_FILE"
-echo "  bash $SCRIPT_DIR/04_run_server_multi_int8.sh" | tee -a "$LOG_FILE"
+echo "  bash $SCRIPT_DIR/04_run_server_multi.sh" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
 echo "Option 3 - Multi-worker + NGINX gateway (BEST - single port 8000):" | tee -a "$LOG_FILE"
-echo "  bash $SCRIPT_DIR/04_run_server_multi_int8.sh" | tee -a "$LOG_FILE"
+echo "  bash $SCRIPT_DIR/04_run_server_multi.sh" | tee -a "$LOG_FILE"
 echo "  bash $SCRIPT_DIR/07_setup_nginx_gateway.sh" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
 echo "Option 4 - Run in tmux session:" | tee -a "$LOG_FILE"
@@ -137,7 +137,7 @@ case $REPLY in
     [Aa])
         echo "Starting multi-worker + NGINX gateway (best for production)..." | tee -a "$LOG_FILE"
         echo "Step 1: Starting 3 workers on ports 8001-8003..." | tee -a "$LOG_FILE"
-        bash "$SCRIPT_DIR/04_run_server_multi_int8.sh" 2>&1 | tee -a "$LOG_FILE"
+        bash "$SCRIPT_DIR/04_run_server_multi.sh" 2>&1 | tee -a "$LOG_FILE"
         
         echo "Step 2: Setting up NGINX gateway on port 8000..." | tee -a "$LOG_FILE"
         bash "$SCRIPT_DIR/07_setup_nginx_gateway.sh" 2>&1 | tee -a "$LOG_FILE"
@@ -152,7 +152,7 @@ case $REPLY in
     [Bb])
         echo "Starting multi-worker direct (no NGINX)..." | tee -a "$LOG_FILE"
         echo "Starting 3 workers on ports 8000-8002..." | tee -a "$LOG_FILE"
-        WORKERS=3 BASE_PORT=8000 bash "$SCRIPT_DIR/04_run_server_multi_int8.sh"
+        WORKERS=3 BASE_PORT=8000 bash "$SCRIPT_DIR/04_run_server_multi.sh"
         
         echo "" | tee -a "$LOG_FILE"
         echo "✅ Complete! Connect clients to ports 8000-8002" | tee -a "$LOG_FILE"

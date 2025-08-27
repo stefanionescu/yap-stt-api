@@ -8,7 +8,7 @@ User=root
 Environment=CUDA_DEVICE_MAX_CONNECTIONS=32
 Environment=WORKERS=3
 Environment=BASE_PORT=8001
-ExecStart=/bin/bash /opt/04_run_server_multi_int8.sh
+ExecStart=/bin/bash /opt/04_run_server_multi.sh
 Restart=always
 RestartSec=2
 LimitNOFILE=1048576

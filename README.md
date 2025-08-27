@@ -1,11 +1,11 @@
-# Sherpa-ONNX Streaming ASR with Zipformer INT8 (Bilingual Chinese + English)
+# Sherpa-ONNX Streaming ASR with Zipformer (Bilingual Chinese + English)
 
-Production-ready streaming WebSocket ASR server using **sherpa-onnx** with **INT8 quantized Zipformer** model for **bilingual Chinese + English** recognition. Optimized for high-concurrency deployments with **~100 concurrent streams** on a single L40S GPU.
+Production-ready streaming WebSocket ASR server using **sherpa-onnx** with **Zipformer** model for **bilingual Chinese + English** recognition. Uses full-precision models for maximum accuracy. Optimized for high-concurrency deployments with **~100 concurrent streams** on a single L40S GPU.
 
 ## ✨ Features
 
 - 🎯 **Bilingual ASR**: Chinese + English streaming recognition
-- ⚡ **INT8 Quantization**: Faster inference with INT8 encoder/joiner
+- ⚡ **High Accuracy**: Full-precision models for best transcription quality
 - 🌐 **WebSocket Streaming**: Real-time audio processing with micro-batching
 - 🔥 **High Concurrency**: ~100 concurrent streams on L40S/A100
 - 📦 **Multiple Deployment Options**: Single worker, multi-worker, or NGINX gateway
@@ -22,7 +22,7 @@ bash scripts/00_full_setup_and_run.sh
 
 This will:
 1. Build sherpa-onnx with GPU support
-2. Download INT8 bilingual model (~5GB)
+2. Download bilingual model (~5GB)
 3. Optimize OS for high concurrency
 4. Give you deployment options
 
@@ -32,7 +32,7 @@ This will:
 bash scripts/01_setup_sherpa_onnx.sh
 
 # 2. Download model
-bash scripts/02_get_model_zh_en_int8.sh
+bash scripts/02_get_model_zh_en.sh
 
 # 3. Optimize system
 bash scripts/06_sysctl_ulimit.sh
@@ -47,7 +47,7 @@ bash scripts/06_sysctl_ulimit.sh
 
 ```bash
 # Start 3 workers + NGINX gateway
-bash scripts/04_run_server_multi_int8.sh &
+bash scripts/04_run_server_multi.sh &
 bash scripts/07_setup_nginx_gateway.sh
 ```
 
@@ -63,7 +63,7 @@ bash scripts/07_setup_nginx_gateway.sh
 
 ```bash
 # Start 3 workers on ports 8000-8002
-WORKERS=3 BASE_PORT=8000 bash scripts/04_run_server_multi_int8.sh
+WORKERS=3 BASE_PORT=8000 bash scripts/04_run_server_multi.sh
 ```
 
 **Configuration:**
@@ -77,7 +77,7 @@ WORKERS=3 BASE_PORT=8000 bash scripts/04_run_server_multi_int8.sh
 
 ```bash
 # Start single worker
-bash scripts/03_run_server_single_int8.sh
+bash scripts/03_run_server_single.sh
 ```
 
 **Configuration:**
@@ -104,10 +104,10 @@ bash scripts/09_health_check.sh
 #### tmux Sessions (Survives SSH Disconnect)
 ```bash
 # Single worker in tmux
-SESSION=sherpa SCRIPT=03_run_server_single_int8.sh bash scripts/05_tmux.sh
+SESSION=sherpa SCRIPT=03_run_server_single.sh bash scripts/05_tmux.sh
 
 # Multi-worker in tmux
-SESSION=sherpa-multi SCRIPT=04_run_server_multi_int8.sh bash scripts/05_tmux.sh
+SESSION=sherpa-multi SCRIPT=04_run_server_multi.sh bash scripts/05_tmux.sh
 
 # Attach to session
 tmux attach -t sherpa
@@ -164,7 +164,7 @@ bash scripts/99_cleanup_services.sh
 2. **Expose Ports**: `8000,8001,8002`
 3. **Run Setup**:
    ```bash
-   WORKERS=3 BASE_PORT=8000 bash scripts/04_run_server_multi_int8.sh
+   WORKERS=3 BASE_PORT=8000 bash scripts/04_run_server_multi.sh
    ```
 4. **Client Load Balancing**: Round-robin ports `[8000,8001,8002]`
 
@@ -180,8 +180,8 @@ bash scripts/99_cleanup_services.sh
 
 ### Model Details
 - **Model**: Bilingual Chinese + English Streaming Zipformer
-- **Quantization**: INT8 encoder/joiner, FP32 decoder
-- **Size**: ~5GB download
+- **Precision**: Full-precision FP32 models for maximum accuracy
+- **Size**: ~5GB download (includes both FP32 and INT8 versions)
 - **Endpointing**: Optimized for 120-150ms finalization
 
 ### Performance Tuning
@@ -206,9 +206,9 @@ yap-stt-api/
 ├── scripts/
 │   ├── 00_full_setup_and_run.sh        # Main orchestrator
 │   ├── 01_setup_sherpa_onnx.sh         # Build sherpa-onnx
-│   ├── 02_get_model_zh_en_int8.sh      # Download model
-│   ├── 03_run_server_single_int8.sh    # Single worker
-│   ├── 04_run_server_multi_int8.sh     # Multi-worker
+│   ├── 02_get_model_zh_en.sh           # Download model
+│   ├── 03_run_server_single.sh         # Single worker
+│   ├── 04_run_server_multi.sh          # Multi-worker
 │   ├── 05_tmux.sh                      # tmux management
 │   ├── 06_sysctl_ulimit.sh             # OS optimization
 │   ├── 07_setup_nginx_gateway.sh       # NGINX gateway

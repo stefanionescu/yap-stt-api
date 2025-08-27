@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SRV=/opt/sherpa-onnx/build/bin/sherpa-onnx-online-websocket-server
-MOD=/opt/sherpa-models/zh-en-zipformer-2023-02-20
+MOD=/opt/sherpa-models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20
 LOG=/opt/sherpa-logs
 mkdir -p "$LOG"
 
@@ -13,9 +13,9 @@ exec "$SRV" \
   --num-work-threads=4 \
   --num-io-threads=2 \
   --tokens="$MOD/tokens.txt" \
-  --encoder="$MOD/encoder-epoch-99-avg-1.int8.onnx" \
+  --encoder="$MOD/encoder-epoch-99-avg-1.onnx" \
   --decoder="$MOD/decoder-epoch-99-avg-1.onnx" \
-  --joiner="$MOD/joiner-epoch-99-avg-1.int8.onnx" \
+  --joiner="$MOD/joiner-epoch-99-avg-1.onnx" \
   --decoding-method=greedy_search \
   --enable-endpoint=true \
   --rule1-min-trailing-silence=0.12 \

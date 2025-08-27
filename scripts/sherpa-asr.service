@@ -6,7 +6,7 @@ After=network-online.target
 Type=simple
 User=root
 Environment=CUDA_DEVICE_MAX_CONNECTIONS=32
-ExecStart=/bin/bash /opt/03_run_server_single_int8.sh
+ExecStart=/bin/bash /opt/03_run_server_single.sh
 Restart=always
 RestartSec=2
 LimitNOFILE=1048576

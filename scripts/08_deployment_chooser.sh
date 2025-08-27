@@ -57,7 +57,7 @@ case $choice in
         fi
         
         echo "Step 2: Starting multi-worker servers (ports 8001-8003)..."
-        bash "$(dirname "$0")/04_run_server_multi_int8.sh"
+        bash "$(dirname "$0")/04_run_server_multi.sh"
         
         echo "Step 3: Setting up NGINX gateway (port 8000)..."
         bash "$(dirname "$0")/07_setup_nginx_gateway.sh"
@@ -83,7 +83,7 @@ case $choice in
         fi
         
         echo "Step 2: Starting multi-worker servers (ports 8000-8002)..."
-        WORKERS=3 BASE_PORT=8000 bash "$(dirname "$0")/04_run_server_multi_int8.sh"
+        WORKERS=3 BASE_PORT=8000 bash "$(dirname "$0")/04_run_server_multi.sh"
         
         echo ""
         echo "✅ DEPLOYMENT COMPLETE!"
@@ -106,7 +106,7 @@ case $choice in
         fi
         
         echo "Step 2: Starting single worker server (port 8000)..."
-        bash "$(dirname "$0")/03_run_server_single_int8.sh"
+        bash "$(dirname "$0")/03_run_server_single.sh"
         
         echo ""
         echo "✅ DEPLOYMENT COMPLETE!"

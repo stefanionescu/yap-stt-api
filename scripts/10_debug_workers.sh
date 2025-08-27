@@ -19,7 +19,7 @@ echo ""
 
 echo "2. Checking Sherpa installation..."
 BIN="/opt/sherpa-onnx/build/bin/sherpa-onnx-online-websocket-server"
-MOD="/opt/sherpa-models/zh-en-zipformer-2023-02-20"
+MOD="/opt/sherpa-models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20"
 
 if [ -x "$BIN" ]; then
     echo "✅ Sherpa binary found: $BIN"
@@ -112,6 +112,6 @@ echo "• If connection refused: Wait 30-60 seconds for model loading"
 echo "• If persistent issues: Try single worker first (script 03)"
 echo ""
 echo "Commands to try:"
-echo "• Restart workers: bash 04_run_server_multi_int8.sh"
+echo "• Restart workers: bash 04_run_server_multi.sh"
 echo "• Clean restart: bash 99_cleanup_services.sh && bash 08_deployment_chooser.sh"
 echo "• Check live logs: tail -f $LOG_DIR/server_*.log"

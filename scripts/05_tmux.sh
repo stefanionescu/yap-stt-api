@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 SESSION=${SESSION:-sherpa}
-SCRIPT=${SCRIPT:-03_run_server_single_int8.sh}
+SCRIPT=${SCRIPT:-03_run_server_single.sh}
 LOG=/opt/sherpa-logs/current.log
 mkdir -p /opt/sherpa-logs
 
