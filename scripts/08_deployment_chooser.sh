@@ -57,12 +57,14 @@ case $choice in
         fi
         
         echo "Step 2: Starting multi-worker servers (ports 8001-8003)..."
-        bash "$(dirname "$0")/04_run_server_multi_int8.sh" &
-        
-        sleep 5  # Give workers time to start
+        bash "$(dirname "$0")/04_run_server_multi_int8.sh"
         
         echo "Step 3: Setting up NGINX gateway (port 8000)..."
         bash "$(dirname "$0")/07_setup_nginx_gateway.sh"
+        
+        echo ""
+        echo "Running health check..."
+        bash "$(dirname "$0")/09_health_check.sh"
         
         echo ""
         echo "✅ DEPLOYMENT COMPLETE!"

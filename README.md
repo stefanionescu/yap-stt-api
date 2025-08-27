@@ -214,6 +214,7 @@ yap-stt-api/
 │   ├── 07_setup_nginx_gateway.sh       # NGINX gateway
 │   ├── 08_deployment_chooser.sh        # Interactive chooser
 │   ├── 09_health_check.sh              # Health check & diagnostics
+│   ├── 10_debug_workers.sh             # Worker startup troubleshooting
 │   ├── 99_cleanup_services.sh          # Complete cleanup
 │   ├── sherpa-asr.service              # Single worker systemd
 │   └── sherpa-asr-multi.service        # Multi-worker systemd
@@ -230,11 +231,15 @@ yap-stt-api/
 - **systemd fails**: Fall back to tmux sessions
 - **High P99 latency**: Increase endpointing rules or reduce batch size
 - **Server not responding**: Run `09_health_check.sh` for diagnostics
+- **Workers fail to start**: Run `10_debug_workers.sh` for detailed troubleshooting
 
 ### Monitoring
 ```bash
 # Complete health check (processes, ports, connections, logs)
 bash scripts/09_health_check.sh
+
+# Debug worker startup issues (system resources, model files, detailed logs)
+bash scripts/10_debug_workers.sh
 
 # Check server logs
 tail -f /opt/sherpa-logs/server*.log

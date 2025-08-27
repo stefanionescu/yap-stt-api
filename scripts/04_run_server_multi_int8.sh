@@ -55,25 +55,74 @@ for i in $(seq 0 $((WORKERS-1))); do
   
   WORKER_PID=$!
   
-  # Wait a moment and verify the worker started successfully
-  sleep 3
-  if kill -0 $WORKER_PID 2>/dev/null && ss -tulpn | grep -q ":${PORT} "; then
-    echo "✅ Worker on port $PORT started successfully (PID $WORKER_PID)"
+  # Wait for worker to fully initialize (model loading takes time)
+  echo "   Waiting for model to load..."
+  sleep 8
+  
+  # Verify the worker is running and accepting connections
+  READY=false
+  if kill -0 $WORKER_PID 2>/dev/null; then
+    # Check if port is listening
+    if ss -tulpn | grep -q ":${PORT} "; then
+      # Test WebSocket connection readiness
+      if timeout 3 bash -c "echo > /dev/tcp/127.0.0.1/$PORT" 2>/dev/null; then
+        echo "✅ Worker on port $PORT started successfully (PID $WORKER_PID)"
+        READY=true
+      else
+        echo "⚠ Worker on port $PORT is binding but not ready for connections yet"
+      fi
+    else
+      echo "❌ Worker on port $PORT process running but port not listening"
+    fi
   else
-    echo "❌ Worker on port $PORT failed to start"
+    echo "❌ Worker on port $PORT process died"
+  fi
+  
+  if [ "$READY" = false ]; then
     echo "   Check logs: tail -20 $LOG/stdout_${PORT}.log"
     if [ -f "$LOG/server_${PORT}.log" ]; then
         echo "   Recent errors:"
-        tail -5 "$LOG/server_${PORT}.log" | grep -i error || echo "   No errors in server log"
+        tail -10 "$LOG/server_${PORT}.log" | grep -E "(error|Error|ERROR|failed|Failed|FAILED)" || echo "   No errors in server log"
     fi
+    echo "   Process may still be starting - check again in 30 seconds"
   fi
 done
 
 echo ""
-echo "=== Multi-worker server started ==="
+echo "=== Verifying all workers are ready ==="
+
+# Give any slower workers extra time to start
+echo "Giving slower workers additional time to initialize..."
+sleep 10
+
+# Final readiness check for all workers
+ALL_READY=true
+for i in $(seq 0 $((WORKERS-1))); do
+  PORT=$((BASE_PORT + i))
+  if timeout 3 bash -c "echo > /dev/tcp/127.0.0.1/$PORT" 2>/dev/null; then
+    echo "✅ Worker on port $PORT ready"
+  else
+    echo "❌ Worker on port $PORT not ready"
+    ALL_READY=false
+  fi
+done
+
+echo ""
+echo "=== Multi-worker server deployment status ==="
 echo "Workers: $WORKERS"
 echo "Ports: $BASE_PORT-$((BASE_PORT + WORKERS - 1))"
 echo "Logs: $LOG/"
+
+if [ "$ALL_READY" = true ]; then
+    echo "Status: ✅ All workers ready"
+else
+    echo "Status: ⚠ Some workers still starting"
+    echo ""
+    echo "💡 If workers are still starting:"
+    echo "   - Wait 30-60 seconds and run health check: bash 09_health_check.sh"
+    echo "   - Check logs: tail -f $LOG/server_*.log"
+fi
+
 echo ""
 echo "Next steps:"
 echo "1. Setup NGINX gateway: bash 07_setup_nginx_gateway.sh"
