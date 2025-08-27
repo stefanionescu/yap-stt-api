@@ -20,7 +20,7 @@ def _ws_url(server: str, secure: bool) -> str:
         scheme = "wss" if secure else "ws"
         return f"{scheme}://{server}"
 
-async def _run(server: str, pcm_bytes: bytes, chunk_ms: int, mode: str) -> dict:
+async def _run(server: str, pcm_bytes: bytes, chunk_ms: int, mode: str, debug: bool = False) -> dict:
     url = _ws_url(server, secure=False)
     bytes_per_ms = int(16000 * 2 / 1000)
     step = max(1, int(chunk_ms)) * bytes_per_ms
@@ -37,25 +37,45 @@ async def _run(server: str, pcm_bytes: bytes, chunk_ms: int, mode: str) -> dict:
             nonlocal final_text, final_recv_ts, last_text
             async for msg in ws:
                 if isinstance(msg, (bytes, bytearray)):
+                    if debug:
+                        print(f"DEBUG: Received binary message (length: {len(msg)})")
                     continue  # Skip binary messages
                 
-                # Handle end signals
-                if msg in ("Done!", ""):
+                if debug:
+                    print(f"DEBUG: Received message: {repr(msg)}")
+                
+                # Handle end signals (various formats Sherpa-ONNX might use)
+                if msg.lower().strip() in ("done", "done!", "", "end"):
+                    if debug:
+                        print("DEBUG: Received end signal")
                     final_recv_ts = time.perf_counter()
                     return
                 
-                # Try to parse as JSON first, fallback to plain text
+                # Extract text from message (try multiple JSON formats)
+                txt = ""
                 try:
                     j = json.loads(msg)
-                    txt = j.get("text", "")
+                    # Try different possible text fields
+                    txt = (j.get("text", "") or 
+                           j.get("result", {}).get("text", "") if isinstance(j.get("result"), dict) else "" or
+                           j.get("alternatives", [{}])[0].get("transcript", "") if j.get("alternatives") else "")
+                    
+                    if debug and j:
+                        print(f"DEBUG: Parsed JSON: {j}")
+                        print(f"DEBUG: Extracted text: '{txt}'")
+                        
                 except (json.JSONDecodeError, TypeError):
                     # Treat as plain text response
                     txt = msg.strip()
+                    if debug:
+                        print(f"DEBUG: Treating as plain text: '{txt}'")
                 
                 now = time.perf_counter()
                 if txt and txt != last_text:
                     partial_ts.append(now - t0)
                     last_text = txt
+                    if debug:
+                        print(f"DEBUG: New partial text: '{txt}'")
                 if txt:
                     final_text = txt
 
@@ -98,6 +118,7 @@ def main() -> int:
     parser.add_argument("--file", type=str, default="mid.wav", help="Filename in samples/ directory")
     parser.add_argument("--chunk-ms", type=int, default=100, help="Chunk size in ms for streaming")
     parser.add_argument("--mode", choices=["stream", "oneshot"], default="stream", help="Run streaming or one-shot ASR")
+    parser.add_argument("--debug", action="store_true", help="Print debug info including raw server messages")
     args = parser.parse_args()
 
     audio_path = Path(SAMPLES_DIR) / args.file
@@ -108,7 +129,7 @@ def main() -> int:
     pcm_bytes = file_to_pcm16_mono_16k(str(audio_path))
     duration = file_duration_seconds(str(audio_path))
 
-    res = asyncio.run(_run(args.server, pcm_bytes, args.chunk_ms, args.mode))
+    res = asyncio.run(_run(args.server, pcm_bytes, args.chunk_ms, args.mode, args.debug))
 
     print(f"Text: {res['text'][:50]}...")
     print(f"Audio duration: {duration:.4f}s")

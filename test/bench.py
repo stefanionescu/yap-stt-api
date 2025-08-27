@@ -124,15 +124,18 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, chunk_ms:
                 if isinstance(msg, (bytes, bytearray)):
                     continue  # Skip binary messages
                 
-                # Handle end signals
-                if msg in ("Done!", ""):
+                # Handle end signals (various formats Sherpa-ONNX might use)
+                if msg.lower().strip() in ("done", "done!", "", "end"):
                     final_recv_ts = time.perf_counter()
                     return
                 
-                # Try to parse as JSON first, fallback to plain text
+                # Extract text from message (try multiple JSON formats)
                 try:
                     j = json.loads(msg)
-                    txt = j.get("text", "")
+                    # Try different possible text fields
+                    txt = (j.get("text", "") or 
+                           j.get("result", {}).get("text", "") if isinstance(j.get("result"), dict) else "" or
+                           j.get("alternatives", [{}])[0].get("transcript", "") if j.get("alternatives") else "")
                 except (json.JSONDecodeError, TypeError):
                     # Treat as plain text response
                     txt = msg.strip()
