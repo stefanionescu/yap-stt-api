@@ -6,7 +6,8 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
 apt-get install -y --no-install-recommends \
   build-essential git curl pkg-config libssl-dev ca-certificates \
-  python3 python3-venv python3-pip ffmpeg tmux jq
+  python3 python3-venv python3-pip ffmpeg tmux jq \
+  cmake libopus-dev
 
 # Rust toolchain
 if ! command -v cargo >/dev/null 2>&1; then
@@ -40,4 +41,9 @@ EOF'
 ulimit -n 1048576 || true
 
 mkdir -p "${MOSHI_LOG_DIR}"
+
+# Sanity printouts
+echo "[00] cmake: $(cmake --version | head -n1)"
+echo "[00] pkg-config: $(pkg-config --version)"
+echo "[00] libopus: $(pkg-config --modversion opus || echo 'not found (unexpected)')"
 echo "[00] Prereqs installed."
