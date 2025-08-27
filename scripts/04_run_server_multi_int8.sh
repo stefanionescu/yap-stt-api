@@ -13,8 +13,13 @@ if command -v nvidia-cuda-mps-control >/dev/null 2>&1; then
   nvidia-cuda-mps-control -d || true
 fi
 
+echo "Starting $WORKERS workers on ports $BASE_PORT-$((BASE_PORT + WORKERS - 1))"
+
 for i in $(seq 0 $((WORKERS-1))); do
   PORT=$((BASE_PORT + i))
+  
+  # Enhanced environment for better GPU scheduling
+  CUDA_DEVICE_MAX_CONNECTIONS=32 \
   nohup "$BIN" \
     --port="$PORT" \
     --num-work-threads=4 \
@@ -32,5 +37,14 @@ for i in $(seq 0 $((WORKERS-1))); do
     --loop-interval-ms=10 \
     --log-file="$LOG/server_${PORT}.log" \
     >"$LOG/stdout_${PORT}.log" 2>&1 &
+  
   echo "Started sherpa worker on port ${PORT} (PID $!)"
+  sleep 1  # Brief delay between worker starts
 done
+
+echo ""
+echo "=== Multi-worker server started ==="
+echo "Workers: $WORKERS"
+echo "Ports: $BASE_PORT-$((BASE_PORT + WORKERS - 1))"
+echo "Logs: $LOG/"
+echo "Round-robin clients across these ports for best performance"
