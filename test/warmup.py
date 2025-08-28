@@ -96,8 +96,7 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
                                 if ttfw is None:
                                     ttfw = now - t0  # strict TTFW on first word
                                 words.append(w)  # accumulate words
-                                # Ensure proper spacing between words
-                                final_text = " ".join(words).strip()
+                                final_text = " ".join(words).strip()  # ALWAYS assemble running text
                                 if final_text != last_text:  # treat each new word as a partial
                                     partial_ts.append(now - t0)
                                     last_text = final_text
@@ -120,7 +119,9 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
                             # Ignore server step messages
                             continue
                         elif kind == "EndWord":
-                            # Word end event, ignore for metrics
+                            # Ensure assembled text is captured even if no Partial/Text
+                            if not final_text and words:
+                                final_text = " ".join(words).strip()
                             continue
                         else:
                             # Unknown message type, treat as potential text
@@ -151,13 +152,8 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
                 if not done_event.is_set():
                     if words or final_text:
                         final_recv_ts = time.perf_counter()
-                        # Always use the assembled words as final text (may be more complete)
-                        if words:
-                            assembled = " ".join(words).strip()
-                            # Add basic sentence punctuation if missing
-                            if assembled and not assembled[-1] in '.!?':
-                                assembled += "."
-                            final_text = assembled
+                        if not final_text and words:
+                            final_text = " ".join(words).strip()
                         done_event.set()
                         if debug:
                             print(f"DEBUG: Treating close as final, text: '{final_text}'")
@@ -230,15 +226,18 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
             else:
                 # set final_recv_ts for metrics even on timeout
                 final_recv_ts = time.perf_counter()
-                # Always use the assembled words as final text (may be more complete)
-                if words:
-                    assembled = " ".join(words).strip()
-                    # Add basic sentence punctuation if missing
-                    if assembled and not assembled[-1] in '.!?':
-                        assembled += "."
-                    final_text = assembled
+                if not final_text and words:
+                    final_text = " ".join(words).strip()
                 if debug:
                     print(f"DEBUG: Accepting timeout with text: '{final_text}'")
+            pass
+        
+        # brief drain to capture last in-flight Word frames
+        try:
+            if debug:
+                print("DEBUG: Draining for 200ms to catch trailing words")
+            await asyncio.sleep(0.2)
+        except Exception:
             pass
         
         # Proactively close; then await receiver task

@@ -135,8 +135,7 @@ async def run(args: argparse.Namespace) -> None:
                                 if ttfw is None:
                                     ttfw = now - t0  # strict TTFW on first word
                                 words.append(w)  # accumulate words
-                                # Ensure proper spacing between words
-                                final_text = " ".join(words).strip()
+                                final_text = " ".join(words).strip()  # assemble running text
                                 if final_text != last_text:  # treat each new word as a partial
                                     partial_ts.append(now - t0)
                                     last_text = final_text
@@ -157,7 +156,9 @@ async def run(args: argparse.Namespace) -> None:
                             # Ignore server step messages
                             continue
                         elif kind == "EndWord":
-                            # Word end event, ignore for display
+                            # Ensure assembled text is captured even if no Partial/Text
+                            if not final_text and words:
+                                final_text = " ".join(words).strip()
                             continue
                     else:
                         # Skip text messages
@@ -170,13 +171,8 @@ async def run(args: argparse.Namespace) -> None:
                 if not done_event.is_set():
                     if words or final_text:
                         final_recv_ts = time.perf_counter()
-                        # Always use the assembled words as final text (may be more complete)
-                        if words:
-                            assembled = " ".join(words).strip()
-                            # Add basic sentence punctuation if missing
-                            if assembled and not assembled[-1] in '.!?':
-                                assembled += "."
-                            final_text = assembled
+                        if not final_text and words:
+                            final_text = " ".join(words).strip()
                         done_event.set()
                 pass
 
@@ -230,14 +226,15 @@ async def run(args: argparse.Namespace) -> None:
             else:
                 # set final_recv_ts for metrics even on timeout
                 final_recv_ts = time.perf_counter()
-                # Always use the assembled words as final text (may be more complete)
-                if words:
-                    assembled = " ".join(words).strip()
-                    # Add basic sentence punctuation if missing
-                    if assembled and not assembled[-1] in '.!?':
-                        assembled += "."
-                    final_text = assembled
+                if not final_text and words:
+                    final_text = " ".join(words).strip()
         
+        # brief drain to capture last in-flight Word frames
+        try:
+            await asyncio.sleep(0.2)
+        except Exception:
+            pass
+
         # Proactively close; then await receiver task
         with contextlib.suppress(websockets.exceptions.ConnectionClosed, 
                                 websockets.exceptions.ConnectionClosedError, 

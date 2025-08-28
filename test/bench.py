@@ -179,8 +179,7 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
                                 if ttfw_word is None:
                                     ttfw_word = now - t0
                                 words.append(w)  # accumulate words
-                                # Ensure proper spacing between words
-                                final_text = " ".join(words).strip()
+                                final_text = " ".join(words).strip()  # assemble running text
                                 if final_text != last_text:  # treat each new word as a partial
                                     partial_ts.append(now - t0)
                                     last_text = final_text
@@ -199,7 +198,9 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
                             # Ignore server step messages
                             continue
                         elif kind == "EndWord":
-                            # Word end event, ignore for metrics
+                            # Ensure assembled text is captured even if no Partial/Text
+                            if not final_text and words:
+                                final_text = " ".join(words).strip()
                             continue
                     else:
                         # Skip text messages
@@ -212,13 +213,8 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
                 if not done_event.is_set():
                     if words or final_text:
                         final_recv_ts = time.perf_counter()
-                        # Always use the assembled words as final text (may be more complete)
-                        if words:
-                            assembled = " ".join(words).strip()
-                            # Add basic sentence punctuation if missing
-                            if assembled and not assembled[-1] in '.!?':
-                                assembled += "."
-                            final_text = assembled
+                        if not final_text and words:
+                            final_text = " ".join(words).strip()
                         done_event.set()
                 pass
                 
@@ -277,15 +273,16 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
             else:
                 # set final_recv_ts for metrics even on timeout
                 final_recv_ts = time.perf_counter()
-                # Always use the assembled words as final text (may be more complete)
-                if words:
-                    assembled = " ".join(words).strip()
-                    # Add basic sentence punctuation if missing
-                    if assembled and not assembled[-1] in '.!?':
-                        assembled += "."
-                    final_text = assembled
+                if not final_text and words:
+                    final_text = " ".join(words).strip()
             pass
         
+        # brief drain to capture last in-flight Word frames
+        try:
+            await asyncio.sleep(0.2)
+        except Exception:
+            pass
+
         # Proactively close; then await receiver task
         with contextlib.suppress(websockets.exceptions.ConnectionClosed, 
                                 websockets.exceptions.ConnectionClosedError, 
