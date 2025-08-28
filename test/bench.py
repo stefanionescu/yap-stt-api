@@ -82,6 +82,13 @@ def summarize(title: str, results: List[Dict[str, float]]) -> None:
     fin = [r.get("finalize_ms", 0.0) for r in results if r.get("finalize_ms", 0.0) > 0]
     gaps = [r.get("avg_partial_gap_ms", 0.0) for r in results if r.get("avg_partial_gap_ms", 0.0) > 0]
 
+    # New honest metrics
+    deltas = [r["delta_to_audio_ms"] for r in results if "delta_to_audio_ms" in r]
+    sendd = [r["send_duration_s"] for r in results if "send_duration_s" in r]
+    postf = [r["post_send_final_s"] for r in results if "post_send_final_s" in r]
+    f2f = [r["flush_to_final_ms"] for r in results if "flush_to_final_ms" in r and r["flush_to_final_ms"] > 0]
+    dtail = [r["decode_tail_ms"] for r in results if "decode_tail_ms" in r and r["decode_tail_ms"] > 0]
+
     print(f"\n== {title} ==")
     print(f"n={len(results)}")
     print(f"Wall s      | avg={stats.mean(wall):.4f}  p50={stats.median(wall):.4f}  p95={p(wall,0.95):.4f}")
@@ -95,10 +102,14 @@ def summarize(title: str, results: List[Dict[str, float]]) -> None:
         print(f"RTF(meas)   | avg={stats.mean(rtf_measured):.4f}  p50={stats.median(rtf_measured):.4f}  p95={p(rtf_measured,0.95):.4f}")
     print(f"xRT         | avg={stats.mean(xrt):.4f}")
     print(f"Throughput  | avg={stats.mean(throughput):.2f} min/min")
-    if fin:
-        print(f"Finalize ms | avg={stats.mean(fin):.1f}  p50={p(fin,0.50):.1f}  p95={p(fin,0.95):.1f}")
-    if gaps:
-        print(f"Partial gap | avg={stats.mean(gaps):.1f}  p50={p(gaps,0.50):.1f}  p95={p(gaps,0.95):.1f}")
+    
+    # New honest metrics display
+    if deltas: print(f"Δ(audio) ms | avg={stats.mean(deltas):.1f}  p50={p(deltas,0.50):.1f}  p95={p(deltas,0.95):.1f}")
+    if sendd:  print(f"Send dur s  | avg={stats.mean(sendd):.3f}  p50={stats.median(sendd):.3f}  p95={p(sendd,0.95):.3f}")
+    if postf:  print(f"Post-send→Final s | avg={stats.mean(postf):.3f}  p50={stats.median(postf):.3f}  p95={p(postf,0.95):.3f}")
+    if f2f:    print(f"Flush→Final ms    | avg={stats.mean(f2f):.1f}  p50={p(f2f,0.50):.1f}  p95={p(f2f,0.95):.1f}")
+    if dtail:  print(f"Decode tail ms    | avg={stats.mean(dtail):.1f}  p50={p(dtail,0.50):.1f}  p95={p(dtail,0.95):.1f}")
+    if gaps:   print(f"Partial gap ms    | avg={stats.mean(gaps):.1f}  p50={p(gaps,0.50):.1f}  p95={p(gaps,0.95):.1f}")
 
 
 def _ws_url(server: str, secure: bool) -> str:
@@ -122,6 +133,7 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
     ttfw_word = None
     ttfw_text = None
     partial_ts: List[float] = []
+    last_partial_ts = 0.0  # timestamp of last partial/word received
     last_chunk_sent_ts = 0.0
     last_signal_ts = 0.0
     final_recv_ts = 0.0
@@ -177,6 +189,7 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
                                     ttfw_text = now - t0
                                 if txt != last_text:
                                     partial_ts.append(now - t0)
+                                    last_partial_ts = now  # track last partial timestamp
                                     last_text = txt
                                 final_text = txt  # prefer Partial/Text over Word assembly
                                 # sync words array so later Words don't go backwards
@@ -191,6 +204,7 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
                                 final_text = " ".join(words).strip()  # assemble running text
                                 if final_text != last_text:  # treat each new word as a partial
                                     partial_ts.append(now - t0)
+                                    last_partial_ts = now  # track last partial timestamp
                                     last_text = final_text
                         elif kind in ("Marker", "Final"):
                             # End-of-utterance
@@ -322,6 +336,12 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
     else:
         avg_gap_ms = 0.0
 
+    # New derived metrics (honest taxonomy)
+    send_duration_s = (last_chunk_sent_ts - t0) if last_chunk_sent_ts else 0.0
+    post_send_final_s = (final_recv_ts - last_chunk_sent_ts) if (final_recv_ts and last_chunk_sent_ts) else 0.0
+    delta_to_audio_s = wall_to_final - file_duration_s
+    decode_tail_s = (final_recv_ts - last_partial_ts) if (final_recv_ts and last_partial_ts) else None
+
     metrics.update({
         "partials": float(len(partial_ts)),
         "avg_partial_gap_ms": float(avg_gap_ms),
@@ -329,6 +349,12 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
         "finalize_ms": float(((final_recv_ts - last_signal_ts) * 1000.0) if (final_recv_ts and last_signal_ts) else 0.0),
         "mode": mode,
         "rtf_target": float(rtf),
+        # New honest metrics
+        "send_duration_s": float(send_duration_s),
+        "post_send_final_s": float(post_send_final_s),
+        "delta_to_audio_ms": float(delta_to_audio_s * 1000.0),
+        "flush_to_final_ms": float(((final_recv_ts - last_signal_ts) * 1000.0) if (final_recv_ts and last_signal_ts) else 0.0),
+        "decode_tail_ms": float(decode_tail_s * 1000.0) if decode_tail_s is not None else 0.0,
     })
     return metrics
 

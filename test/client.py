@@ -83,6 +83,7 @@ async def run(args: argparse.Namespace) -> None:
     file_duration_s = orig_samples / 24000.0
 
     partial_ts: list[float] = []
+    last_partial_ts = 0.0  # timestamp of last partial/word received
     last_chunk_sent_ts = 0.0
     last_signal_ts = 0.0
     final_recv_ts = 0.0
@@ -130,6 +131,7 @@ async def run(args: argparse.Namespace) -> None:
                                     ttfw = now - t0
                                 if txt != last_text:
                                     partial_ts.append(now - t0)
+                                    last_partial_ts = now  # track last partial timestamp
                                     print(f"PART: {txt}")
                                     last_text = txt
                                 final_text = txt  # prefer Partial/Text over Word assembly
@@ -144,6 +146,7 @@ async def run(args: argparse.Namespace) -> None:
                                 final_text = " ".join(words).strip()  # assemble running text
                                 if final_text != last_text:  # treat each new word as a partial
                                     partial_ts.append(now - t0)
+                                    last_partial_ts = now  # track last partial timestamp
                                     last_text = final_text
                                 # print occasional words, not every single one
                                 if len(words) % 5 == 1 or len(words) <= 3:
@@ -279,9 +282,17 @@ async def run(args: argparse.Namespace) -> None:
     else:
         avg_gap_ms = 0.0
     
+    # New derived metrics (honest taxonomy)
+    send_duration_s = (last_chunk_sent_ts - t0) if last_chunk_sent_ts else 0.0
+    post_send_final_s = (final_recv_ts - last_chunk_sent_ts) if (final_recv_ts and last_chunk_sent_ts) else 0.0
+    delta_to_audio_ms = (wall_to_final - file_duration_s) * 1000.0
+    decode_tail_ms = ((final_recv_ts - last_partial_ts) * 1000.0) if (final_recv_ts and last_partial_ts) else 0.0
+    
     ttfw_ms = (ttfw * 1000.0) if ttfw is not None else 0.0
     print(f"Transcription time (to Final): {wall_to_final:.3f}s  RTF(measured): {rtf_measured:.4f}  (target={args.rtf})")
-    print(f"TTFW: {ttfw_ms:.1f}ms  Partials: {len(partial_ts)}  Avg partial gap: {avg_gap_ms:.1f} ms  Finalize: {finalize_ms:.1f} ms")
+    print(f"TTFW: {ttfw_ms:.1f}ms  Partials: {len(partial_ts)}  Avg partial gap: {avg_gap_ms:.1f} ms")
+    print(f"Δ(audio): {delta_to_audio_ms:.1f}ms  Send dur: {send_duration_s:.3f}s  Post-send→Final: {post_send_final_s:.3f}s")
+    print(f"Flush→Final: {finalize_ms:.1f}ms  Decode tail: {decode_tail_ms:.1f}ms")
 
     # metrics out
     out_dir = Path("test/results")
@@ -299,6 +310,12 @@ async def run(args: argparse.Namespace) -> None:
             "finalize_ms": finalize_ms,
             "file": os.path.basename(file_path),
             "server": args.server,
+            # New honest metrics
+            "send_duration_s": send_duration_s,
+            "post_send_final_s": post_send_final_s,
+            "delta_to_audio_ms": delta_to_audio_ms,
+            "flush_to_final_ms": finalize_ms,
+            "decode_tail_ms": decode_tail_ms,
         }, ensure_ascii=False) + "\n")
 
 def main() -> None:

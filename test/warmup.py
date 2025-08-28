@@ -37,6 +37,7 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
     file_duration_s = orig_samples / 24000.0
 
     partial_ts = []
+    last_partial_ts = 0.0  # timestamp of last partial/word received
     last_chunk_sent_ts = 0.0
     last_signal_ts = 0.0
     final_recv_ts = 0.0
@@ -90,6 +91,7 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
                                     ttfw = now - t0
                                 if txt != last_text:
                                     partial_ts.append(now - t0)
+                                    last_partial_ts = now  # track last partial timestamp
                                     last_text = txt
                                     if debug:
                                         print(f"DEBUG: New partial text: '{txt}'")
@@ -105,6 +107,7 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
                                 final_text = " ".join(words).strip()  # ALWAYS assemble running text
                                 if final_text != last_text:  # treat each new word as a partial
                                     partial_ts.append(now - t0)
+                                    last_partial_ts = now  # track last partial timestamp
                                     last_text = final_text
                                 if debug:
                                     print(f"DEBUG: Word: {w!r}, assembled: {final_text!r}")
@@ -135,6 +138,7 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
                                     ttfw = now - t0
                                 if txt != last_text:
                                     partial_ts.append(now - t0)
+                                    last_partial_ts = now  # track last partial timestamp
                                     last_text = txt
                                     if debug:
                                         print(f"DEBUG: Unknown message type '{kind}' with text: '{txt}'")
@@ -270,6 +274,12 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
     # Add wall_to_final (up to Final). No default tail; no forced pad in timing.
     wall_to_final = (final_recv_ts - t0) if final_recv_ts else elapsed_s
 
+    # New derived metrics (honest taxonomy)
+    send_duration_s = (last_chunk_sent_ts - t0) if last_chunk_sent_ts else 0.0
+    post_send_final_s = (final_recv_ts - last_chunk_sent_ts) if (final_recv_ts and last_chunk_sent_ts) else 0.0
+    delta_to_audio_s = wall_to_final - file_duration_s
+    decode_tail_s = (final_recv_ts - last_partial_ts) if (final_recv_ts and last_partial_ts) else None
+
     return {
         "text": final_text,
         "elapsed_s": elapsed_s,              # includes close/cleanup
@@ -282,6 +292,12 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
         "mode": mode,
         "rtf_target": rtf,                   # configured throttle
         "rtf_measured": (wall_to_final / file_duration_s) if file_duration_s > 0 else None,
+        # New honest metrics
+        "send_duration_s": send_duration_s,
+        "post_send_final_s": post_send_final_s,
+        "delta_to_audio_ms": delta_to_audio_s * 1000.0,
+        "flush_to_final_ms": finalize_ms,
+        "decode_tail_ms": (decode_tail_s * 1000.0) if decode_tail_s is not None else 0.0,
     }
 
 def main() -> int:
@@ -320,8 +336,10 @@ def main() -> int:
         print(f"RTF(measured): {rtf:.4f}  xRT: {xrt:.2f}x  (target={res.get('rtf_target')})")
     ttfw_ms = (res.get('ttfw_s', 0) * 1000.0) if res.get('ttfw_s') is not None else 0.0
     print(f"TTFW: {ttfw_ms:.1f}ms")
+    print(f"Δ(audio): {res.get('delta_to_audio_ms', 0.0):.1f}ms  Send dur: {res.get('send_duration_s', 0.0):.3f}s  Post-send→Final: {res.get('post_send_final_s', 0.0):.3f}s")
     if args.mode == "stream":
-        print(f"Partials: {res.get('partials', 0)}  Avg partial gap: {res.get('avg_partial_gap_ms', 0.0):.1f} ms  Finalize: {res.get('finalize_ms', 0.0):.1f} ms")
+        print(f"Partials: {res.get('partials', 0)}  Avg partial gap: {res.get('avg_partial_gap_ms', 0.0):.1f} ms")
+        print(f"Flush→Final: {res.get('finalize_ms', 0.0):.1f}ms  Decode tail: {res.get('decode_tail_ms', 0.0):.1f}ms")
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     with open(RESULTS_FILE, "w", encoding="utf-8") as out:
