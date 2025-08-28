@@ -123,6 +123,7 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
     final_recv_ts = 0.0
     last_text = ""
     final_text = ""
+    words = []  # fallback transcript from Word events
     ready_event = asyncio.Event()
     done_event = asyncio.Event()
 
@@ -147,7 +148,7 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
         
         # receiver: Handle Moshi MessagePack message types
         async def receiver():
-            nonlocal ttfw_word, ttfw_text, final_recv_ts, final_text, last_text
+            nonlocal ttfw_word, ttfw_text, final_recv_ts, final_text, last_text, words
             try:
                 async for raw in ws:
                     # moshi-server only sends binary frames
@@ -159,12 +160,8 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
                         
                         if kind == "Ready":
                             ready_event.set()
-                        elif kind == "Word":
-                            # First word for strict TTFW
-                            if ttfw_word is None:
-                                ttfw_word = now - t0
                         elif kind in ("Partial", "Text"):
-                            # Running transcript
+                            # Running transcript - prefer over Word assembly
                             txt = (data.get("text") or "").strip()
                             if txt:
                                 if ttfw_text is None:
@@ -172,7 +169,19 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
                                 if txt != last_text:
                                     partial_ts.append(now - t0)
                                     last_text = txt
-                                final_text = txt
+                                final_text = txt  # prefer Partial/Text over Word assembly
+                        elif kind == "Word":
+                            word_text = (data.get("text") or data.get("word") or "").strip()
+                            if word_text:
+                                # First word for strict TTFW
+                                if ttfw_word is None:
+                                    ttfw_word = now - t0
+                                words.append(word_text)
+                                # treat each new word as a "partial" for gap metrics
+                                partial_ts.append(now - t0)
+                                # only update final_text from words if we haven't seen Partial/Text
+                                if not final_text:
+                                    final_text = " ".join(words)
                         elif kind in ("Marker", "Final"):
                             # End-of-utterance
                             txt = (data.get("text") or "").strip()
@@ -197,7 +206,13 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
                 # graceful close — okay
                 pass
             except websockets.exceptions.ConnectionClosedError as e:
-                # server closed without a close frame
+                # server closed without a close frame — treat as final if we have content
+                if not done_event.is_set():
+                    if words or final_text:
+                        final_recv_ts = time.perf_counter()
+                        if not final_text:
+                            final_text = " ".join(words)
+                        done_event.set()
                 pass
                 
             # socket closed
@@ -206,8 +221,11 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
 
         recv_task = asyncio.create_task(receiver())
 
-        # wait for Ready
-        await asyncio.wait_for(ready_event.wait(), timeout=10.0)
+        # Optional grace period for Ready (don't block if server doesn't send it)
+        try:
+            await asyncio.wait_for(ready_event.wait(), timeout=0.2)
+        except asyncio.TimeoutError:
+            pass  # proceed to send anyway
         
         # Convert PCM16 bytes to float32 normalized [-1,1]
         pcm_int16 = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
@@ -241,10 +259,19 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
         # flush + wait for final
         await ws.send(msgpack.packb({"type": "Flush"}, use_bin_type=True))
         
-        # Wait for server final (avoid indefinite waits)
+        # Wait for server final with dynamic timeout based on audio duration
+        timeout_s = max(10.0, audio_seconds / rtf + 3.0)
         try:
-            await asyncio.wait_for(done_event.wait(), timeout=10.0)
+            await asyncio.wait_for(done_event.wait(), timeout=timeout_s)
         except asyncio.TimeoutError:
+            # if we have text, accept it; otherwise it's a real timeout
+            if not (words or final_text):
+                pass  # real timeout, will be logged as error
+            else:
+                # set final_recv_ts for metrics even on timeout
+                final_recv_ts = time.perf_counter()
+                if not final_text:
+                    final_text = " ".join(words)
             pass
         
         # Proactively close; then await receiver task

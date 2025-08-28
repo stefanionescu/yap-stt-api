@@ -84,6 +84,7 @@ async def run(args: argparse.Namespace) -> None:
     final_recv_ts = 0.0
     final_text = ""
     last_text = ""
+    words: list[str] = []  # fallback transcript from Word events
 
     # Moshi server authentication
     API_KEY = os.getenv("MOSHI_API_KEY", "public_token")
@@ -104,7 +105,7 @@ async def run(args: argparse.Namespace) -> None:
     async with websockets.connect(url, **ws_options) as ws:
         
         async def receiver():
-            nonlocal final_text, final_recv_ts, last_text, ttfw
+            nonlocal final_text, final_recv_ts, last_text, ttfw, words
             try:
                 async for raw in ws:
                     # moshi-server only sends binary frames
@@ -125,13 +126,21 @@ async def run(args: argparse.Namespace) -> None:
                                     partial_ts.append(now - t0)
                                     print(f"PART: {txt}")
                                     last_text = txt
-                                final_text = txt
+                                final_text = txt  # prefer Partial/Text over Word assembly
                         elif kind == "Word":
-                            if ttfw is None:
-                                ttfw = now - t0  # strict-ttfw on first word
-                            word = data.get("word", "")
-                            if word:
-                                print(f"WORD: {word}")
+                            word_text = (data.get("text") or data.get("word") or "").strip()
+                            if word_text:
+                                if ttfw is None:
+                                    ttfw = now - t0  # strict-ttfw on first word
+                                words.append(word_text)
+                                # treat each new word as a "partial" for gap metrics
+                                partial_ts.append(now - t0)
+                                # only update final_text from words if we haven't seen Partial/Text
+                                if not final_text:
+                                    final_text = " ".join(words)
+                                # print occasional words, not every single one
+                                if len(words) % 5 == 1 or len(words) <= 3:
+                                    print(f"WORD: {word_text}")
                         elif kind in ("Final", "Marker"):
                             txt = (data.get("text") or "").strip()
                             if txt:
@@ -155,13 +164,22 @@ async def run(args: argparse.Namespace) -> None:
                 # graceful close — okay
                 pass
             except websockets.exceptions.ConnectionClosedError as e:
-                # server closed without a close frame
+                # server closed without a close frame — treat as final if we have content
+                if not done_event.is_set():
+                    if words or final_text:
+                        final_recv_ts = time.perf_counter()
+                        if not final_text:
+                            final_text = " ".join(words)
+                        done_event.set()
                 pass
 
         recv_task = asyncio.create_task(receiver())
 
-        # wait for Ready
-        await asyncio.wait_for(ready_event.wait(), timeout=10.0)
+        # Optional grace period for Ready (don't block if server doesn't send it)
+        try:
+            await asyncio.wait_for(ready_event.wait(), timeout=0.2)
+        except asyncio.TimeoutError:
+            pass  # proceed to send anyway
         
         # Convert PCM16 bytes to float32 normalized [-1,1]
         pcm_int16 = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
@@ -193,11 +211,20 @@ async def run(args: argparse.Namespace) -> None:
         # flush + wait for final
         await ws.send(msgpack.packb({"type": "Flush"}, use_bin_type=True))
         
-        # Wait for server final (avoid indefinite waits)
+        # Wait for server final with dynamic timeout based on audio duration
+        audio_duration_s = len(pcm_int16) / 24000.0
+        timeout_s = max(10.0, audio_duration_s / args.rtf + 3.0)
         try:
-            await asyncio.wait_for(done_event.wait(), timeout=10.0)
+            await asyncio.wait_for(done_event.wait(), timeout=timeout_s)
         except asyncio.TimeoutError:
-            pass
+            # if we have text, accept it; otherwise it's a real timeout
+            if not (words or final_text):
+                print("Warning: Timeout waiting for final response and no text received")
+            else:
+                # set final_recv_ts for metrics even on timeout
+                final_recv_ts = time.perf_counter()
+                if not final_text:
+                    final_text = " ".join(words)
         
         # Proactively close; then await receiver task
         with contextlib.suppress(websockets.exceptions.ConnectionClosed, 

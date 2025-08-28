@@ -38,6 +38,7 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
     final_recv_ts = 0.0
     final_text = ""
     last_text = ""
+    words = []  # fallback transcript from Word events
     ready_event = asyncio.Event()
     done_event = asyncio.Event()
     ttfw = None
@@ -58,7 +59,7 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
     async with websockets.connect(url, **ws_options) as ws:
 
         async def receiver():
-            nonlocal final_text, final_recv_ts, last_text, ttfw
+            nonlocal final_text, final_recv_ts, last_text, ttfw, words
             try:
                 async for raw in ws:
                     # moshi-server only sends binary frames
@@ -75,14 +76,8 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
                         
                         if kind == "Ready":
                             ready_event.set()
-                        elif kind == "Word":
-                            if ttfw is None:
-                                ttfw = now - t0  # strict-ttfw on first word
-                            if debug:
-                                word = data.get("word", "")
-                                print(f"DEBUG: Word: {word}")
                         elif kind in ("Partial", "Text"):
-                            # Running transcript
+                            # Running transcript - prefer over Word assembly
                             txt = (data.get("text") or "").strip()
                             if txt:
                                 if ttfw is None:
@@ -92,7 +87,20 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
                                     last_text = txt
                                     if debug:
                                         print(f"DEBUG: New partial text: '{txt}'")
-                                final_text = txt
+                                final_text = txt  # prefer Partial/Text over Word assembly
+                        elif kind == "Word":
+                            word_text = (data.get("text") or data.get("word") or "").strip()
+                            if word_text:
+                                if ttfw is None:
+                                    ttfw = now - t0  # strict-ttfw on first word
+                                words.append(word_text)
+                                # treat each new word as a "partial" for gap metrics
+                                partial_ts.append(now - t0)
+                                # only update final_text from words if we haven't seen Partial/Text
+                                if not final_text:
+                                    final_text = " ".join(words)
+                                if debug:
+                                    print(f"DEBUG: Word: '{word_text}', assembled: '{final_text}'")
                         elif kind in ("Marker", "Final"):
                             # End-of-utterance
                             txt = (data.get("text") or "").strip()
@@ -135,19 +143,34 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
                     print("DEBUG: Connection closed gracefully")
                 pass
             except websockets.exceptions.ConnectionClosedError as e:
-                # server closed without a close frame
+                # server closed without a close frame — treat as final if we have content
                 if debug:
                     print(f"DEBUG: Connection closed with error: {e}")
+                if not done_event.is_set():
+                    if words or final_text:
+                        final_recv_ts = time.perf_counter()
+                        if not final_text:
+                            final_text = " ".join(words)
+                        done_event.set()
+                        if debug:
+                            print(f"DEBUG: Treating close as final, text: '{final_text}'")
                 pass
 
         recv_task = asyncio.create_task(receiver())
 
-        # wait for Ready
+        # Optional grace period for Ready (don't block if server doesn't send it)
         if debug:
-            print("DEBUG: Waiting for Ready")
-        await asyncio.wait_for(ready_event.wait(), timeout=10.0)
+            print("DEBUG: Waiting for Ready (with timeout)")
+        try:
+            await asyncio.wait_for(ready_event.wait(), timeout=0.2)
+            if debug:
+                print("DEBUG: Ready received")
+        except asyncio.TimeoutError:
+            if debug:
+                print("DEBUG: No Ready received, proceeding anyway")
+            pass  # proceed to send anyway
         if debug:
-            print("DEBUG: Ready received, starting audio stream")
+            print("DEBUG: Starting audio stream")
         
         # Convert PCM16 bytes to float32 normalized [-1,1]
         pcm_int16 = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
@@ -181,14 +204,29 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
         if debug:
             print("DEBUG: Sent Flush")
         
-        # Wait for server final (avoid indefinite waits)
+        # Wait for server final with dynamic timeout based on audio duration
+        audio_duration_s = len(pcm_int16) / 24000.0
+        timeout_s = max(10.0, audio_duration_s / rtf + 3.0)
+        if debug:
+            print(f"DEBUG: Waiting for final with timeout {timeout_s:.1f}s")
         try:
-            await asyncio.wait_for(done_event.wait(), timeout=10.0)
+            await asyncio.wait_for(done_event.wait(), timeout=timeout_s)
             if debug:
                 print("DEBUG: Final received")
         except asyncio.TimeoutError:
             if debug:
                 print("DEBUG: Timeout waiting for Final")
+            # if we have text, accept it; otherwise it's a real timeout
+            if not (words or final_text):
+                if debug:
+                    print("DEBUG: No text received, real timeout")
+            else:
+                # set final_recv_ts for metrics even on timeout
+                final_recv_ts = time.perf_counter()
+                if not final_text:
+                    final_text = " ".join(words)
+                if debug:
+                    print(f"DEBUG: Accepting timeout with text: '{final_text}'")
             pass
         
         # Proactively close; then await receiver task
