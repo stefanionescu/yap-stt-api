@@ -258,9 +258,9 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
                 await ws.send(msg)
                 last_chunk_sent_ts = time.perf_counter()
 
-        # inject trailing silence (3 x 80ms) to help endpointer finalize last token
+        # tail silence: send a short tail before Flush to commit last tokens
         silence = np.zeros(1920, dtype=np.float32)
-        for _ in range(3):
+        for _ in range(4):  # ~320 ms tail
             msg = msgpack.packb({"type": "Audio", "pcm": silence.tolist()},
                                use_bin_type=True, use_single_float=True)
             await ws.send(msg)
@@ -269,6 +269,7 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
 
         # flush + wait for final
         await ws.send(msgpack.packb({"type": "Flush"}, use_bin_type=True))
+        last_signal_ts = time.perf_counter()
         
         # Wait for server final with dynamic timeout based on audio duration
         timeout_s = max(10.0, audio_seconds / rtf + 3.0)
@@ -302,18 +303,11 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
     else:
         avg_gap_ms = 0.0
 
-    if final_recv_ts and last_signal_ts:
-        finalize_ms = (final_recv_ts - last_signal_ts) * 1000.0
-    elif final_recv_ts and last_chunk_sent_ts:
-        finalize_ms = (final_recv_ts - last_chunk_sent_ts) * 1000.0
-    else:
-        finalize_ms = 0.0
-
     metrics.update({
         "partials": float(len(partial_ts)),
         "avg_partial_gap_ms": float(avg_gap_ms),
         "final_len_chars": float(len(final_text)),
-        "finalize_ms": float(finalize_ms),
+        "finalize_ms": float(((final_recv_ts - last_signal_ts) * 1000.0) if (final_recv_ts and last_signal_ts) else 0.0),
         "mode": mode,
         "rtf": float(rtf),
     })

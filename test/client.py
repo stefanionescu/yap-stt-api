@@ -210,9 +210,9 @@ async def run(args: argparse.Namespace) -> None:
                 await ws.send(msg)
                 last_chunk_sent_ts = time.perf_counter()
 
-        # inject trailing silence (3 x 80ms) to help endpointer finalize last token
+        # tail silence: send a short tail before Flush to commit last tokens
         silence = np.zeros(1920, dtype=np.float32)
-        for _ in range(3):
+        for _ in range(4):  # ~320 ms tail
             msg = msgpack.packb({"type": "Audio", "pcm": silence.tolist()},
                                use_bin_type=True, use_single_float=True)
             await ws.send(msg)
@@ -254,12 +254,7 @@ async def run(args: argparse.Namespace) -> None:
         print("No final text")
 
     elapsed_s = time.perf_counter() - t0
-    if final_recv_ts and last_signal_ts:
-        finalize_ms = (final_recv_ts - last_signal_ts) * 1000.0
-    elif final_recv_ts and last_chunk_sent_ts:
-        finalize_ms = (final_recv_ts - last_chunk_sent_ts) * 1000.0
-    else:
-        finalize_ms = 0.0
+    finalize_ms = ((final_recv_ts - last_signal_ts) * 1000.0) if (final_recv_ts and last_signal_ts) else 0.0
     if len(partial_ts) >= 2:
         gaps = [b - a for a, b in zip(partial_ts[:-1], partial_ts[1:])]
         avg_gap_ms = (sum(gaps) / len(gaps)) * 1000.0
