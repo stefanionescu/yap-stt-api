@@ -33,38 +33,58 @@ fi
 echo "[00] System CUDA libraries found:"
 find /usr/lib/x86_64-linux-gnu/ /lib/x86_64-linux-gnu/ /usr/local/ -name "*cuda*" -o -name "*nvrtc*" 2>/dev/null | head -10 | sed 's/^/  /'
 
-# Install our specific toolkit version
-if ! dpkg -s "cuda-toolkit-${CUDA_MM_PKG}" >/dev/null 2>&1; then
-  echo "[00] Installing cuda-toolkit-${CUDA_MM_PKG} to match driver…"
-  apt-get install -y --no-install-recommends "cuda-toolkit-${CUDA_MM_PKG}"
-else
-  echo "[00] cuda-toolkit-${CUDA_MM_PKG} already installed."
-fi
-
-# Handle conflicting /usr/local/cuda symlink
-if [ -L "/usr/local/cuda" ]; then
-  CURRENT_TARGET=$(readlink -f /usr/local/cuda)
-  if [[ "${CURRENT_TARGET}" != "${CUDA_PREFIX}" ]]; then
-    echo "[00] WARNING: /usr/local/cuda points to ${CURRENT_TARGET}, not our ${CUDA_PREFIX}"
-    echo "[00] This could cause library conflicts. Consider: rm /usr/local/cuda && ln -s ${CUDA_PREFIX} /usr/local/cuda"
-    # Optionally auto-fix it (uncomment if you want aggressive fixing):
-    # rm -f /usr/local/cuda && ln -s "${CUDA_PREFIX}" /usr/local/cuda
-    # echo "[00] ✓ Fixed /usr/local/cuda symlink to point to ${CUDA_PREFIX}"
+# Install toolkit only if we don't have a suitable existing one
+EXISTING_CUDA_OK=false
+if [ -d "${CUDA_PREFIX}" ]; then
+  echo "[00] Found existing CUDA installation at ${CUDA_PREFIX}"
+  if [ -x "${CUDA_PREFIX}/bin/nvcc" ]; then
+    EXISTING_CUDA_OK=true
+    echo "[00] ✓ Existing CUDA ${CUDA_MM} is suitable, skipping installation"
   fi
 fi
 
-# Prefer versioned CUDA path (avoid /usr/local/cuda symlink pointing to a newer toolkit)
+if [ "$EXISTING_CUDA_OK" = false ]; then
+  if ! dpkg -s "cuda-toolkit-${CUDA_MM_PKG}" >/dev/null 2>&1; then
+    echo "[00] Installing cuda-toolkit-${CUDA_MM_PKG} to match driver…"
+    apt-get install -y --no-install-recommends "cuda-toolkit-${CUDA_MM_PKG}"
+  else
+    echo "[00] cuda-toolkit-${CUDA_MM_PKG} already installed."
+  fi
+fi
+
+# Set up CUDA environment
 if [ -d "${CUDA_PREFIX}/bin" ]; then
   export PATH="${CUDA_PREFIX}/bin:$PATH"
   
-  # Refresh ldconfig to prioritize our CUDA libraries
-  echo "[00] Refreshing library loader cache for ${CUDA_PREFIX}..."
-  echo "${CUDA_PREFIX}/lib64" > /etc/ld.so.conf.d/cuda-our-version.conf
-  echo "${CUDA_PREFIX}/targets/x86_64-linux/lib" >> /etc/ld.so.conf.d/cuda-our-version.conf
-  ldconfig
+  # Check if /usr/local/cuda points to the right place
+  if [ -L "/usr/local/cuda" ]; then
+    CURRENT_TARGET=$(readlink -f /usr/local/cuda)
+    if [[ "${CURRENT_TARGET}" == "${CUDA_PREFIX}" ]]; then
+      echo "[00] ✓ /usr/local/cuda correctly points to ${CUDA_PREFIX}"
+    else
+      echo "[00] INFO: /usr/local/cuda points to ${CURRENT_TARGET}, we're using ${CUDA_PREFIX}"
+      echo "[00] This is fine - we'll use explicit versioned paths"
+    fi
+  fi
   
-  # Verify our libs are now prioritized
-  echo "[00] Library loader will use:"
+  # Only set up custom ldconfig if we need to override existing libs
+  NEED_LDCONFIG_OVERRIDE=false
+  CURRENT_NVRTC=$(ldconfig -p | awk '/libnvrtc.so./{print $NF}' | head -1)
+  if [[ "${CURRENT_NVRTC}" != "${CUDA_PREFIX}"* ]]; then
+    NEED_LDCONFIG_OVERRIDE=true
+  fi
+  
+  if [ "$NEED_LDCONFIG_OVERRIDE" = true ]; then
+    echo "[00] Setting up library loader priority for ${CUDA_PREFIX}..."
+    echo "${CUDA_PREFIX}/lib64" > /etc/ld.so.conf.d/cuda-our-version.conf
+    echo "${CUDA_PREFIX}/targets/x86_64-linux/lib" >> /etc/ld.so.conf.d/cuda-our-version.conf
+    ldconfig
+  else
+    echo "[00] ✓ System libraries already point to ${CUDA_PREFIX}"
+  fi
+  
+  # Verify final library setup
+  echo "[00] Final library setup:"
   echo "  libnvrtc.so: $(ldconfig -p | awk '/libnvrtc.so./{print $NF}' | head -1)"
   echo "  libcudart.so: $(ldconfig -p | awk '/libcudart.so./{print $NF}' | head -1)"
   

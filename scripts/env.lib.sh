@@ -30,14 +30,49 @@ export MOSHI_CONFIG="${MOSHI_CONFIG:-/workspace/moshi-stt.toml}"
 export TMUX_SESSION="${TMUX_SESSION:-moshi-stt}"
 export SMOKETEST_RTF="${SMOKETEST_RTF:-1}"
 
-# Auto-select toolkit version to match driver, but cap to 12.4 for stability
+# Detect existing CUDA installation (common in RunPod/Docker images)
+detect_existing_cuda() {
+  if [ -L "/usr/local/cuda" ]; then
+    local existing_target=$(readlink -f /usr/local/cuda)
+    if [[ "${existing_target}" =~ cuda-([0-9]+\.[0-9]+)$ ]]; then
+      echo "${BASH_REMATCH[1]}"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+# Auto-select toolkit version: prefer existing, fallback to driver-capped version
+EXISTING_MM=$(detect_existing_cuda || echo "")
 SUPPORT_MM="${CUDA_MM:-$(detect_cuda_mm)}"
-case "${SUPPORT_MM}" in
-  12.6|12.5|12.4) TOOLKIT_MM=12.4 ;;  # cap to 12.4 unless you know your driver supports newer
-  *) TOOLKIT_MM="${SUPPORT_MM}" ;;
-esac
+
+if [ -n "${EXISTING_MM}" ] && [ -d "/usr/local/cuda-${EXISTING_MM}" ]; then
+  # Use existing CUDA installation if it exists and is reasonable
+  case "${EXISTING_MM}" in
+    12.*|11.*) 
+      TOOLKIT_MM="${EXISTING_MM}"
+      echo "[env] Using existing CUDA ${EXISTING_MM} installation"
+      ;;
+    *) 
+      # Fallback to driver version if existing is too old/new
+      case "${SUPPORT_MM}" in
+        12.6|12.5|12.4) TOOLKIT_MM=12.4 ;;
+        *) TOOLKIT_MM="${SUPPORT_MM}" ;;
+      esac
+      echo "[env] Existing CUDA ${EXISTING_MM} not suitable, will install ${TOOLKIT_MM}"
+      ;;
+  esac
+else
+  # No existing CUDA, cap to 12.4 for stability
+  case "${SUPPORT_MM}" in
+    12.6|12.5|12.4) TOOLKIT_MM=12.4 ;;
+    *) TOOLKIT_MM="${SUPPORT_MM}" ;;
+  esac
+  echo "[env] No existing CUDA found, will install ${TOOLKIT_MM}"
+fi
+
 export CUDA_MM="${TOOLKIT_MM}"
-export CUDA_MM_PKG="${CUDA_MM_PKG:-${CUDA_MM//./-}}" # e.g., "12-4"
+export CUDA_MM_PKG="${CUDA_MM_PKG:-${CUDA_MM//./-}}" # e.g., "12-4" or "12-8"
 export CUDA_PREFIX="/usr/local/cuda-${CUDA_MM}"
 
 # Force loader to use versioned CUDA libs and set L40S compute capability

@@ -27,8 +27,12 @@ EOF
   set -a; source "${BASE_DIR}/.env"; set +a
 fi
 
-# Ensure scripts are executable
-chmod +x "${BASE_DIR}"/*.sh
+# Ensure scripts are executable (only if not already)
+for script in "${BASE_DIR}"/*.sh; do
+  if [ ! -x "$script" ]; then
+    chmod +x "$script"
+  fi
+done
 
 # Run each phase
 "${BASE_DIR}/00_prereqs.sh"
