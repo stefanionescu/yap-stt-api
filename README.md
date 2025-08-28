@@ -506,20 +506,3 @@ bash scripts/99_stop.sh
 ## 📄 License
 
 MIT License - Production ready for commercial deployments.
-
-## 🤝 Support
-
-**For Server Issues:**
-- Check server logs: `tail -f /workspace/logs/moshi-server.log`
-- Verify GPU: `nvidia-smi`
-- Status check: `bash scripts/05_status.sh`
-
-**For Testing Issues:**
-- Activate venv: `source venv/bin/activate`  
-- Check dependencies: `pip install -r requirements.txt`
-- Debug mode: `python test/warmup.py --debug`
-
-**Performance Questions:**
-- Run benchmarks: `python test/bench.py --n 100 --concurrency 20`
-- Monitor GPU: `nvidia-smi -l 1` during tests
-- Tune config: `/workspace/moshi-stt.toml`
