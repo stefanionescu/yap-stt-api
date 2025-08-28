@@ -35,11 +35,11 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
 
     partial_ts = []
     last_chunk_sent_ts = 0.0
+    last_signal_ts = 0.0
     final_recv_ts = 0.0
     final_text = ""
     last_text = ""
     words = []  # fallback transcript from Word events
-    last_word = ""
     ready_event = asyncio.Event()
     done_event = asyncio.Event()
     ttfw = None
@@ -96,7 +96,6 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
                             if w:
                                 if ttfw is None:
                                     ttfw = now - t0  # strict TTFW on first word
-                                last_word = w
                                 words.append(w)  # accumulate words
                                 final_text = " ".join(words).strip()  # ALWAYS assemble running text
                                 if final_text != last_text:  # treat each new word as a partial
@@ -109,10 +108,6 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
                             txt = (data.get("text") or "").strip()
                             if txt:
                                 final_text = txt
-                            # prefer assembled words if it is longer (captures any last word)
-                            assembled = " ".join(words).strip()
-                            if assembled and len(assembled) > len(final_text or ""):
-                                final_text = assembled
                             final_recv_ts = now
                             done_event.set()
                             if debug:
@@ -156,9 +151,8 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
                 if not done_event.is_set():
                     if words or final_text:
                         final_recv_ts = time.perf_counter()
-                        assembled = " ".join(words).strip()
-                        if assembled and (not final_text or len(assembled) > len(final_text)):
-                            final_text = assembled
+                        if not final_text and words:
+                            final_text = " ".join(words).strip()
                         done_event.set()
                         if debug:
                             print(f"DEBUG: Treating close as final, text: '{final_text}'")
@@ -207,8 +201,18 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
                 await ws.send(msg)
                 last_chunk_sent_ts = time.perf_counter()
 
+        # inject trailing silence (3 x 80ms) to help endpointer finalize last token
+        silence = np.zeros(1920, dtype=np.float32)
+        for _ in range(3):
+            msg = msgpack.packb({"type": "Audio", "pcm": silence.tolist()},
+                               use_bin_type=True, use_single_float=True)
+            await ws.send(msg)
+            last_chunk_sent_ts = time.perf_counter()
+            await asyncio.sleep(0.080 / rtf)
+
         # flush + wait for final
         await ws.send(msgpack.packb({"type": "Flush"}, use_bin_type=True))
+        last_signal_ts = time.perf_counter()
         if debug:
             print("DEBUG: Sent Flush")
         
@@ -231,9 +235,8 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
             else:
                 # set final_recv_ts for metrics even on timeout
                 final_recv_ts = time.perf_counter()
-                assembled = " ".join(words).strip()
-                if assembled and (not final_text or len(assembled) > len(final_text)):
-                    final_text = assembled
+                if not final_text and words:
+                    final_text = " ".join(words).strip()
                 if debug:
                     print(f"DEBUG: Accepting timeout with text: '{final_text}'")
             pass
@@ -248,7 +251,12 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
             await recv_task
 
     elapsed_s = time.perf_counter() - t0
-    finalize_ms = ((final_recv_ts - last_chunk_sent_ts) * 1000.0) if (final_recv_ts and last_chunk_sent_ts) else 0.0
+    if final_recv_ts and last_signal_ts:
+        finalize_ms = (final_recv_ts - last_signal_ts) * 1000.0
+    elif final_recv_ts and last_chunk_sent_ts:
+        finalize_ms = (final_recv_ts - last_chunk_sent_ts) * 1000.0
+    else:
+        finalize_ms = 0.0
     avg_gap_ms = 0.0
     if len(partial_ts) >= 2:
         gaps = [b - a for a, b in zip(partial_ts[:-1], partial_ts[1:])]
