@@ -145,6 +145,10 @@ class EOSDecider:
         self.pending_word = None
         return word
     
+    def clear_pending_word(self):
+        """Clear any pending word (when superseded by newer text)."""
+        self.pending_word = None
+    
     def observed_silence_ms(self) -> float:
         """Calculate how much silence/quiet we've observed."""
         now = time.perf_counter()

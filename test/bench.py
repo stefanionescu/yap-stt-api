@@ -198,6 +198,7 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
                                 final_text = txt  # prefer Partial/Text over Word assembly
                                 # sync words array so later Words don't go backwards
                                 words = final_text.split()
+                                eos_decider.clear_pending_word()  # running text supersedes pending
                         elif kind == "Word":
                             w = (data.get("text") or data.get("word") or "").strip()
                             if w:
@@ -212,10 +213,17 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
                                     eos_decider.update_partial(now)  # Update EOS state
                                     last_text = final_text
                         elif kind in ("Marker", "Final"):
-                            # End-of-utterance
+                            # End-of-utterance - COMMIT any pending word before deciding final text
+                            pending = eos_decider.get_pending_word()
+                            if pending:
+                                words.append(pending)
+                                # If running text doesn't include it, sync it
+                                if (not final_text) or len(final_text.split()) < len(words):
+                                    final_text = " ".join(words).strip()
+                            
                             txt = (data.get("text") or "").strip()
                             if txt:
-                                final_text = txt
+                                final_text = txt  # prefer server-provided final
                             final_recv_ts = now
                             done_event.set()
                             break
@@ -309,13 +317,17 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
         
         # Top up with just enough silence if needed
         needed_ms = eos_decider.needed_padding_ms()
-        if needed_ms > 0:
-            frames = int((needed_ms + 79) // 80)  # ceil to 80ms frames
-            if frames > 0:
-                silence = np.zeros(1920, dtype=np.float32).tolist()
-                for _ in range(frames):
-                    await ws.send(msgpack.packb({"type":"Audio","pcm":silence},
-                                                use_bin_type=True, use_single_float=True))
+        frames = int((needed_ms + 79) // 80)  # ceil to 80ms frames
+        
+        # Ensure at least one decoder step happens before Flush
+        MIN_PAD_FRAMES = 1
+        frames = max(frames, MIN_PAD_FRAMES)
+        
+        if frames > 0:
+            silence = np.zeros(1920, dtype=np.float32).tolist()
+            for _ in range(frames):
+                await ws.send(msgpack.packb({"type":"Audio","pcm":silence},
+                                            use_bin_type=True, use_single_float=True))
         
         # Final flush
         await ws.send(msgpack.packb({"type": "Flush"}, use_bin_type=True))

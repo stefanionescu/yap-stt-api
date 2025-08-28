@@ -102,6 +102,7 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
                                 final_text = txt  # prefer Partial/Text over Word assembly
                                 # sync words array so later Words don't go backwards
                                 words = final_text.split()
+                                eos_decider.clear_pending_word()  # running text supersedes pending
                         elif kind == "Word":
                             w = (data.get("text") or data.get("word") or "").strip()
                             if w:
@@ -117,14 +118,23 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
                                 if debug:
                                     print(f"DEBUG: Word: {w!r}, assembled: {final_text!r}")
                         elif kind in ("Marker", "Final"):
-                            # End-of-utterance
+                            # End-of-utterance - COMMIT any pending word before deciding final text
+                            pending = eos_decider.get_pending_word()
+                            if pending:
+                                words.append(pending)
+                                if debug:
+                                    print(f"DEBUG: Added pending word on Final: {pending!r}")
+                                # If running text doesn't include it, sync it
+                                if (not final_text) or len(final_text.split()) < len(words):
+                                    final_text = " ".join(words).strip()
+                            
                             txt = (data.get("text") or "").strip()
                             if txt:
-                                final_text = txt
+                                final_text = txt  # prefer server-provided final
                             final_recv_ts = now
                             done_event.set()
                             if debug:
-                                print(f"DEBUG: Final message received, text: '{txt}'")
+                                print(f"DEBUG: Final message received, text: '{final_text}'")
                             break
                         elif kind == "Error":
                             done_event.set()
@@ -253,15 +263,19 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
         
         # Top up with just enough silence if needed
         needed_ms = eos_decider.needed_padding_ms()
-        if needed_ms > 0:
-            frames = int((needed_ms + 79) // 80)  # ceil to 80ms frames
-            if frames > 0:
-                if debug:
-                    print(f"DEBUG: Adding {frames} silence frames ({frames * 80:.0f}ms)")
-                silence = np.zeros(1920, dtype=np.float32).tolist()
-                for _ in range(frames):
-                    await ws.send(msgpack.packb({"type":"Audio","pcm":silence},
-                                                use_bin_type=True, use_single_float=True))
+        frames = int((needed_ms + 79) // 80)  # ceil to 80ms frames
+        
+        # Ensure at least one decoder step happens before Flush
+        MIN_PAD_FRAMES = 1
+        frames = max(frames, MIN_PAD_FRAMES)
+        
+        if frames > 0:
+            if debug:
+                print(f"DEBUG: Adding {frames} silence frames ({frames * 80:.0f}ms)")
+            silence = np.zeros(1920, dtype=np.float32).tolist()
+            for _ in range(frames):
+                await ws.send(msgpack.packb({"type":"Audio","pcm":silence},
+                                            use_bin_type=True, use_single_float=True))
         
         # Final flush
         await ws.send(msgpack.packb({"type": "Flush"}, use_bin_type=True))
