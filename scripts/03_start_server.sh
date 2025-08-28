@@ -17,7 +17,7 @@ echo "  nvcc: $(nvcc --version | sed -n 's/^.*release //p' | head -n1)"
 echo "  Using CUDA prefix: ${CUDA_PREFIX}"
 echo "  LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
 echo "  CUDA_COMPUTE_CAP: ${CUDA_COMPUTE_CAP}"
-echo "  NVRTC chosen: $(ldconfig -p | awk '/libnvrtc.so/{print $NF}' | head -1)"
+echo "  NVRTC chosen: $(ldconfig -p | awk '/libnvrtc\\.so/{print $NF; exit}')"
 
 # Show all CUDA libs the loader will see first
 ldconfig -p | grep -E 'lib(cudart|nvrtc|cuda)\.so' | sort -u | sed 's/^/    /'

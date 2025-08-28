@@ -19,7 +19,7 @@ if [ ! -f /usr/share/keyrings/cuda-archive-keyring.gpg ]; then
   apt-get update -y
 fi
 
-# Detect and handle pre-existing CUDA installations
+# Detect and handle pre-existing CUDA installations (nuke >12.4)
 echo "[00] Auditing existing CUDA installations..."
 if [ -L "/usr/local/cuda" ]; then
   EXISTING_CUDA_TARGET=$(readlink -f /usr/local/cuda)
@@ -27,6 +27,22 @@ if [ -L "/usr/local/cuda" ]; then
 elif [ -d "/usr/local/cuda" ]; then
   echo "[00] Found existing /usr/local/cuda directory (not symlink)"
   EXISTING_CUDA_TARGET="/usr/local/cuda"
+fi
+
+# If an existing CUDA > 12.4 is present, purge conflicting packages
+if [ -n "${EXISTING_CUDA_TARGET:-}" ]; then
+  if [[ "${EXISTING_CUDA_TARGET}" =~ cuda-([0-9]+)\.([0-9]+)$ ]]; then
+    EXISTING_MAJOR=${BASH_REMATCH[1]}
+    EXISTING_MINOR=${BASH_REMATCH[2]}
+    if (( EXISTING_MAJOR > 12 )) || { (( EXISTING_MAJOR == 12 )) && (( EXISTING_MINOR > 4 )); }; then
+      echo "[00] Detected CUDA ${EXISTING_MAJOR}.${EXISTING_MINOR} (> 12.4). Purging to install 12.4..."
+      # Remove CUDA meta packages that can override libs
+      apt-get remove --purge -y 'cuda-*' nvidia-cuda-toolkit 2>/dev/null || true
+      rm -f /etc/ld.so.conf.d/cuda-our-version.conf || true
+      ldconfig || true
+      rm -f /usr/local/cuda || true
+    fi
+  fi
 fi
 
 # Show any system-wide CUDA libs that might conflict (robust under pipefail)
@@ -38,26 +54,15 @@ echo "[00] System CUDA libraries found:"
     | sed -n '1,10{s/^/  /;p;}'
 ) || true
 
-# Install toolkit only if we don't have a suitable existing one
-EXISTING_CUDA_OK=false
-if [ -d "${CUDA_PREFIX}" ]; then
-  echo "[00] Found existing CUDA installation at ${CUDA_PREFIX}"
-  if [ -x "${CUDA_PREFIX}/bin/nvcc" ]; then
-    EXISTING_CUDA_OK=true
-    echo "[00] ✓ Existing CUDA ${CUDA_MM} is suitable, skipping installation"
-  fi
+# Always install CUDA 12.4 toolkit fresh if not present
+if ! dpkg -s "cuda-toolkit-${CUDA_MM_PKG}" >/dev/null 2>&1; then
+  echo "[00] Installing cuda-toolkit-${CUDA_MM_PKG} (force 12.4)…"
+  apt-get install -y --no-install-recommends "cuda-toolkit-${CUDA_MM_PKG}"
+else
+  echo "[00] cuda-toolkit-${CUDA_MM_PKG} already installed."
 fi
 
-if [ "$EXISTING_CUDA_OK" = false ]; then
-  if ! dpkg -s "cuda-toolkit-${CUDA_MM_PKG}" >/dev/null 2>&1; then
-    echo "[00] Installing cuda-toolkit-${CUDA_MM_PKG} to match driver…"
-    apt-get install -y --no-install-recommends "cuda-toolkit-${CUDA_MM_PKG}"
-  else
-    echo "[00] cuda-toolkit-${CUDA_MM_PKG} already installed."
-  fi
-fi
-
-# Set up CUDA environment
+# Set up CUDA 12.4 environment
 if [ -d "${CUDA_PREFIX}/bin" ]; then
   export PATH="${CUDA_PREFIX}/bin:$PATH"
   
@@ -67,9 +72,12 @@ if [ -d "${CUDA_PREFIX}/bin" ]; then
     if [[ "${CURRENT_TARGET}" == "${CUDA_PREFIX}" ]]; then
       echo "[00] ✓ /usr/local/cuda correctly points to ${CUDA_PREFIX}"
     else
-      echo "[00] INFO: /usr/local/cuda points to ${CURRENT_TARGET}, we're using ${CUDA_PREFIX}"
-      echo "[00] This is fine - we'll use explicit versioned paths"
+      echo "[00] Fixing /usr/local/cuda symlink to ${CUDA_PREFIX}"
+      rm -f /usr/local/cuda
+      ln -s "${CUDA_PREFIX}" /usr/local/cuda
     fi
+  else
+    ln -s "${CUDA_PREFIX}" /usr/local/cuda || true
   fi
   
   # Only set up custom ldconfig if we need to override existing libs

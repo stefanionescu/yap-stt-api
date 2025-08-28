@@ -12,7 +12,7 @@ if ! command -v nvcc >/dev/null 2>&1; then
 fi
 
 # CUDA sanity checks before build
-echo "[01] CUDA sanity checks:"
+echo "[01] CUDA sanity checks (targeting CUDA ${CUDA_MM}):"
 echo "  Driver says CUDA: $(nvidia-smi | awk -F'CUDA Version: ' '/CUDA Version/ {print $2}' | awk '{print $1}' | head -n1)"
 echo "  nvcc: $(nvcc --version | sed -n 's/^.*release //p' | head -n1)"
 echo "  nvcc path: $(which nvcc)"
@@ -30,12 +30,13 @@ if [ -L "/usr/local/cuda" ]; then
   fi
 fi
 
-echo "  NVRTC chosen: $(ldconfig -p | awk '/libnvrtc.so/{print $NF}' | head -1)"
-NVRTC_PATH=$(ldconfig -p | awk '/libnvrtc.so/{print $NF}' | head -1)
+echo "  NVRTC chosen: $(ldconfig -p | awk '/libnvrtc\\.so/{print $NF; exit}')"
+NVRTC_PATH=$(ldconfig -p | awk '/libnvrtc\\.so/{print $NF; exit}')
 if [[ "${NVRTC_PATH}" == "${CUDA_PREFIX}"* ]]; then
   echo "  ✓ NVRTC from our CUDA version"
 else
-  echo "  ⚠️  WARNING: NVRTC from different CUDA version!"
+  echo "  ⚠️  WARNING: NVRTC from different CUDA version! Failing fast."
+  exit 2
 fi
 
 # Optional: show all CUDA libs the loader will see first

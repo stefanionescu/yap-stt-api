@@ -146,6 +146,15 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
       fi
     fi
     apt-get autoremove --purge -y 2>/dev/null || true
+    # Optional: force remove all cuda-* if user wants to fully nuke
+    if [[ "${1:-}" == "--nuke-cuda" ]]; then
+      echo "[99] --nuke-cuda flag detected, purging all cuda-* packages"
+      apt-get remove --purge -y 'cuda-*' nvidia-cuda-toolkit 2>/dev/null || true
+      rm -f /usr/local/cuda || true
+      rm -rf /usr/local/cuda-* || true
+      rm -f /etc/ld.so.conf.d/cuda-our-version.conf || true
+      ldconfig || true
+    fi
     echo "[99] ✓ Removed system packages installed by scripts"
   fi
 else
