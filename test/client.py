@@ -78,6 +78,9 @@ async def run(args: argparse.Namespace) -> None:
     samples_per_chunk = int(24000 * 0.080)  # 1920 samples
     bytes_per_chunk = samples_per_chunk * 2  # 3840 bytes
     chunk_ms = 80.0
+    # original audio duration (based on the 24k PCM16 you built)
+    orig_samples = len(pcm) // 2
+    file_duration_s = orig_samples / 24000.0
 
     partial_ts: list[float] = []
     last_chunk_sent_ts = 0.0
@@ -185,13 +188,9 @@ async def run(args: argparse.Namespace) -> None:
         except asyncio.TimeoutError:
             pass  # proceed to send anyway
         
-        # Convert PCM16 bytes to float32 normalized [-1,1] and pad to full hops
+        # Convert PCM16 bytes to float32 normalized [-1,1] (no pre-padding)
         pcm_int16 = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
         hop = 1920  # 80 ms @ 24k
-        rem = len(pcm_int16) % hop
-        if rem:
-            pad = hop - rem
-            pcm_int16 = np.pad(pcm_int16, (0, pad))
         
         if args.mode == "stream":
             # 80 ms @ 24k = 1920 samples
@@ -216,33 +215,36 @@ async def run(args: argparse.Namespace) -> None:
                 await ws.send(msg)
                 last_chunk_sent_ts = time.perf_counter()
 
-        # tail silence: send a short tail before Flush to commit last tokens
-        silence = np.zeros(1920, dtype=np.float32)
-        for _ in range(12):  # ~960 ms tail
-            msg = msgpack.packb({"type": "Audio", "pcm": silence.tolist()},
-                               use_bin_type=True, use_single_float=True)
-            await ws.send(msg)
-            last_chunk_sent_ts = time.perf_counter()
-            await asyncio.sleep(0.080 / args.rtf)
-
         # flush + wait for final
         await ws.send(msgpack.packb({"type": "Flush"}, use_bin_type=True))
         last_signal_ts = time.perf_counter()
         
-        # Wait for server final with dynamic timeout based on audio duration
-        audio_duration_s = len(pcm_int16) / 24000.0
-        timeout_s = max(10.0, audio_duration_s / args.rtf + 3.0)
+        # Wait for server final with dynamic timeout based on file duration
+        timeout_s = max(10.0, file_duration_s / args.rtf + 3.0)
+        # Minimal fast-path wait for Final
+        fast_wait = min(max(2 * (chunk_ms / 1000.0) / args.rtf, 0.2), 1.0)  # 0.2–1.0 s
         try:
-            await asyncio.wait_for(done_event.wait(), timeout=timeout_s)
+            await asyncio.wait_for(done_event.wait(), timeout=fast_wait)
         except asyncio.TimeoutError:
-            # if we have text, accept it; otherwise it's a real timeout
-            if not (words or final_text):
-                print("Warning: Timeout waiting for final response and no text received")
-            else:
-                # set final_recv_ts for metrics even on timeout
-                final_recv_ts = time.perf_counter()
-                if not final_text and words:
-                    final_text = " ".join(words).strip()
+            # Fallback: one zero-hop (no sleep) + re-Flush, then wait the remainder
+            print("No Final yet — sending single zero-hop + re-Flush")
+            silence = np.zeros(1920, dtype=np.float32)
+            msg = msgpack.packb({"type": "Audio", "pcm": silence.tolist()},
+                                use_bin_type=True, use_single_float=True)
+            await ws.send(msg)
+            await ws.send(msgpack.packb({"type": "Flush"}, use_bin_type=True))
+            last_signal_ts = time.perf_counter()
+            try:
+                remain = max(0.0, timeout_s - fast_wait)
+                await asyncio.wait_for(done_event.wait(), timeout=remain)
+            except asyncio.TimeoutError:
+                if words or final_text:
+                    final_recv_ts = time.perf_counter()
+                    if not final_text and words:
+                        final_text = " ".join(words).strip()
+                    print(f"Accepting timeout with partial text: '{final_text}'")
+                else:
+                    print("Warning: Timeout waiting for final response and no text received")
         
         # Proactively close; don't block main path on close handshake
         with contextlib.suppress(Exception):
@@ -257,6 +259,9 @@ async def run(args: argparse.Namespace) -> None:
 
     elapsed_s = time.perf_counter() - t0
     finalize_ms = ((final_recv_ts - last_signal_ts) * 1000.0) if (final_recv_ts and last_signal_ts) else 0.0
+    # Add wall_to_final (up to Final). No default tail; no forced pad in timing.
+    wall_to_final = (final_recv_ts - t0) if final_recv_ts else elapsed_s
+    rtf_measured = (wall_to_final / file_duration_s) if file_duration_s > 0 else None
     if len(partial_ts) >= 2:
         gaps = [b - a for a, b in zip(partial_ts[:-1], partial_ts[1:])]
         avg_gap_ms = (sum(gaps) / len(gaps)) * 1000.0
@@ -264,14 +269,19 @@ async def run(args: argparse.Namespace) -> None:
         avg_gap_ms = 0.0
     
     ttfw_ms = (ttfw * 1000.0) if ttfw is not None else 0.0
-    print(f"Elapsed: {elapsed_s:.3f}s  TTFW: {ttfw_ms:.1f}ms  Partials: {len(partial_ts)}  Avg partial gap: {avg_gap_ms:.1f} ms  Finalize: {finalize_ms:.1f} ms")
+    print(f"Transcription time (to Final): {wall_to_final:.3f}s  RTF(measured): {rtf_measured:.4f}  (target={args.rtf})")
+    print(f"TTFW: {ttfw_ms:.1f}ms  Partials: {len(partial_ts)}  Avg partial gap: {avg_gap_ms:.1f} ms  Finalize: {finalize_ms:.1f} ms")
 
     # metrics out
     out_dir = Path("test/results")
     out_dir.mkdir(parents=True, exist_ok=True)
     with open(out_dir / "client_metrics.jsonl", "w", encoding="utf-8") as f:
         f.write(json.dumps({
-            "elapsed_s": elapsed_s,
+            "elapsed_s": elapsed_s,              # includes close/cleanup
+            "wall_to_final_s": wall_to_final,    # what users feel
+            "audio_s": file_duration_s,          # original file duration at 24k
+            "rtf_target": args.rtf,              # configured throttle
+            "rtf_measured": rtf_measured,        # measured RTF
             "ttfw_ms": ttfw_ms,
             "partials": len(partial_ts),
             "avg_partial_gap_ms": avg_gap_ms,

@@ -32,6 +32,9 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
     samples_per_chunk = int(24000 * 0.080)  # 1920 samples
     bytes_per_chunk = samples_per_chunk * 2  # 3840 bytes
     chunk_ms = 80.0
+    # original audio duration (based on the 24k PCM16 you built)
+    orig_samples = len(pcm_bytes) // 2
+    file_duration_s = orig_samples / 24000.0
 
     partial_ts = []
     last_chunk_sent_ts = 0.0
@@ -176,13 +179,9 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
         if debug:
             print("DEBUG: Starting audio stream")
         
-        # Convert PCM16 bytes to float32 normalized [-1,1] and pad to full hops
+        # Convert PCM16 bytes to float32 normalized [-1,1] (no pre-padding)
         pcm_int16 = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
         hop = 1920  # 80 ms @ 24k
-        rem = len(pcm_int16) % hop
-        if rem:
-            pad = hop - rem
-            pcm_int16 = np.pad(pcm_int16, (0, pad))
         
         if mode == "stream":
             # 80 ms @ 24k = 1920 samples
@@ -207,45 +206,43 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
                 await ws.send(msg)
                 last_chunk_sent_ts = time.perf_counter()
 
-        # tail silence: send a short tail before Flush to commit last tokens
-        silence = np.zeros(1920, dtype=np.float32)
-        for _ in range(12):  # ~960 ms tail
-            msg = msgpack.packb({"type": "Audio", "pcm": silence.tolist()},
-                               use_bin_type=True, use_single_float=True)
-            await ws.send(msg)
-            last_chunk_sent_ts = time.perf_counter()
-            await asyncio.sleep(0.080 / rtf)
-
         # flush + wait for final
         await ws.send(msgpack.packb({"type": "Flush"}, use_bin_type=True))
         last_signal_ts = time.perf_counter()
         if debug:
             print("DEBUG: Sent Flush")
         
-        # Wait for server final with dynamic timeout based on audio duration
-        audio_duration_s = len(pcm_int16) / 24000.0
-        timeout_s = max(10.0, audio_duration_s / rtf + 3.0)
+        # Wait for server final with dynamic timeout based on file duration
+        timeout_s = max(10.0, file_duration_s / rtf + 3.0)
+        # Minimal fast-path wait for Final
+        fast_wait = min(max(2 * (chunk_ms / 1000.0) / rtf, 0.2), 1.0)  # 0.2–1.0 s
         if debug:
-            print(f"DEBUG: Waiting for final with timeout {timeout_s:.1f}s")
+            print(f"DEBUG: Waiting for Final (fast {fast_wait:.2f}s, then fallback; hard {timeout_s:.1f}s)")
         try:
-            await asyncio.wait_for(done_event.wait(), timeout=timeout_s)
-            if debug:
-                print("DEBUG: Final received")
+            await asyncio.wait_for(done_event.wait(), timeout=fast_wait)
         except asyncio.TimeoutError:
+            # Fallback: one zero-hop (no sleep) + re-Flush, then wait the remainder
             if debug:
-                print("DEBUG: Timeout waiting for Final")
-            # if we have text, accept it; otherwise it's a real timeout
-            if not (words or final_text):
-                if debug:
-                    print("DEBUG: No text received, real timeout")
-            else:
-                # set final_recv_ts for metrics even on timeout
-                final_recv_ts = time.perf_counter()
-                if not final_text and words:
-                    final_text = " ".join(words).strip()
-                if debug:
-                    print(f"DEBUG: Accepting timeout with text: '{final_text}'")
-            pass
+                print("DEBUG: No Final yet — sending single zero-hop + re-Flush")
+            silence = np.zeros(1920, dtype=np.float32)
+            msg = msgpack.packb({"type": "Audio", "pcm": silence.tolist()},
+                                use_bin_type=True, use_single_float=True)
+            await ws.send(msg)
+            await ws.send(msgpack.packb({"type": "Flush"}, use_bin_type=True))
+            last_signal_ts = time.perf_counter()
+            try:
+                remain = max(0.0, timeout_s - fast_wait)
+                await asyncio.wait_for(done_event.wait(), timeout=remain)
+            except asyncio.TimeoutError:
+                if words or final_text:
+                    final_recv_ts = time.perf_counter()
+                    if not final_text and words:
+                        final_text = " ".join(words).strip()
+                    if debug:
+                        print(f"DEBUG: Accepting timeout with partial text: '{final_text}'")
+                else:
+                    if debug:
+                        print("DEBUG: No text received, real timeout")
         
         # Proactively close; don't block main path on close handshake
         with contextlib.suppress(Exception):
@@ -259,24 +256,21 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
         gaps = [b - a for a, b in zip(partial_ts[:-1], partial_ts[1:])]
         avg_gap_ms = (sum(gaps) / len(gaps)) * 1000.0
 
-    # Add wall_to_final (up to Final) and audio_streamed (file + pad + tail)
+    # Add wall_to_final (up to Final). No default tail; no forced pad in timing.
     wall_to_final = (final_recv_ts - t0) if final_recv_ts else elapsed_s
-    hop = 1920
-    original_samples = int(duration * 24000)
-    pad_s = ((hop - (original_samples % hop)) / 24000.0) if (original_samples % hop) else 0.0
-    tail_s = (12 * 0.080) / rtf
 
     return {
         "text": final_text,
-        "elapsed_s": elapsed_s,
+        "elapsed_s": elapsed_s,              # includes close/cleanup
         "ttfw_s": ttfw,
         "partials": len(partial_ts) if mode == "stream" else 0,
         "avg_partial_gap_ms": avg_gap_ms if mode == "stream" else 0.0,
         "finalize_ms": finalize_ms if mode == "stream" else 0.0,
-        "wall_to_final_s": wall_to_final,
-        "audio_streamed_s": float(duration + pad_s + tail_s),
+        "wall_to_final_s": wall_to_final,    # what users feel
+        "audio_s": file_duration_s,          # original file duration at 24k
         "mode": mode,
-        "rtf": rtf,
+        "rtf_target": rtf,                   # configured throttle
+        "rtf_measured": (wall_to_final / file_duration_s) if file_duration_s > 0 else None,
     }
 
 def main() -> int:
@@ -308,11 +302,11 @@ def main() -> int:
         print(f"Warmup error: {res['error']}")
     print(f"Text: {res.get('text', '')[:50]}...")
     print(f"Audio duration: {duration:.4f}s")
-    print(f"Transcription time: {res.get('elapsed_s', 0.0):.4f}s")
-    if duration > 0 and res.get('elapsed_s', 0.0) > 0:
-        rtf = res["elapsed_s"] / duration
+    print(f"Transcription time (to Final): {res.get('wall_to_final_s', 0.0):.4f}s")
+    if duration > 0 and res.get('wall_to_final_s', 0.0) > 0:
+        rtf = res["wall_to_final_s"] / duration
         xrt = (1.0/rtf) if rtf > 0 else 0.0
-        print(f"RTF: {rtf:.4f}  xRT: {xrt:.2f}x")
+        print(f"RTF(measured): {rtf:.4f}  xRT: {xrt:.2f}x  (target={res.get('rtf_target')})")
     ttfw_ms = (res.get('ttfw_s', 0) * 1000.0) if res.get('ttfw_s') is not None else 0.0
     print(f"TTFW: {ttfw_ms:.1f}ms")
     if args.mode == "stream":

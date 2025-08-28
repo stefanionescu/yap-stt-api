@@ -74,6 +74,7 @@ def summarize(title: str, results: List[Dict[str, float]]) -> None:
     wall = [r["wall_s"] for r in results]
     audio = [r["audio_s"] for r in results]
     rtf = [r["rtf"] for r in results]
+    rtf_measured = [r["rtf_measured"] for r in results if "rtf_measured" in r and r["rtf_measured"] is not None]
     xrt = [r["xrt"] for r in results]
     throughput = [r["throughput_min_per_min"] for r in results]
     ttfw_word_vals = [r["ttfw_word_s"] for r in results if "ttfw_word_s" in r]
@@ -90,6 +91,8 @@ def summarize(title: str, results: List[Dict[str, float]]) -> None:
         print(f"TTFW(text)  | avg={stats.mean(ttfw_text_vals):.4f}  p50={stats.median(ttfw_text_vals):.4f}  p95={p(ttfw_text_vals,0.95):.4f}")
     print(f"Audio s     | avg={stats.mean(audio):.4f}")
     print(f"RTF         | avg={stats.mean(rtf):.4f}  p50={stats.median(rtf):.4f}  p95={p(rtf,0.95):.4f}")
+    if rtf_measured:
+        print(f"RTF(meas)   | avg={stats.mean(rtf_measured):.4f}  p50={stats.median(rtf_measured):.4f}  p95={p(rtf_measured,0.95):.4f}")
     print(f"xRT         | avg={stats.mean(xrt):.4f}")
     print(f"Throughput  | avg={stats.mean(throughput):.2f} min/min")
     if fin:
@@ -127,6 +130,9 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
     words = []  # fallback transcript from Word events
     ready_event = asyncio.Event()
     done_event = asyncio.Event()
+    # original audio duration (based on the 24k PCM16 you built)
+    orig_samples = len(pcm_bytes) // 2
+    file_duration_s = orig_samples / 24000.0
 
     # Moshi uses 24kHz, 80ms chunks
     samples_per_chunk = int(24000 * 0.080)  # 1920 samples
@@ -231,13 +237,9 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
         except asyncio.TimeoutError:
             pass  # proceed to send anyway
         
-        # Convert PCM16 bytes to float32 normalized [-1,1] and pad to full hops
+        # Convert PCM16 bytes to float32 normalized [-1,1] (no pre-padding)
         pcm_int16 = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
         hop = 1920  # 80 ms @ 24k
-        rem = len(pcm_int16) % hop
-        if rem:
-            pad = hop - rem
-            pcm_int16 = np.pad(pcm_int16, (0, pad))
         
         # sender: stream audio in MessagePack frames
         if mode == "stream":
@@ -263,33 +265,34 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
                 await ws.send(msg)
                 last_chunk_sent_ts = time.perf_counter()
 
-        # tail silence: send a short tail before Flush to commit last tokens
-        silence = np.zeros(1920, dtype=np.float32)
-        for _ in range(12):  # ~960 ms tail
-            msg = msgpack.packb({"type": "Audio", "pcm": silence.tolist()},
-                               use_bin_type=True, use_single_float=True)
-            await ws.send(msg)
-            last_chunk_sent_ts = time.perf_counter()
-            await asyncio.sleep(0.080 / rtf)
-
         # flush + wait for final
         await ws.send(msgpack.packb({"type": "Flush"}, use_bin_type=True))
         last_signal_ts = time.perf_counter()
         
-        # Wait for server final with dynamic timeout based on audio duration
-        timeout_s = max(10.0, audio_seconds / rtf + 3.0)
+        # Wait for server final with dynamic timeout based on file duration
+        timeout_s = max(10.0, file_duration_s / rtf + 3.0)
+        # Minimal fast-path wait for Final
+        fast_wait = min(max(2 * (chunk_ms / 1000.0) / rtf, 0.2), 1.0)  # 0.2–1.0 s
         try:
-            await asyncio.wait_for(done_event.wait(), timeout=timeout_s)
+            await asyncio.wait_for(done_event.wait(), timeout=fast_wait)
         except asyncio.TimeoutError:
-            # if we have text, accept it; otherwise it's a real timeout
-            if not (words or final_text):
-                pass  # real timeout, will be logged as error
-            else:
-                # set final_recv_ts for metrics even on timeout
-                final_recv_ts = time.perf_counter()
-                if not final_text and words:
-                    final_text = " ".join(words).strip()
-            pass
+            # Fallback: one zero-hop (no sleep) + re-Flush, then wait the remainder
+            silence = np.zeros(1920, dtype=np.float32)
+            msg = msgpack.packb({"type": "Audio", "pcm": silence.tolist()},
+                                use_bin_type=True, use_single_float=True)
+            await ws.send(msg)
+            await ws.send(msgpack.packb({"type": "Flush"}, use_bin_type=True))
+            last_signal_ts = time.perf_counter()
+            try:
+                remain = max(0.0, timeout_s - fast_wait)
+                await asyncio.wait_for(done_event.wait(), timeout=remain)
+            except asyncio.TimeoutError:
+                if words or final_text:
+                    final_recv_ts = time.perf_counter()
+                    if not final_text and words:
+                        final_text = " ".join(words).strip()
+                else:
+                    pass  # real timeout, will be logged as error
         
         # Proactively close; don't block main path on close handshake
         with contextlib.suppress(Exception):
@@ -297,16 +300,11 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
         # Receiver may still be draining; don't await it if we're done
 
     wall = time.perf_counter() - t0
-    metrics = _metrics(audio_seconds, wall, ttfw_word, ttfw_text)
-    # Add wall_to_final (up to Final) and audio_streamed (file + pad + tail)
+    metrics = _metrics(file_duration_s, wall, ttfw_word, ttfw_text)
+    # Add wall_to_final (up to Final). No default tail; no forced pad in timing.
     wall_to_final = (final_recv_ts - t0) if final_recv_ts else wall
     metrics["wall_to_final_s"] = float(wall_to_final)
-    # Compute pad_s and tail_s (tail is 12 hops @ 80ms / rtf)
-    hop = 1920
-    original_samples = int(audio_seconds * 24000)
-    pad_s = ((hop - (original_samples % hop)) / 24000.0) if (original_samples % hop) else 0.0
-    tail_s = (12 * 0.080) / rtf
-    metrics["audio_streamed_s"] = float(audio_seconds + pad_s + tail_s)
+    metrics["rtf_measured"] = float(wall_to_final / file_duration_s) if file_duration_s > 0 else None
     if len(partial_ts) >= 2:
         gaps = [b - a for a, b in zip(partial_ts[:-1], partial_ts[1:])]
         avg_gap_ms = (sum(gaps) / len(gaps)) * 1000.0
