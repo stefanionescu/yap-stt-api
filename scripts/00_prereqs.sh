@@ -29,9 +29,14 @@ elif [ -d "/usr/local/cuda" ]; then
   EXISTING_CUDA_TARGET="/usr/local/cuda"
 fi
 
-# Show any system-wide CUDA libs that might conflict
+# Show any system-wide CUDA libs that might conflict (robust under pipefail)
 echo "[00] System CUDA libraries found:"
-find /usr/lib/x86_64-linux-gnu/ /lib/x86_64-linux-gnu/ /usr/local/ -name "*cuda*" -o -name "*nvrtc*" 2>/dev/null | head -10 | sed 's/^/  /'
+(
+  set +e
+  find /usr/lib/x86_64-linux-gnu/ /lib/x86_64-linux-gnu/ /usr/local/ \
+    \( -name "*cuda*" -o -name "*nvrtc*" \) 2>/dev/null \
+    | sed -n '1,10{s/^/  /;p;}'
+) || true
 
 # Install toolkit only if we don't have a suitable existing one
 EXISTING_CUDA_OK=false
@@ -69,7 +74,7 @@ if [ -d "${CUDA_PREFIX}/bin" ]; then
   
   # Only set up custom ldconfig if we need to override existing libs
   NEED_LDCONFIG_OVERRIDE=false
-  CURRENT_NVRTC=$(ldconfig -p | awk '/libnvrtc.so./{print $NF}' | head -1)
+  CURRENT_NVRTC=$(ldconfig -p | awk '/libnvrtc\.so\./{print $NF; exit}')
   if [[ "${CURRENT_NVRTC}" != "${CUDA_PREFIX}"* ]]; then
     NEED_LDCONFIG_OVERRIDE=true
   fi
@@ -85,8 +90,8 @@ if [ -d "${CUDA_PREFIX}/bin" ]; then
   
   # Verify final library setup
   echo "[00] Final library setup:"
-  echo "  libnvrtc.so: $(ldconfig -p | awk '/libnvrtc.so./{print $NF}' | head -1)"
-  echo "  libcudart.so: $(ldconfig -p | awk '/libcudart.so./{print $NF}' | head -1)"
+  echo "  libnvrtc.so: $(ldconfig -p | awk '/libnvrtc\.so\./{print $NF; exit}')"
+  echo "  libcudart.so: $(ldconfig -p | awk '/libcudart\.so\./{print $NF; exit}')"
   
   # Set up persistent environment in ~/.bashrc for manual shell sessions
   grep -q "${CUDA_PREFIX}/bin" ~/.bashrc || echo "export PATH=\"${CUDA_PREFIX}/bin:\$PATH\"" >> ~/.bashrc
