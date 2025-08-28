@@ -174,12 +174,16 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
         if debug:
             print("DEBUG: Starting audio stream")
         
-        # Convert PCM16 bytes to float32 normalized [-1,1]
+        # Convert PCM16 bytes to float32 normalized [-1,1] and pad to full hops
         pcm_int16 = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+        hop = 1920  # 80 ms @ 24k
+        rem = len(pcm_int16) % hop
+        if rem:
+            pad = hop - rem
+            pcm_int16 = np.pad(pcm_int16, (0, pad))
         
         if mode == "stream":
             # 80 ms @ 24k = 1920 samples
-            hop = 1920
             for i in range(0, len(pcm_int16), hop):
                 pcm_chunk = pcm_int16[i:i+hop]
                 if len(pcm_chunk) == 0:
@@ -203,7 +207,7 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
 
         # tail silence: send a short tail before Flush to commit last tokens
         silence = np.zeros(1920, dtype=np.float32)
-        for _ in range(4):  # ~320 ms tail
+        for _ in range(12):  # ~960 ms tail
             msg = msgpack.packb({"type": "Audio", "pcm": silence.tolist()},
                                use_bin_type=True, use_single_float=True)
             await ws.send(msg)
