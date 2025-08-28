@@ -122,10 +122,9 @@ def _ws_url(server: str, secure: bool) -> str:
     return f"{scheme}://{host}/api/asr-streaming"
 
 
-async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: float, mode: str) -> Dict[str, float]:
+async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: float) -> Dict[str, float]:
     """
-    One session over WebSocket using Moshi protocol. For 'stream', sleeps per chunk to simulate realtime.
-    For 'oneshot', sends with no sleeps.
+    One session over WebSocket using Moshi protocol with streaming mode.
     rtf: Real-time factor for throttling (1.0 for realtime, higher for faster)
     """
     url = _ws_url(server, secure=False)
@@ -282,35 +281,23 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
         samples_sent = 0
         sr = 24000
 
-        # sender: stream audio in MessagePack frames
-        if mode == "stream":
-            # realistic streaming with RTF control - pace by wall-clock against audio timeline
-            for i in range(0, len(pcm_int16), hop):
-                pcm_chunk = pcm_int16[i:i+hop]
-                if len(pcm_chunk) == 0:
-                    break
-                msg = msgpack.packb({"type": "Audio", "pcm": pcm_chunk.tolist()},
-                                   use_bin_type=True, use_single_float=True)
-                await ws.send(msg)
-                last_chunk_sent_ts = time.perf_counter()
+        # sender: stream audio in MessagePack frames with RTF control
+        # realistic streaming with RTF control - pace by wall-clock against audio timeline
+        for i in range(0, len(pcm_int16), hop):
+            pcm_chunk = pcm_int16[i:i+hop]
+            if len(pcm_chunk) == 0:
+                break
+            msg = msgpack.packb({"type": "Audio", "pcm": pcm_chunk.tolist()},
+                               use_bin_type=True, use_single_float=True)
+            await ws.send(msg)
+            last_chunk_sent_ts = time.perf_counter()
 
-                # advance timeline by the *actual* chunk duration
-                samples_sent += len(pcm_chunk)
-                target = t_stream0 + (samples_sent / sr) / max(rtf, 1e-6)
-                sleep_for = target - time.perf_counter()
-                if sleep_for > 0:
-                    await asyncio.sleep(sleep_for)
-        else:
-            # oneshot: no sleeps; still chunk for reasonable frame sizes
-            hop = int(24000 * 2.0)  # ~2 sec chunks
-            for i in range(0, len(pcm_int16), hop):
-                pcm_chunk = pcm_int16[i:i+hop]
-                if len(pcm_chunk) == 0:
-                    break
-                msg = msgpack.packb({"type": "Audio", "pcm": pcm_chunk.tolist()},
-                                   use_bin_type=True, use_single_float=True)
-                await ws.send(msg)
-                last_chunk_sent_ts = time.perf_counter()
+            # advance timeline by the *actual* chunk duration
+            samples_sent += len(pcm_chunk)
+            target = t_stream0 + (samples_sent / sr) / max(rtf, 1e-6)
+            sleep_for = target - time.perf_counter()
+            if sleep_for > 0:
+                await asyncio.sleep(sleep_for)
 
         # Dynamic EOS settle gate - wait for evidence utterance is over
         await eos_decider.wait_for_settle(max_wait_ms=600)
@@ -378,7 +365,6 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
         "avg_partial_gap_ms": float(avg_gap_ms),
         "final_len_chars": float(len(final_text)),
         "finalize_ms": float(((final_recv_ts - last_signal_ts) * 1000.0) if (final_recv_ts and last_signal_ts) else 0.0),
-        "mode": mode,
         "rtf_target": float(rtf),
         # New honest metrics
         "send_duration_s": float(send_duration_s),
@@ -390,7 +376,7 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
     return metrics
 
 
-async def bench_ws(server: str, file_path: str, total_reqs: int, concurrency: int, rtf: float, mode: str) -> Tuple[List[Dict[str, float]], int, int]:
+async def bench_ws(server: str, file_path: str, total_reqs: int, concurrency: int, rtf: float) -> Tuple[List[Dict[str, float]], int, int]:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     try:
         with open(ERRORS_FILE, "w", encoding="utf-8") as ef:
@@ -416,7 +402,7 @@ async def bench_ws(server: str, file_path: str, total_reqs: int, concurrency: in
             try:
                 # Dynamic timeout: audio duration * 2 + 60s buffer (minimum 300s for long streams)
                 timeout = max(300.0, audio_seconds * 2 + 60.0)
-                r = await asyncio.wait_for(_ws_one(server, pcm, audio_seconds, rtf, mode), timeout=timeout)
+                r = await asyncio.wait_for(_ws_one(server, pcm, audio_seconds, rtf), timeout=timeout)
                 results.append(r)
             except Exception as e:
                 errors_total += 1
@@ -439,7 +425,6 @@ def main() -> None:
     ap.add_argument("--concurrency", type=int, default=5, help="Max concurrent sessions")
     ap.add_argument("--file", type=str, default="mid.wav", help="Audio file from samples/")
     ap.add_argument("--rtf", type=float, default=1.0, help="Real-time factor (1.0=realtime, higher=faster)")
-    ap.add_argument("--mode", choices=["stream", "oneshot"], default="stream", help="Run streaming or one-shot")
     args = ap.parse_args()
 
     file_path = find_sample_by_name(args.file)
@@ -450,12 +435,12 @@ def main() -> None:
             print(f"Available files: {[os.path.basename(f) for f in available]}")
         return
 
-    print(f"Benchmark → WS ({args.mode}) | n={args.n} | concurrency={args.concurrency} | rtf={args.rtf} | server={args.server}")
+    print(f"Benchmark → WS (streaming) | n={args.n} | concurrency={args.concurrency} | rtf={args.rtf} | server={args.server}")
     print(f"File: {os.path.basename(file_path)}")
 
     t0 = time.time()
     results, rejected, errors = asyncio.run(
-        bench_ws(args.server, file_path, args.n, args.concurrency, args.rtf, args.mode)
+        bench_ws(args.server, file_path, args.n, args.concurrency, args.rtf)
     )
     elapsed = time.time() - t0
 

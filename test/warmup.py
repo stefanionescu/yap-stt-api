@@ -25,7 +25,7 @@ def _ws_url(server: str, secure: bool) -> str:
     host = server.rstrip("/")
     return f"{scheme}://{host}/api/asr-streaming"
 
-async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool = False) -> dict:
+async def _run(server: str, pcm_bytes: bytes, rtf: float, debug: bool = False) -> dict:
     url = _ws_url(server, secure=False)
     
     # Moshi uses 24kHz, 80ms chunks
@@ -220,34 +220,23 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
         samples_sent = 0
         sr = 24000
 
-        if mode == "stream":
-            # 80 ms @ 24k = 1920 samples - pace by wall-clock against audio timeline
-            for i in range(0, len(pcm_int16), hop):
-                pcm_chunk = pcm_int16[i:i+hop]
-                if len(pcm_chunk) == 0:
-                    break
-                msg = msgpack.packb({"type": "Audio", "pcm": pcm_chunk.tolist()},
-                                   use_bin_type=True, use_single_float=True)
-                await ws.send(msg)
-                last_chunk_sent_ts = time.perf_counter()
+        # Stream audio with RTF control - pace by wall-clock against audio timeline
+        # 80 ms @ 24k = 1920 samples
+        for i in range(0, len(pcm_int16), hop):
+            pcm_chunk = pcm_int16[i:i+hop]
+            if len(pcm_chunk) == 0:
+                break
+            msg = msgpack.packb({"type": "Audio", "pcm": pcm_chunk.tolist()},
+                               use_bin_type=True, use_single_float=True)
+            await ws.send(msg)
+            last_chunk_sent_ts = time.perf_counter()
 
-                # advance timeline by the *actual* chunk duration
-                samples_sent += len(pcm_chunk)
-                target = t_stream0 + (samples_sent / sr) / max(rtf, 1e-6)
-                sleep_for = target - time.perf_counter()
-                if sleep_for > 0:
-                    await asyncio.sleep(sleep_for)
-        else:
-            # oneshot: larger chunks
-            hop = int(24000 * 2.0)  # ~2 sec chunks
-            for i in range(0, len(pcm_int16), hop):
-                pcm_chunk = pcm_int16[i:i+hop]
-                if len(pcm_chunk) == 0:
-                    break
-                msg = msgpack.packb({"type": "Audio", "pcm": pcm_chunk.tolist()},
-                                   use_bin_type=True, use_single_float=True)
-                await ws.send(msg)
-                last_chunk_sent_ts = time.perf_counter()
+            # advance timeline by the *actual* chunk duration
+            samples_sent += len(pcm_chunk)
+            target = t_stream0 + (samples_sent / sr) / max(rtf, 1e-6)
+            sleep_for = target - time.perf_counter()
+            if sleep_for > 0:
+                await asyncio.sleep(sleep_for)
 
         # Dynamic EOS settle gate - wait for evidence utterance is over
         if debug:
@@ -332,12 +321,11 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
         "text": final_text,
         "elapsed_s": elapsed_s,              # includes close/cleanup
         "ttfw_s": ttfw,
-        "partials": len(partial_ts) if mode == "stream" else 0,
-        "avg_partial_gap_ms": avg_gap_ms if mode == "stream" else 0.0,
-        "finalize_ms": finalize_ms if mode == "stream" else 0.0,
+        "partials": len(partial_ts),
+        "avg_partial_gap_ms": avg_gap_ms,
+        "finalize_ms": finalize_ms,
         "wall_to_final_s": wall_to_final,    # what users feel
         "audio_s": file_duration_s,          # original file duration at 24k
-        "mode": mode,
         "rtf_target": rtf,                   # configured throttle
         "rtf_measured": (wall_to_final / file_duration_s) if file_duration_s > 0 else None,
         # New honest metrics
@@ -354,7 +342,6 @@ def main() -> int:
     parser.add_argument("--secure", action="store_true")
     parser.add_argument("--file", type=str, default="mid.wav", help="Audio file. Absolute path or name in samples/")
     parser.add_argument("--rtf", type=float, default=1000.0, help="Real-time factor (1000=fast warmup, 1.0=realtime)")
-    parser.add_argument("--mode", choices=["stream", "oneshot"], default="stream", help="Run streaming or one-shot ASR")
     parser.add_argument("--debug", action="store_true", help="Print debug info including raw server messages")
     args = parser.parse_args()
 
@@ -371,7 +358,7 @@ def main() -> int:
     pcm_bytes = file_to_pcm16_mono_24k(str(audio_path))
     duration = file_duration_seconds(str(audio_path))
 
-    res = asyncio.run(_run(args.server, pcm_bytes, args.rtf, args.mode, args.debug))
+    res = asyncio.run(_run(args.server, pcm_bytes, args.rtf, args.debug))
 
     if res.get("error"):
         print(f"Warmup error: {res['error']}")
@@ -385,9 +372,8 @@ def main() -> int:
     ttfw_ms = (res.get('ttfw_s', 0) * 1000.0) if res.get('ttfw_s') is not None else 0.0
     print(f"TTFW: {ttfw_ms:.1f}ms")
     print(f"Δ(audio): {res.get('delta_to_audio_ms', 0.0):.1f}ms  Send dur: {res.get('send_duration_s', 0.0):.3f}s  Post-send→Final: {res.get('post_send_final_s', 0.0):.3f}s")
-    if args.mode == "stream":
-        print(f"Partials: {res.get('partials', 0)}  Avg partial gap: {res.get('avg_partial_gap_ms', 0.0):.1f} ms")
-        print(f"Flush→Final: {res.get('finalize_ms', 0.0):.1f}ms  Decode tail: {res.get('decode_tail_ms', 0.0):.1f}ms")
+    print(f"Partials: {res.get('partials', 0)}  Avg partial gap: {res.get('avg_partial_gap_ms', 0.0):.1f} ms")
+    print(f"Flush→Final: {res.get('finalize_ms', 0.0):.1f}ms  Decode tail: {res.get('decode_tail_ms', 0.0):.1f}ms")
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     with open(RESULTS_FILE, "w", encoding="utf-8") as out:

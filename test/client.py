@@ -46,7 +46,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--secure", action="store_true", help="Use WSS (requires cert on server)")
     parser.add_argument("--file", type=str, default="mid.wav", help="Audio file from samples/")
     parser.add_argument("--rtf", type=float, default=1.0, help="Real-time factor (1.0=realtime, higher=faster)")
-    parser.add_argument("--mode", choices=["stream", "oneshot"], default="stream", help="Run streaming or one-shot ASR")
     return parser.parse_args()
 
 def _ws_url(server: str, secure: bool) -> str:
@@ -112,10 +111,16 @@ async def run(args: argparse.Namespace) -> None:
     ttfw = None
     ready_event = asyncio.Event()
     done_event = asyncio.Event()
+    
+    # Network latency measurements
+    connect_start = time.perf_counter()
     async with websockets.connect(url, **ws_options) as ws:
+        connect_time = time.perf_counter() - connect_start
+        
+        first_response_time = None
         
         async def receiver():
-            nonlocal final_text, final_recv_ts, last_text, ttfw, words
+            nonlocal final_text, final_recv_ts, last_text, ttfw, words, first_response_time
             try:
                 async for raw in ws:
                     # moshi-server only sends binary frames
@@ -132,6 +137,9 @@ async def run(args: argparse.Namespace) -> None:
                             if txt:
                                 if ttfw is None:
                                     ttfw = now - t0
+                                # Track first response latency
+                                if first_response_time is None and first_audio_sent is not None:
+                                    first_response_time = now - first_audio_sent
                                 if txt != last_text:
                                     partial_ts.append(now - t0)
                                     last_partial_ts = now  # track last partial timestamp
@@ -147,6 +155,9 @@ async def run(args: argparse.Namespace) -> None:
                             if w:
                                 if ttfw is None:
                                     ttfw = now - t0  # strict TTFW on first word
+                                # Track first response latency
+                                if first_response_time is None and first_audio_sent is not None:
+                                    first_response_time = now - first_audio_sent
                                 words.append(w)  # accumulate words
                                 final_text = " ".join(words).strip()  # assemble running text
                                 if final_text != last_text:  # treat each new word as a partial
@@ -211,10 +222,14 @@ async def run(args: argparse.Namespace) -> None:
 
         recv_task = asyncio.create_task(receiver())
 
-        # Optional grace period for Ready (don't block if server doesn't send it)
+        # Measure handshake latency (connection to Ready message)
+        handshake_start = time.perf_counter()
+        handshake_time = None
         try:
             await asyncio.wait_for(ready_event.wait(), timeout=0.2)
+            handshake_time = time.perf_counter() - handshake_start
         except asyncio.TimeoutError:
+            handshake_time = 0.2  # timeout duration
             pass  # proceed to send anyway
         
         # Convert PCM16 bytes to float32 normalized [-1,1] (no pre-padding)
@@ -225,35 +240,29 @@ async def run(args: argparse.Namespace) -> None:
         t_stream0 = time.perf_counter()
         samples_sent = 0
         sr = 24000
+        first_audio_sent = None
 
-        if args.mode == "stream":
-            # 80 ms @ 24k = 1920 samples - pace by wall-clock against audio timeline
-            for i in range(0, len(pcm_int16), hop):
-                pcm_chunk = pcm_int16[i:i+hop]
-                if len(pcm_chunk) == 0:
-                    break
-                msg = msgpack.packb({"type": "Audio", "pcm": pcm_chunk.tolist()},
-                                   use_bin_type=True, use_single_float=True)
-                await ws.send(msg)
-                last_chunk_sent_ts = time.perf_counter()
+        # Stream audio with RTF control - pace by wall-clock against audio timeline
+        # 80 ms @ 24k = 1920 samples
+        for i in range(0, len(pcm_int16), hop):
+            pcm_chunk = pcm_int16[i:i+hop]
+            if len(pcm_chunk) == 0:
+                break
+            msg = msgpack.packb({"type": "Audio", "pcm": pcm_chunk.tolist()},
+                               use_bin_type=True, use_single_float=True)
+            await ws.send(msg)
+            last_chunk_sent_ts = time.perf_counter()
+            
+            # Track first audio chunk sent for response latency
+            if first_audio_sent is None:
+                first_audio_sent = last_chunk_sent_ts
 
-                # advance timeline by the *actual* chunk duration
-                samples_sent += len(pcm_chunk)
-                target = t_stream0 + (samples_sent / sr) / max(args.rtf, 1e-6)
-                sleep_for = target - time.perf_counter()
-                if sleep_for > 0:
-                    await asyncio.sleep(sleep_for)
-        else:
-            # oneshot: larger chunks
-            hop = int(24000 * 2.0)  # ~2 sec chunks
-            for i in range(0, len(pcm_int16), hop):
-                pcm_chunk = pcm_int16[i:i+hop]
-                if len(pcm_chunk) == 0:
-                    break
-                msg = msgpack.packb({"type": "Audio", "pcm": pcm_chunk.tolist()},
-                                   use_bin_type=True, use_single_float=True)
-                await ws.send(msg)
-                last_chunk_sent_ts = time.perf_counter()
+            # advance timeline by the *actual* chunk duration
+            samples_sent += len(pcm_chunk)
+            target = t_stream0 + (samples_sent / sr) / max(args.rtf, 1e-6)
+            sleep_for = target - time.perf_counter()
+            if sleep_for > 0:
+                await asyncio.sleep(sleep_for)
 
         # Dynamic EOS settle gate - wait for evidence utterance is over
         print("Starting dynamic EOS settle gate")
@@ -331,7 +340,19 @@ async def run(args: argparse.Namespace) -> None:
     delta_to_audio_ms = (wall_to_final - file_duration_s) * 1000.0
     decode_tail_ms = ((final_recv_ts - last_partial_ts) * 1000.0) if (final_recv_ts and last_partial_ts) else 0.0
     
+    # Network latency metrics
+    connect_ms = connect_time * 1000.0
+    handshake_ms = handshake_time * 1000.0 if handshake_time is not None else 0.0
+    first_response_ms = first_response_time * 1000.0 if first_response_time is not None else 0.0
+    
     ttfw_ms = (ttfw * 1000.0) if ttfw is not None else 0.0
+    
+    print(f"\n=== Network Latency ===")
+    print(f"Connection time: {connect_ms:.1f}ms")
+    print(f"Handshake time: {handshake_ms:.1f}ms")
+    print(f"First response: {first_response_ms:.1f}ms")
+    
+    print(f"\n=== Transcription Performance ===")
     print(f"Transcription time (to Final): {wall_to_final:.3f}s  RTF(measured): {rtf_measured:.4f}  (target={args.rtf})")
     print(f"TTFW: {ttfw_ms:.1f}ms  Partials: {len(partial_ts)}  Avg partial gap: {avg_gap_ms:.1f} ms")
     print(f"Δ(audio): {delta_to_audio_ms:.1f}ms  Send dur: {send_duration_s:.3f}s  Post-send→Final: {post_send_final_s:.3f}s")
@@ -353,7 +374,11 @@ async def run(args: argparse.Namespace) -> None:
             "finalize_ms": finalize_ms,
             "file": os.path.basename(file_path),
             "server": args.server,
-            # New honest metrics
+            # Network latency metrics
+            "connect_ms": connect_ms,
+            "handshake_ms": handshake_ms,
+            "first_response_ms": first_response_ms,
+            # Processing metrics
             "send_duration_s": send_duration_s,
             "post_send_final_s": post_send_final_s,
             "delta_to_audio_ms": delta_to_audio_ms,

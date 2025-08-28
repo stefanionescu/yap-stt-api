@@ -1,16 +1,14 @@
 # Yap STT Service
 
-Complete production-ready **Moshi STT Server** deployment system with GPU acceleration and comprehensive testing harness. One-command setup for high-performance speech-to-text service on bare metal, cloud instances, or Runpod.
+One-command deployment for **Moshi STT Server** with GPU acceleration. Automated CUDA 12.4 setup, Rust compilation, and production-ready WebSocket server.
 
-## ✨ What This Is
+## ✨ Features
 
-**Yap STT Service** provides:
-
-1. 🚀 **Complete Moshi STT Server Deployment** - Automated CUDA setup, Rust compilation, server configuration
-2. 📊 **Production Management** - tmux sessions, logging, status monitoring, graceful shutdown  
-3. 🧪 **Comprehensive Testing Suite** - Real-time clients, load testing, benchmarks, protocol validation
-4. ⚡ **GPU Optimized** - Automatic CUDA toolkit matching, optimized for L40S/A100/RTX cards
-5. 🌐 **Runpod Ready** - Tested for bare-metal cloud deployments with public endpoint support
+- 🚀 **One-command setup** - Complete deployment in ~10 minutes
+- ⚡ **CUDA 12.4 optimized** - Automatic GPU setup for L40S/A100/RTX cards  
+- 📊 **Production ready** - tmux sessions, logging, monitoring
+- 🧪 **Testing suite** - Load testing, benchmarks, real-time clients
+- 🌐 **RunPod compatible** - Tested on cloud GPU instances
 
 ## 🚀 Quick Start (One Command)
 
@@ -21,18 +19,13 @@ bash scripts/main.sh
 ```
 
 **This will:**
-1. Install CUDA toolkit (matching your GPU driver)
-2. Install Rust toolchain and compile moshi-server
-3. Clone Kyutai DSM repository and fetch configs
-4. Start Moshi server in tmux session on port 8000
-5. Run smoke test to verify everything works
-6. Show you connection details and management commands
+1. Install CUDA 12.4 toolkit (purges conflicting versions)
+2. Install Rust toolchain and compile moshi-server with CUDA
+3. Fetch Kyutai STT configs and models
+4. Start server in tmux session on port 8000
+5. Run smoke test to verify functionality
 
-**After ~5-10 minutes, you'll have:**
-- Moshi STT server running on `ws://0.0.0.0:8000/api/asr-streaming`
-- GPU-accelerated speech recognition
-- Production tmux session with logging
-- Ready for client connections
+**Result:** GPU-accelerated STT server at `ws://localhost:8000` ready for connections.
 
 ## 📊 Service Management
 
@@ -56,7 +49,7 @@ tmux attach -t moshi-stt
 # Graceful shutdown (keeps installation)
 tmux kill-session -t moshi-stt
 
-# Complete cleanup (removes everything, ~5GB freed)
+# Complete cleanup
 bash scripts/99_stop.sh
 ```
 
@@ -86,40 +79,30 @@ bash scripts/04_smoke_test.sh
 
 ## 🌐 Runpod Deployment
 
-### Quick Runpod Setup
+### RunPod Setup
 1. **Launch Instance**: Ubuntu 22.04 + L40S/A100/RTX 4090
-2. **Expose Port**: `8000` in Runpod dashboard  
+2. **Expose Port**: `8000` in RunPod dashboard  
 3. **Run Setup**:
    ```bash
-   git clone https://github.com/your-repo/yap-stt-api.git
+   git clone <your-repo-url>
    cd yap-stt-api
-   bash scripts/main.sh
+   scripts/main.sh
    ```
-4. **Connect**: Your server will be at `ws://your-runpod-ip:8000/api/asr-streaming`
+4. **Connect**: Server will be at `ws://your-runpod-ip:8000`
 
-### Runpod Configuration
-
-**Environment Variables** (optional, set in `.env`):
-```bash
-# Server binding
-MOSHI_ADDR=0.0.0.0          # Bind to all interfaces
-MOSHI_PORT=8000             # Default port
-MOSHI_CLIENT_HOST=127.0.0.1 # Internal health check host
-
-# Public endpoint (if using Runpod proxy)
-MOSHI_PUBLIC_WS_URL=wss://your-runpod-proxy.com
-
-# Performance tuning
-HF_HOME=/workspace/hf_cache          # Model cache location
-HF_HUB_ENABLE_HF_TRANSFER=1         # Fast downloads
-SMOKETEST_RTF=1000                   # Smoke test speed
-```
-
-**Resource Requirements:**
+**Requirements:**
 - **GPU**: L40S/A100 (recommended) or RTX 4090/3090
-- **RAM**: 16GB+ (32GB recommended)  
-- **Storage**: 20GB+ free space
-- **Network**: Public port 8000 exposed
+- **RAM**: 16GB+ system memory  
+- **Storage**: 10GB+ free space
+- **Network**: Port 8000 exposed publicly
+
+**Environment Variables** (optional):
+```bash
+# Server settings  
+MOSHI_ADDR=0.0.0.0     # Bind address
+MOSHI_PORT=8000        # Server port
+HF_HOME=/workspace/hf_cache    # Model cache location
+```
 
 ## 🔧 Configuration
 
@@ -150,453 +133,188 @@ ulimit -n 1048576  # High file descriptor limit
 # Supports hundreds of concurrent WebSocket connections
 ```
 
-## 🧪 Testing Your Deployed Server
+## 🧪 Testing
 
-Once your server is running, use the comprehensive test suite:
-
-### Prerequisites for Testing
+Install Python dependencies:
 ```bash
-# Install Python testing dependencies
-python3 -m venv venv
-source venv/bin/activate
+python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 🖥️ Interactive Client (`test/client.py`)
-**Real-time streaming client with live partial results**
-
+### Basic Testing
 ```bash
-# Connect to local server
-python test/client.py --server localhost:8000
+# Interactive client with network latency measurement (realtime)
+python test/client.py --server localhost:8000 --rtf 1.0
 
-# Connect to Runpod server  
-python test/client.py --server your-runpod-ip:8000/api/asr-streaming
+# Interactive client (fast)
+python test/client.py --server localhost:8000 --rtf 10.0
 
-# Test with specific audio file
-python test/client.py --file samples/mid.wav --rtf 1.0
+# Load testing (realtime)
+python test/bench.py --n 20 --concurrency 5 --rtf 1.0
 
-# Fast upload mode (no streaming delays)
-python test/client.py --mode oneshot --file samples/long.mp3
+# Load testing (fast)
+python test/bench.py --n 20 --concurrency 5 --rtf 100.0
+
+# Health check (fast warmup)
+python test/warmup.py --rtf 1000.0
 ```
 
-**What you'll see:**
-- Real-time `WORD:` events as speech is processed
-- `PART:` partial transcripts building up
-- Final transcription and timing metrics
-- Connection and protocol validation
-
-### 📊 Load Testing (`test/bench.py`)
-**Performance benchmarking with concurrent streams**
-
+### Checking Test Results & Logs
 ```bash
-# Light load test (20 sessions, 5 concurrent)
-python test/bench.py --n 20 --concurrency 5
-
-# Heavy load test (100 sessions, 20 concurrent)  
-python test/bench.py --n 100 --concurrency 20
-
-# Production server stress test
-python test/bench.py --server your-runpod-ip:8000/api/asr-streaming --n 200 --concurrency 50
-
-# Real-time vs throughput testing
-python test/bench.py --rtf 1.0 --mode stream     # Real-time simulation
-python test/bench.py --rtf 1000 --mode oneshot   # Max throughput
-```
-
-**Metrics you'll get:**
-- **Δ(audio) ms**: Key metric - how much faster/slower than audio duration (negative = faster than realtime)
-- **TTFW(word)**: Time to first word token (latency SLA)
-- **TTFW(text)**: Time to first partial text (user experience)
-- **Post-send→Final s**: Server compute tail (honest across realtime vs throughput modes)
-- **RTF/xRT**: Real-time factor and throughput analysis  
-- **P50/P95**: Percentile latency for production SLAs
-- **Error rates**: Connection failures and timeouts
-
-### 🔥 Server Warm-up (`test/warmup.py`)
-**Single connection verification and cache warming**
-
-```bash
-# Quick server health check
-python test/warmup.py
-
-# Fast warm-up (primes caches for consistent benchmarks)
-python test/warmup.py --rtf 1000
-
-# Debug mode (see all server protocol messages)
-python test/warmup.py --debug --server localhost:8000
-
-# Test transcription accuracy
-python test/warmup.py --file samples/mid.wav --rtf 1.0
-```
-
-### Test Audio Files
-Located in `samples/`:
-- `short-noisy.wav` - Quick test with background noise
-- `mid.wav` - Clean medium-length speech
-- `long.mp3` - Extended audio for endurance testing  
-- `long-noisy.mp3` - Challenging noisy audio
-
-## 📋 Test Outputs & Error Logs
-
-All test tools automatically create detailed logs and metrics in the `test/results/` directory:
-
-### Bench Test Results
-```bash
-# View per-stream metrics (JSONL format)
-cat test/results/bench_metrics.jsonl
-
-# Check for connection errors and timeouts  
-cat test/results/bench_errors.txt
-
-# Example metrics interpretation:
-# {
-#   "delta_to_audio_ms": -150.2,        # 150ms faster than realtime ✅
-#   "post_send_final_s": 0.847,         # Server processing time  
-#   "ttfw_word_s": 0.089,               # 89ms to first word
-#   "rtf_measured": 0.712,              # 0.71x realtime (1.4x faster)
-#   "partials": 23,                     # Streaming responsiveness
-#   "flush_to_final_ms": 45.3           # Protocol finalization time
-# }
-```
-
-### Warmup Test Results
-```bash
-# View single-session detailed results
-cat test/results/warmup.txt
-
-# Key fields to check:
-# - "text": Final transcription accuracy
-# - "delta_to_audio_ms": Speed vs realtime  
-# - "ttfw_s": Time to first response
-# - "rtf_measured": Actual vs target RTF
-```
-
-### Client Test Results
-```bash
-# View interactive client session metrics
+# View interactive client metrics and network latency
 cat test/results/client_metrics.jsonl
 
-# Monitor for:
-# - Connection stability (no sudden disconnects)
-# - Consistent partial updates during streaming
-# - Final transcription completeness
+# View load testing performance metrics  
+cat test/results/bench_metrics.jsonl | head -5
+
+# Check for connection errors and timeouts
+cat test/results/bench_errors.txt
+
+# View health check results
+cat test/results/warmup.txt
+
+# Monitor server logs during testing
+tail -f /workspace/logs/moshi-server.log
+
+# Check server status
+scripts/05_status.sh
 ```
 
-### Error Troubleshooting
+### Test Files
+- `samples/mid.wav` - Clean speech
+- `samples/long.mp3` - Extended audio
+- `samples/short-noisy.wav` - Background noise test
 
-**Connection Errors in bench_errors.txt:**
+### Test Results
+Tests create detailed logs in `test/results/`:
+- `client_metrics.jsonl` - Interactive session with network latency
+- `bench_metrics.jsonl` - Performance metrics
+- `bench_errors.txt` - Connection errors  
+- `warmup.txt` - Health check results
+
+**Network Latency Metrics** (in `client.py`):
+- **Connection time**: WebSocket establishment latency
+- **Handshake time**: Time to receive Ready message  
+- **First response**: Time from first audio to first server response
+
+### Analyzing Results
 ```bash
-# Check for common issues:
-grep -i "connection" test/results/bench_errors.txt
-grep -i "timeout" test/results/bench_errors.txt  
-grep -i "401\|404" test/results/bench_errors.txt
+# Find performance issues in bench results
+grep -E '"delta_to_audio_ms":[0-9]+' test/results/bench_metrics.jsonl | head -3
 
-# Solutions:
-# - 401/404: Check WebSocket path includes /api/asr-streaming
-# - Timeouts: Increase server resources or reduce concurrency
-# - Connection refused: Verify server is running (bash scripts/05_status.sh)
+# Check connection error patterns  
+grep -i "timeout\|connection\|refused" test/results/bench_errors.txt
+
+# Look for CUDA/GPU errors in server logs
+grep -i "cuda\|gpu\|memory" /workspace/logs/moshi-server.log
+
+# Monitor real-time performance during tests
+tail -f /workspace/logs/moshi-server.log | grep -i "batch\|worker"
 ```
 
-**Performance Red Flags:**
-```bash
-# Watch for these patterns in metrics:
-# - delta_to_audio_ms > 1000: Slower than realtime, scale up GPU
-# - rtf_measured > 2.0: Excessive processing time
-# - ttfw_word_s > 0.5: Poor initial latency  
-# - High error counts: Server overload or network issues
+## 🔌 Protocol
 
-# Check server resources during tests:
-nvidia-smi  # GPU utilization
-htop        # CPU/RAM usage during bench runs
-```
+**WebSocket Endpoint**: `ws://localhost:8000` 
 
-### Continuous Monitoring
-```bash
-# Run automated health checks
-python test/warmup.py --server localhost:8000 && echo "✅ Server OK" || echo "❌ Server Issues"
+**Audio Format**:
+- 24kHz, 16-bit PCM, mono
+- Base64 encoded in JSON messages
 
-# Benchmark trend monitoring  
-python test/bench.py --n 10 --concurrency 2 | grep "Δ(audio)"
-# Target: Δ(audio) avg < 100ms for production workloads
-```
-
-## 🔌 Moshi Protocol Details
-
-### WebSocket Protocol
-Your deployed server speaks the native Moshi Rust protocol:
-
-**Client → Server:**
+**Protocol Flow**:
 ```json
-{"type":"StartSTT"}                                    // Handshake
-{"type":"Audio","audio":"<base64_pcm_24khz_mono>"}     // Audio frames  
-{"type":"Flush"}                                       // End signal
-```
+// Client → Server
+{"type":"StartSTT"}                            // Start session
+{"type":"Audio","audio":"<base64_audio>"}      // Audio chunks
+{"type":"Flush"}                               // End session
 
-**Server → Client:**
-```json
-{"type":"Ready"}                          // Server ready
-{"type":"Step"}                          // Processing step  
-{"type":"Word","word":"hello"}           // Word token
-{"type":"Partial","text":"hello world"} // Partial transcript
-{"type":"Text","text":"hello world"}    // Updated transcript
-{"type":"Final","text":"hello world"}   // Final result
-```
-
-### Audio Format Requirements
-- **Sample Rate**: 24kHz (Moshi native)
-- **Channels**: Mono
-- **Format**: 16-bit PCM
-- **Chunk Size**: 80ms (1920 samples, 3840 bytes)
-- **Encoding**: Base64 encoded in JSON frames
-
-### WebSocket Endpoint  
-- **Path**: `/api/asr-streaming` (not root `/`)
-- **Full URL**: `ws://host:port/api/asr-streaming`
-- **SSL**: `wss://host:port/api/asr-streaming`
-- **Auth**: Requires `kyutai-api-key` header (set via `MOSHI_API_KEY` env var)
-
-### Environment Variables
-```bash
-# Set default server for all tests
-export MOSHI_SERVER=localhost:8000/api/asr-streaming
-python test/client.py  # Uses environment variable
-
-# Set API key (defaults to "public_token" for local testing)
-export MOSHI_API_KEY=your-secret-key
-python test/client.py
-
-# Both together for production testing
-export MOSHI_SERVER=prod-server:8000/api/asr-streaming
-export MOSHI_API_KEY=production-key
-python test/bench.py --n 100 --concurrency 20
-```
-
-### Connection Settings
-```python
-# Optimized WebSocket settings (used by test suite)
-import os
-API_KEY = os.getenv("MOSHI_API_KEY", "public_token")
-headers = [("kyutai-api-key", API_KEY)]
-
-websocket_options = {
-    "max_size": None,           # No frame size limit
-    "compression": None,        # Disable compression  
-    "ping_interval": 20,        # Keep-alive
-    "ping_timeout": 20,         
-    "max_queue": None,            # Send queue limit
-    "write_limit": 2**22,      # Write buffer size
-    "extra_headers": headers   # API key authentication
-}
+// Server → Client  
+{"type":"Ready"}                               // Ready to receive
+{"type":"Word","word":"hello"}                 // Word tokens
+{"type":"Partial","text":"hello world"}       // Partial results
+{"type":"Final","text":"hello world"}         // Final transcript
 ```
 
 ## 🐛 Troubleshooting
 
-### WebSocket 401/404 Errors
-**Problem**: Connection refused, 401 Unauthorized, or 404 during WebSocket handshake  
-
-**Common Causes:**
-1. **Wrong path**: Connecting to root `/` instead of `/api/asr-streaming` 
-2. **Missing API key**: Server expects `kyutai-api-key` header
-
-```bash
-# ❌ Wrong - will get 404
-python test/client.py --server localhost:8000
-
-# ✅ Correct - will connect successfully  
-python test/client.py --server localhost:8000/api/asr-streaming
-
-# ✅ With custom API key
-export MOSHI_API_KEY=your-secret-key
-python test/client.py --server localhost:8000/api/asr-streaming
-```
-
-**Solutions**: 
-- Always use the full path `/api/asr-streaming` 
-- Set `MOSHI_API_KEY` env var (defaults to `"public_token"` for local testing)
-
 ### Server Won't Start
 ```bash
-# Check CUDA installation
-nvidia-smi
-nvcc --version
+# Check CUDA 12.4 installation
+nvidia-smi && nvcc --version
 
-# Check dependencies
-bash scripts/00_prereqs.sh
-
-# View server logs
+# View server logs (live)
 tail -f /workspace/logs/moshi-server.log
 
+# Check specific errors in logs
+cat /workspace/logs/moshi-server.log | grep -i error
+
 # Check tmux session
-tmux ls
 tmux attach -t moshi-stt
 ```
 
-### GPU Issues
-```bash
-# Verify GPU detection
-python -c "import torch; print(torch.cuda.is_available())"
-
-# Check CUDA toolkit version matching
-ls /usr/local/cuda-*/bin/nvcc
-
-# Rebuild with correct CUDA
-bash scripts/99_stop.sh  # Clean everything
-bash scripts/main.sh     # Fresh install
-```
-
-### Connection Issues
+### Connection Issues  
 ```bash
 # Check port binding
 ss -tlnp | grep 8000
 
-# Test WebSocket connectivity  
-python -c "import websockets, asyncio; asyncio.run(websockets.connect('ws://localhost:8000/api/asr-streaming'))"
+# Test WebSocket connectivity
+python test/warmup.py
 
-# Check firewall (Runpod)
-# Ensure port 8000 is exposed in Runpod dashboard
+# Check recent connection errors
+cat test/results/bench_errors.txt | tail -10
+
+# For RunPod: ensure port 8000 is exposed
 ```
 
 ### Performance Issues
 ```bash
-# Monitor GPU usage during testing
+# Check GPU utilization during tests
 nvidia-smi -l 1
 
-# Check server resource usage
+# View server resource usage
 top -p $(pgrep moshi-server)
 
-# Reduce batch size in config
-vim /workspace/moshi-stt.toml
-# Decrease batch_size if running out of VRAM
+# Find slow sessions in results
+grep -E '"delta_to_audio_ms":[5-9][0-9][0-9]|[0-9]{4}' test/results/bench_metrics.jsonl
 ```
 
-### Audio/Testing Issues  
+### CUDA Issues
 ```bash
-# Install ffmpeg for audio conversion
-apt-get update && apt-get install -y ffmpeg
+# Check for CUDA errors in logs
+grep -i "cuda\|ptx\|driver" /workspace/logs/moshi-server.log
 
-# Test audio processing
-python -c "from test.utils import file_to_pcm16_mono_24k; print('OK' if file_to_pcm16_mono_24k('samples/mid.wav') else 'ERROR')"
-
-# Activate Python environment
-source venv/bin/activate
-pip install -r requirements.txt
-
-# Check test outputs for detailed error analysis
-cat test/results/bench_errors.txt      # Connection/timeout errors
-cat test/results/warmup.txt            # Single session diagnostics  
-cat test/results/client_metrics.jsonl  # Interactive session metrics
+# Clean install if CUDA problems
+scripts/99_stop.sh  
+scripts/main.sh
 ```
 
-## 📁 Directory Structure
+## 📁 Structure
 
 ```
-yap-stt-api/
-├── scripts/                          # Server deployment & management
-│   ├── main.sh                      # One-command complete setup
-│   ├── 00_prereqs.sh               # System dependencies (CUDA, Rust)
-│   ├── 01_install_moshi_server.sh  # Compile moshi-server
-│   ├── 02_fetch_configs.sh         # Get Kyutai configs
-│   ├── 03_start_server.sh          # Start server in tmux
-│   ├── 04_smoke_test.sh            # Smoke test with reference client
-│   ├── 05_status.sh                # Status monitoring
-│   ├── 99_stop.sh                  # Complete cleanup
-│   └── env.lib.sh                  # Environment configuration
-├── test/                            # Comprehensive testing suite
-│   ├── client.py                   # Interactive streaming client
-│   ├── bench.py                    # Load testing & benchmarks
-│   ├── warmup.py                   # Server warm-up & health check
-│   ├── utils.py                    # Audio processing utilities
-│   └── results/                    # Test outputs (auto-created)
-│       ├── bench_metrics.jsonl     # Per-stream benchmark data
-│       ├── bench_errors.txt        # Connection/timeout errors
-│       ├── client_metrics.jsonl    # Interactive session metrics
-│       └── warmup.txt              # Single-session diagnostics
-├── samples/                         # Test audio files
-│   ├── short-noisy.wav
-│   ├── mid.wav  
-│   ├── long.mp3
-│   └── long-noisy.mp3
-├── requirements.txt                 # Python testing dependencies
-└── README.md
+├── scripts/           # Deployment scripts
+│   ├── main.sh       # One-command setup
+│   ├── 00_prereqs.sh # CUDA 12.4 + dependencies
+│   ├── 01_install_moshi_server.sh # Compile server
+│   ├── 02_fetch_configs.sh        # Get STT configs
+│   ├── 03_start_server.sh         # Start in tmux
+│   ├── 05_status.sh               # Monitor server
+│   └── 99_stop.sh                 # Complete cleanup
+├── test/              # Testing suite
+│   ├── client.py     # Interactive client
+│   ├── bench.py      # Load testing
+│   └── warmup.py     # Health checks
+├── samples/           # Test audio files
+└── requirements.txt   # Python deps
 ```
 
-## 🔧 Advanced Usage
-
-### Custom Configuration
-```bash
-# Edit environment before setup
-cp scripts/.env.example scripts/.env
-vim scripts/.env
-
-# Custom server settings
-export MOSHI_PORT=8080
-export MOSHI_ADDR=0.0.0.0
-bash scripts/main.sh
-```
-
-### Multiple Servers (Load Balancing)
-```bash
-# Start additional servers on different ports
-MOSHI_PORT=8001 TMUX_SESSION=moshi-stt-1 bash scripts/03_start_server.sh
-MOSHI_PORT=8002 TMUX_SESSION=moshi-stt-2 bash scripts/03_start_server.sh
-
-# Test round-robin load balancing
-python test/bench.py --server localhost:8000 --n 30 --concurrency 10
-python test/bench.py --server localhost:8001 --n 30 --concurrency 10  
-python test/bench.py --server localhost:8002 --n 30 --concurrency 10
-```
-
-### Production Deployment
-```bash
-# Setup with production settings
-export HF_HOME=/opt/hf_cache
-export MOSHI_LOG_DIR=/opt/moshi-logs
-export MOSHI_ADDR=0.0.0.0
-bash scripts/main.sh
-
-# Setup log rotation
-echo "/opt/moshi-logs/*.log {
-    daily
-    rotate 7
-    compress
-    missingok
-    notifempty
-    sharedscripts
-}" > /etc/logrotate.d/moshi
-```
-
-### Proxy/SSL Setup
-```bash
-# Behind nginx proxy
-server {
-    listen 443 ssl;
-    server_name your-domain.com;
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-    }
-}
-
-# Test with SSL
-python test/client.py --server your-domain.com:443 --secure
-```
-
-## 🧹 Complete Removal
+## 🧹 Cleanup
 
 ```bash
-# Nuclear option - removes everything (~5GB freed)
-bash scripts/99_stop.sh
-
-# This removes:
-# - moshi-server binary and Rust toolchain
-# - Kyutai DSM repository and configs  
-# - HuggingFace model cache
-# - All logs and tmux sessions
-# - CUDA toolkit (optional)
+# Complete removal
+scripts/99_stop.sh
 ```
 
-## 📄 License
-
-MIT License - Production ready for commercial deployments.
+**Removes**:
+- moshi-server binary + Rust toolchain
+- All CUDA installations and configs
+- HuggingFace model cache and logs  
+- tmux sessions and build artifacts
