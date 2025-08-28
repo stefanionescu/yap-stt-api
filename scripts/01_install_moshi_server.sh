@@ -72,8 +72,15 @@ except OSError as e:
 PY
 
 if ! command -v moshi-server >/dev/null 2>&1; then
-  echo "[01] Installing moshi-server with CUDA ${CUDA_MM}, compute cap ${CUDA_COMPUTE_CAP}..."
-  cargo install --features cuda moshi-server
+  echo "[01] Building moshi-server from local workspace with CUDA ${CUDA_MM}, compute cap ${CUDA_COMPUTE_CAP}..."
+  
+  # Set cudarc NVRTC path to ensure it uses the correct CUDA version
+  export CUDARC_NVRTC_PATH="${CUDA_PREFIX}/lib64/libnvrtc.so"
+  
+  pushd "${ROOT_DIR}/../server"
+  cargo build --release --features cuda -p moshi-server
+  install -m 0755 target/release/moshi-server /usr/local/bin/moshi-server
+  popd
 else
   echo "[01] moshi-server already installed."
 fi

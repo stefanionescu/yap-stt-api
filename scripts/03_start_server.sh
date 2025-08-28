@@ -22,13 +22,8 @@ echo "  NVRTC chosen: $(ldconfig -p | awk '/libnvrtc\\.so/{print $NF; exit}')"
 # Show all CUDA libs the loader will see first
 ldconfig -p | grep -E 'lib(cudart|nvrtc|cuda)\.so' | sort -u | sed 's/^/    /'
 
-# Show current batch_size configuration
-echo "[03] Current batch_size configuration:"
-if [ -f "${MOSHI_CONFIG}" ]; then
-  grep -n "batch_size" "${MOSHI_CONFIG}" || echo "   No batch_size found in config"
-else
-  echo "   Config file not found: ${MOSHI_CONFIG}"
-fi
+# Show config file being used
+echo "[03] Using config file: ${MOSHI_CONFIG}"
 
 tmux has-session -t "${SESSION}" 2>/dev/null && tmux kill-session -t "${SESSION}"
 
@@ -52,11 +47,6 @@ echo "[03] Local client URL: ${LOCAL_URL}"
 [ -n "${MOSHI_PUBLIC_WS_URL}" ] && echo "[03] Public proxy URL: ${MOSHI_PUBLIC_WS_URL}"
 echo "[03] Log: ${LOG_FILE}"
 
-# Wait a moment for server to initialize and log configuration
+# Wait a moment for server to initialize
 sleep 3
-echo "[03] Verifying batch_size configuration in logs:"
-if [ -f "${LOG_FILE}" ]; then
-  grep -i "batch" "${LOG_FILE}" | tail -3 || echo "   No batch-related logs found yet"
-else
-  echo "   Log file not created yet"
-fi
+echo "[03] Server initialization complete. Check log file for details: ${LOG_FILE}"
