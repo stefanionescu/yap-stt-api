@@ -88,19 +88,20 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
                                     if debug:
                                         print(f"DEBUG: New partial text: '{txt}'")
                                 final_text = txt  # prefer Partial/Text over Word assembly
+                                # sync words array so later Words don't go backwards
+                                words = final_text.split()
                         elif kind == "Word":
-                            word_text = (data.get("text") or data.get("word") or "").strip()
-                            if word_text:
+                            w = (data.get("text") or data.get("word") or "").strip()
+                            if w:
                                 if ttfw is None:
-                                    ttfw = now - t0  # strict-ttfw on first word
-                                words.append(word_text)
-                                # treat each new word as a "partial" for gap metrics
-                                partial_ts.append(now - t0)
-                                # only update final_text from words if we haven't seen Partial/Text
-                                if not final_text:
-                                    final_text = " ".join(words)
+                                    ttfw = now - t0  # strict TTFW on first word
+                                words.append(w)  # accumulate words
+                                final_text = " ".join(words).strip()  # ALWAYS assemble running text
+                                if final_text != last_text:  # treat each new word as a partial
+                                    partial_ts.append(now - t0)
+                                    last_text = final_text
                                 if debug:
-                                    print(f"DEBUG: Word: '{word_text}', assembled: '{final_text}'")
+                                    print(f"DEBUG: Word: {w!r}, assembled: {final_text!r}")
                         elif kind in ("Marker", "Final"):
                             # End-of-utterance
                             txt = (data.get("text") or "").strip()
@@ -149,8 +150,8 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
                 if not done_event.is_set():
                     if words or final_text:
                         final_recv_ts = time.perf_counter()
-                        if not final_text:
-                            final_text = " ".join(words)
+                        if not final_text and words:
+                            final_text = " ".join(words).strip()
                         done_event.set()
                         if debug:
                             print(f"DEBUG: Treating close as final, text: '{final_text}'")
@@ -223,8 +224,8 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
             else:
                 # set final_recv_ts for metrics even on timeout
                 final_recv_ts = time.perf_counter()
-                if not final_text:
-                    final_text = " ".join(words)
+                if not final_text and words:
+                    final_text = " ".join(words).strip()
                 if debug:
                     print(f"DEBUG: Accepting timeout with text: '{final_text}'")
             pass

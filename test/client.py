@@ -127,20 +127,21 @@ async def run(args: argparse.Namespace) -> None:
                                     print(f"PART: {txt}")
                                     last_text = txt
                                 final_text = txt  # prefer Partial/Text over Word assembly
+                                # sync words array so later Words don't go backwards
+                                words = final_text.split()
                         elif kind == "Word":
-                            word_text = (data.get("text") or data.get("word") or "").strip()
-                            if word_text:
+                            w = (data.get("text") or data.get("word") or "").strip()
+                            if w:
                                 if ttfw is None:
-                                    ttfw = now - t0  # strict-ttfw on first word
-                                words.append(word_text)
-                                # treat each new word as a "partial" for gap metrics
-                                partial_ts.append(now - t0)
-                                # only update final_text from words if we haven't seen Partial/Text
-                                if not final_text:
-                                    final_text = " ".join(words)
+                                    ttfw = now - t0  # strict TTFW on first word
+                                words.append(w)  # accumulate words
+                                final_text = " ".join(words).strip()  # assemble running text
+                                if final_text != last_text:  # treat each new word as a partial
+                                    partial_ts.append(now - t0)
+                                    last_text = final_text
                                 # print occasional words, not every single one
                                 if len(words) % 5 == 1 or len(words) <= 3:
-                                    print(f"WORD: {word_text}")
+                                    print(f"WORD: {w!r}, assembled: {final_text!r}")
                         elif kind in ("Final", "Marker"):
                             txt = (data.get("text") or "").strip()
                             if txt:
@@ -168,8 +169,8 @@ async def run(args: argparse.Namespace) -> None:
                 if not done_event.is_set():
                     if words or final_text:
                         final_recv_ts = time.perf_counter()
-                        if not final_text:
-                            final_text = " ".join(words)
+                        if not final_text and words:
+                            final_text = " ".join(words).strip()
                         done_event.set()
                 pass
 
@@ -223,8 +224,8 @@ async def run(args: argparse.Namespace) -> None:
             else:
                 # set final_recv_ts for metrics even on timeout
                 final_recv_ts = time.perf_counter()
-                if not final_text:
-                    final_text = " ".join(words)
+                if not final_text and words:
+                    final_text = " ".join(words).strip()
         
         # Proactively close; then await receiver task
         with contextlib.suppress(websockets.exceptions.ConnectionClosed, 
