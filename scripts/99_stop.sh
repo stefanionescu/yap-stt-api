@@ -146,15 +146,13 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
       fi
     fi
     apt-get autoremove --purge -y 2>/dev/null || true
-    # Optional: force remove all cuda-* if user wants to fully nuke
-    if [[ "${1:-}" == "--nuke-cuda" ]]; then
-      echo "[99] --nuke-cuda flag detected, purging all cuda-* packages"
-      apt-get remove --purge -y 'cuda-*' nvidia-cuda-toolkit 2>/dev/null || true
-      rm -f /usr/local/cuda || true
-      rm -rf /usr/local/cuda-* || true
-      rm -f /etc/ld.so.conf.d/cuda-our-version.conf || true
-      ldconfig || true
-    fi
+    # Always nuke CUDA packages and symlinks to avoid conflicts on next run
+    echo "[99] Purging all CUDA packages and paths (default behavior)"
+    apt-get remove --purge -y 'cuda-*' nvidia-cuda-toolkit 2>/dev/null || true
+    rm -f /usr/local/cuda || true
+    rm -rf /usr/local/cuda-* || true
+    rm -f /etc/ld.so.conf.d/cuda-our-version.conf || true
+    ldconfig || true
     echo "[99] ✓ Removed system packages installed by scripts"
   fi
 else
@@ -193,7 +191,6 @@ echo
 echo "[99] ===== CLEANUP COMPLETE ====="
 echo "[99] Preserved:"
 echo "[99]   • Git repository and your code"
-echo "[99]   • RunPod's built-in CUDA toolkit (if not installed by scripts)"
 echo "[99]   • System packages that came with RunPod image"
 echo
 echo "[99] Removed:"

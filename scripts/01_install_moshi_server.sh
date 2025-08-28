@@ -30,13 +30,30 @@ if [ -L "/usr/local/cuda" ]; then
   fi
 fi
 
-echo "  NVRTC chosen: $(ldconfig -p | awk '/libnvrtc\\.so/{print $NF; exit}')"
 NVRTC_PATH=$(ldconfig -p | awk '/libnvrtc\\.so/{print $NF; exit}')
-if [[ "${NVRTC_PATH}" == "${CUDA_PREFIX}"* ]]; then
-  echo "  ✓ NVRTC from our CUDA version"
+CUDA_SYMLINK_TARGET=$(readlink -f /usr/local/cuda 2>/dev/null || true)
+echo "  NVRTC chosen: ${NVRTC_PATH:-<not found in ldconfig cache>}"
+
+# Accept either the explicit versioned prefix, or the /usr/local/cuda symlink if it points to our prefix
+if [[ -n "${NVRTC_PATH}" ]]; then
+  if [[ "${NVRTC_PATH}" == "${CUDA_PREFIX}"* ]] || { [[ "${NVRTC_PATH}" == "/usr/local/cuda"* ]] && [[ "${CUDA_SYMLINK_TARGET}" == "${CUDA_PREFIX}" ]]; }; then
+    echo "  ✓ NVRTC resolves to CUDA ${CUDA_MM}"
+  else
+    echo "  ⚠️  NVRTC path does not match ${CUDA_PREFIX}. Attempting to refresh ldconfig..."
+    echo "${CUDA_PREFIX}/lib64" > /etc/ld.so.conf.d/cuda-our-version.conf
+    echo "${CUDA_PREFIX}/targets/x86_64-linux/lib" >> /etc/ld.so.conf.d/cuda-our-version.conf
+    ldconfig
+    NVRTC_PATH=$(ldconfig -p | awk '/libnvrtc\\.so/{print $NF; exit}')
+    echo "  NVRTC after refresh: ${NVRTC_PATH:-<not found>}"
+    if [[ "${NVRTC_PATH}" == "${CUDA_PREFIX}"* ]] || { [[ "${NVRTC_PATH}" == "/usr/local/cuda"* ]] && [[ "${CUDA_SYMLINK_TARGET}" == "${CUDA_PREFIX}" ]]; }; then
+      echo "  ✓ NVRTC now resolves to CUDA ${CUDA_MM}"
+    else
+      echo "  ✗ ERROR: NVRTC from different CUDA version after refresh."
+      exit 2
+    fi
+  fi
 else
-  echo "  ⚠️  WARNING: NVRTC from different CUDA version! Failing fast."
-  exit 2
+  echo "  ⚠️  NVRTC not present in ldconfig cache; proceeding with LD_LIBRARY_PATH overrides"
 fi
 
 # Optional: show all CUDA libs the loader will see first
