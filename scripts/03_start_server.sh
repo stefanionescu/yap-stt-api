@@ -9,6 +9,15 @@ LOG_FILE="${MOSHI_LOG_DIR}/moshi-server.log"
 SESSION="${TMUX_SESSION}"
 
 echo "[03] Starting moshi-server in tmux '${SESSION}'…"
+
+# Show current batch_size configuration
+echo "[03] Current batch_size configuration:"
+if [ -f "${MOSHI_CONFIG}" ]; then
+  grep -n "batch_size" "${MOSHI_CONFIG}" || echo "   No batch_size found in config"
+else
+  echo "   Config file not found: ${MOSHI_CONFIG}"
+fi
+
 tmux has-session -t "${SESSION}" 2>/dev/null && tmux kill-session -t "${SESSION}"
 
 tmux new-session -d -s "${SESSION}" \
@@ -29,3 +38,12 @@ echo "[03] Bound at: ${BIND_URL}"
 echo "[03] Local client URL: ${LOCAL_URL}"
 [ -n "${MOSHI_PUBLIC_WS_URL}" ] && echo "[03] Public proxy URL: ${MOSHI_PUBLIC_WS_URL}"
 echo "[03] Log: ${LOG_FILE}"
+
+# Wait a moment for server to initialize and log configuration
+sleep 3
+echo "[03] Verifying batch_size configuration in logs:"
+if [ -f "${LOG_FILE}" ]; then
+  grep -i "batch" "${LOG_FILE}" | tail -3 || echo "   No batch-related logs found yet"
+else
+  echo "   Log file not created yet"
+fi
