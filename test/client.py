@@ -17,7 +17,7 @@ import websockets
 import numpy as np
 import msgpack
 
-from utils import file_to_pcm16_mono_24k, file_duration_seconds
+from utils import file_to_pcm16_mono_24k, file_duration_seconds, EOSDecider
 
 SAMPLES_DIR = "samples"
 EXTS = {".wav", ".flac", ".ogg", ".mp3"}
@@ -90,6 +90,9 @@ async def run(args: argparse.Namespace) -> None:
     final_text = ""
     last_text = ""
     words: list[str] = []  # fallback transcript from Word events
+    
+    # Dynamic EOS settle gate
+    eos_decider = EOSDecider()
 
     # Moshi server authentication
     API_KEY = os.getenv("MOSHI_API_KEY", "public_token")
@@ -132,6 +135,7 @@ async def run(args: argparse.Namespace) -> None:
                                 if txt != last_text:
                                     partial_ts.append(now - t0)
                                     last_partial_ts = now  # track last partial timestamp
+                                    eos_decider.update_partial(now)  # Update EOS state
                                     print(f"PART: {txt}")
                                     last_text = txt
                                 final_text = txt  # prefer Partial/Text over Word assembly
@@ -147,6 +151,7 @@ async def run(args: argparse.Namespace) -> None:
                                 if final_text != last_text:  # treat each new word as a partial
                                     partial_ts.append(now - t0)
                                     last_partial_ts = now  # track last partial timestamp
+                                    eos_decider.update_partial(now)  # Update EOS state
                                     last_text = final_text
                                 # print occasional words, not every single one
                                 if len(words) % 5 == 1 or len(words) <= 3:
@@ -165,7 +170,12 @@ async def run(args: argparse.Namespace) -> None:
                             # Ignore server step messages
                             continue
                         elif kind == "EndWord":
-                            # Word end event, ignore for display
+                            # Word end event - track for EOS decisions and handle pending words
+                            w = (data.get("text") or data.get("word") or "").strip()
+                            if w:
+                                eos_decider.set_pending_word(w)
+                                print(f"EndWord pending: {w!r}")
+                            eos_decider.set_end_word()
                             continue
                     else:
                         # Skip text messages
@@ -176,6 +186,12 @@ async def run(args: argparse.Namespace) -> None:
             except websockets.exceptions.ConnectionClosedError as e:
                 # server closed without a close frame — treat as final if we have content
                 if not done_event.is_set():
+                    # Check for pending word from EndWord events
+                    pending = eos_decider.get_pending_word()
+                    if pending:
+                        words.append(pending)
+                        print(f"Added pending word on close: {pending!r}")
+                    
                     if words or final_text:
                         final_recv_ts = time.perf_counter()
                         if not final_text and words:
@@ -229,36 +245,49 @@ async def run(args: argparse.Namespace) -> None:
                 await ws.send(msg)
                 last_chunk_sent_ts = time.perf_counter()
 
-        # flush + wait for final
+        # Dynamic EOS settle gate - wait for evidence utterance is over
+        print("Starting dynamic EOS settle gate")
+        await eos_decider.wait_for_settle(max_wait_ms=600)
+        
+        observed = eos_decider.observed_silence_ms()
+        needed = eos_decider.needed_padding_ms()
+        print(f"Settle complete - observed: {observed:.1f}ms, needed padding: {needed:.1f}ms")
+        
+        # Top up with just enough silence if needed
+        needed_ms = eos_decider.needed_padding_ms()
+        if needed_ms > 0:
+            frames = int((needed_ms + 79) // 80)  # ceil to 80ms frames
+            if frames > 0:
+                print(f"Adding {frames} silence frames ({frames * 80:.0f}ms)")
+                silence = np.zeros(1920, dtype=np.float32).tolist()
+                for _ in range(frames):
+                    await ws.send(msgpack.packb({"type":"Audio","pcm":silence},
+                                                use_bin_type=True, use_single_float=True))
+        
+        # Final flush
         await ws.send(msgpack.packb({"type": "Flush"}, use_bin_type=True))
         last_signal_ts = time.perf_counter()
+        print("Sent final Flush")
         
-        # Wait for server final with dynamic timeout based on file duration
+        # Wait for server final with dynamic timeout
         timeout_s = max(10.0, file_duration_s / args.rtf + 3.0)
-        # Minimal fast-path wait for Final
-        fast_wait = min(max(2 * (chunk_ms / 1000.0) / args.rtf, 0.2), 1.0)  # 0.2–1.0 s
+        print(f"Waiting for Final (timeout {timeout_s:.1f}s)")
         try:
-            await asyncio.wait_for(done_event.wait(), timeout=fast_wait)
+            await asyncio.wait_for(done_event.wait(), timeout=timeout_s)
         except asyncio.TimeoutError:
-            # Fallback: one zero-hop (no sleep) + re-Flush, then wait the remainder
-            print("No Final yet — sending single zero-hop + re-Flush")
-            silence = np.zeros(1920, dtype=np.float32)
-            msg = msgpack.packb({"type": "Audio", "pcm": silence.tolist()},
-                                use_bin_type=True, use_single_float=True)
-            await ws.send(msg)
-            await ws.send(msgpack.packb({"type": "Flush"}, use_bin_type=True))
-            last_signal_ts = time.perf_counter()
-            try:
-                remain = max(0.0, timeout_s - fast_wait)
-                await asyncio.wait_for(done_event.wait(), timeout=remain)
-            except asyncio.TimeoutError:
-                if words or final_text:
-                    final_recv_ts = time.perf_counter()
-                    if not final_text and words:
-                        final_text = " ".join(words).strip()
-                    print(f"Accepting timeout with partial text: '{final_text}'")
-                else:
-                    print("Warning: Timeout waiting for final response and no text received")
+            # Check for pending word from EndWord events before giving up
+            pending = eos_decider.get_pending_word()
+            if pending:
+                words.append(pending)
+                print(f"Added pending word on timeout: {pending!r}")
+            
+            if words or final_text:
+                final_recv_ts = time.perf_counter()
+                if not final_text and words:
+                    final_text = " ".join(words).strip()
+                print(f"Accepting timeout with text: '{final_text}'")
+            else:
+                print("Warning: Timeout waiting for final response and no text received")
         
         # Proactively close; don't block main path on close handshake
         with contextlib.suppress(Exception):

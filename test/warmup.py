@@ -10,7 +10,7 @@ import websockets
 import numpy as np
 import msgpack
 
-from utils import file_to_pcm16_mono_24k, file_duration_seconds
+from utils import file_to_pcm16_mono_24k, file_duration_seconds, EOSDecider
 
 SAMPLES_DIR = "samples"
 RESULTS_DIR = Path("test/results")
@@ -47,6 +47,9 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
     ready_event = asyncio.Event()
     done_event = asyncio.Event()
     ttfw = None
+    
+    # Dynamic EOS settle gate
+    eos_decider = EOSDecider()
 
     # Moshi server authentication
     API_KEY = os.getenv("MOSHI_API_KEY", "public_token")
@@ -92,6 +95,7 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
                                 if txt != last_text:
                                     partial_ts.append(now - t0)
                                     last_partial_ts = now  # track last partial timestamp
+                                    eos_decider.update_partial(now)  # Update EOS state
                                     last_text = txt
                                     if debug:
                                         print(f"DEBUG: New partial text: '{txt}'")
@@ -108,6 +112,7 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
                                 if final_text != last_text:  # treat each new word as a partial
                                     partial_ts.append(now - t0)
                                     last_partial_ts = now  # track last partial timestamp
+                                    eos_decider.update_partial(now)  # Update EOS state
                                     last_text = final_text
                                 if debug:
                                     print(f"DEBUG: Word: {w!r}, assembled: {final_text!r}")
@@ -128,7 +133,13 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
                             # Ignore server step messages
                             continue
                         elif kind == "EndWord":
-                            # Word end event, ignore for metrics
+                            # Word end event - track for EOS decisions and handle pending words
+                            w = (data.get("text") or data.get("word") or "").strip()
+                            if w:
+                                eos_decider.set_pending_word(w)
+                                if debug:
+                                    print(f"DEBUG: EndWord pending: {w!r}")
+                            eos_decider.set_end_word()
                             continue
                         else:
                             # Unknown message type, treat as potential text
@@ -158,6 +169,13 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
                 if debug:
                     print(f"DEBUG: Connection closed with error: {e}")
                 if not done_event.is_set():
+                    # Check for pending word from EndWord events
+                    pending = eos_decider.get_pending_word()
+                    if pending:
+                        words.append(pending)
+                        if debug:
+                            print(f"DEBUG: Added pending word on close: {pending!r}")
+                    
                     if words or final_text:
                         final_recv_ts = time.perf_counter()
                         if not final_text and words:
@@ -221,43 +239,59 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
                 await ws.send(msg)
                 last_chunk_sent_ts = time.perf_counter()
 
-        # flush + wait for final
+        # Dynamic EOS settle gate - wait for evidence utterance is over
+        if debug:
+            print("DEBUG: Starting dynamic EOS settle gate")
+        
+        # Wait until we have enough evidence that the user finished
+        await eos_decider.wait_for_settle(max_wait_ms=600)
+        
+        if debug:
+            observed = eos_decider.observed_silence_ms()
+            needed = eos_decider.needed_padding_ms()
+            print(f"DEBUG: Settle complete - observed: {observed:.1f}ms, needed padding: {needed:.1f}ms")
+        
+        # Top up with just enough silence if needed
+        needed_ms = eos_decider.needed_padding_ms()
+        if needed_ms > 0:
+            frames = int((needed_ms + 79) // 80)  # ceil to 80ms frames
+            if frames > 0:
+                if debug:
+                    print(f"DEBUG: Adding {frames} silence frames ({frames * 80:.0f}ms)")
+                silence = np.zeros(1920, dtype=np.float32).tolist()
+                for _ in range(frames):
+                    await ws.send(msgpack.packb({"type":"Audio","pcm":silence},
+                                                use_bin_type=True, use_single_float=True))
+        
+        # Final flush
         await ws.send(msgpack.packb({"type": "Flush"}, use_bin_type=True))
         last_signal_ts = time.perf_counter()
         if debug:
-            print("DEBUG: Sent Flush")
+            print("DEBUG: Sent final Flush")
         
-        # Wait for server final with dynamic timeout based on file duration
+        # Wait for server final with dynamic timeout
         timeout_s = max(10.0, file_duration_s / rtf + 3.0)
-        # Minimal fast-path wait for Final
-        fast_wait = min(max(2 * (chunk_ms / 1000.0) / rtf, 0.2), 1.0)  # 0.2–1.0 s
         if debug:
-            print(f"DEBUG: Waiting for Final (fast {fast_wait:.2f}s, then fallback; hard {timeout_s:.1f}s)")
+            print(f"DEBUG: Waiting for Final (timeout {timeout_s:.1f}s)")
         try:
-            await asyncio.wait_for(done_event.wait(), timeout=fast_wait)
+            await asyncio.wait_for(done_event.wait(), timeout=timeout_s)
         except asyncio.TimeoutError:
-            # Fallback: one zero-hop (no sleep) + re-Flush, then wait the remainder
-            if debug:
-                print("DEBUG: No Final yet — sending single zero-hop + re-Flush")
-            silence = np.zeros(1920, dtype=np.float32)
-            msg = msgpack.packb({"type": "Audio", "pcm": silence.tolist()},
-                                use_bin_type=True, use_single_float=True)
-            await ws.send(msg)
-            await ws.send(msgpack.packb({"type": "Flush"}, use_bin_type=True))
-            last_signal_ts = time.perf_counter()
-            try:
-                remain = max(0.0, timeout_s - fast_wait)
-                await asyncio.wait_for(done_event.wait(), timeout=remain)
-            except asyncio.TimeoutError:
-                if words or final_text:
-                    final_recv_ts = time.perf_counter()
-                    if not final_text and words:
-                        final_text = " ".join(words).strip()
-                    if debug:
-                        print(f"DEBUG: Accepting timeout with partial text: '{final_text}'")
-                else:
-                    if debug:
-                        print("DEBUG: No text received, real timeout")
+            # Check for pending word from EndWord events before giving up
+            pending = eos_decider.get_pending_word()
+            if pending:
+                words.append(pending)
+                if debug:
+                    print(f"DEBUG: Added pending word on timeout: {pending!r}")
+            
+            if words or final_text:
+                final_recv_ts = time.perf_counter()
+                if not final_text and words:
+                    final_text = " ".join(words).strip()
+                if debug:
+                    print(f"DEBUG: Accepting timeout with text: '{final_text}'")
+            else:
+                if debug:
+                    print("DEBUG: No text received, real timeout")
         
         # Proactively close; don't block main path on close handshake
         with contextlib.suppress(Exception):

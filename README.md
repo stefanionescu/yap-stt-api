@@ -204,9 +204,10 @@ python test/bench.py --rtf 1000 --mode oneshot   # Max throughput
 ```
 
 **Metrics you'll get:**
+- **Δ(audio) ms**: Key metric - how much faster/slower than audio duration (negative = faster than realtime)
 - **TTFW(word)**: Time to first word token (latency SLA)
 - **TTFW(text)**: Time to first partial text (user experience)
-- **Finalize latency**: End-of-audio to final result
+- **Post-send→Final s**: Server compute tail (honest across realtime vs throughput modes)
 - **RTF/xRT**: Real-time factor and throughput analysis  
 - **P50/P95**: Percentile latency for production SLAs
 - **Error rates**: Connection failures and timeouts
@@ -234,6 +235,90 @@ Located in `samples/`:
 - `mid.wav` - Clean medium-length speech
 - `long.mp3` - Extended audio for endurance testing  
 - `long-noisy.mp3` - Challenging noisy audio
+
+## 📋 Test Outputs & Error Logs
+
+All test tools automatically create detailed logs and metrics in the `test/results/` directory:
+
+### Bench Test Results
+```bash
+# View per-stream metrics (JSONL format)
+cat test/results/bench_metrics.jsonl
+
+# Check for connection errors and timeouts  
+cat test/results/bench_errors.txt
+
+# Example metrics interpretation:
+# {
+#   "delta_to_audio_ms": -150.2,        # 150ms faster than realtime ✅
+#   "post_send_final_s": 0.847,         # Server processing time  
+#   "ttfw_word_s": 0.089,               # 89ms to first word
+#   "rtf_measured": 0.712,              # 0.71x realtime (1.4x faster)
+#   "partials": 23,                     # Streaming responsiveness
+#   "flush_to_final_ms": 45.3           # Protocol finalization time
+# }
+```
+
+### Warmup Test Results
+```bash
+# View single-session detailed results
+cat test/results/warmup.txt
+
+# Key fields to check:
+# - "text": Final transcription accuracy
+# - "delta_to_audio_ms": Speed vs realtime  
+# - "ttfw_s": Time to first response
+# - "rtf_measured": Actual vs target RTF
+```
+
+### Client Test Results
+```bash
+# View interactive client session metrics
+cat test/results/client_metrics.jsonl
+
+# Monitor for:
+# - Connection stability (no sudden disconnects)
+# - Consistent partial updates during streaming
+# - Final transcription completeness
+```
+
+### Error Troubleshooting
+
+**Connection Errors in bench_errors.txt:**
+```bash
+# Check for common issues:
+grep -i "connection" test/results/bench_errors.txt
+grep -i "timeout" test/results/bench_errors.txt  
+grep -i "401\|404" test/results/bench_errors.txt
+
+# Solutions:
+# - 401/404: Check WebSocket path includes /api/asr-streaming
+# - Timeouts: Increase server resources or reduce concurrency
+# - Connection refused: Verify server is running (bash scripts/05_status.sh)
+```
+
+**Performance Red Flags:**
+```bash
+# Watch for these patterns in metrics:
+# - delta_to_audio_ms > 1000: Slower than realtime, scale up GPU
+# - rtf_measured > 2.0: Excessive processing time
+# - ttfw_word_s > 0.5: Poor initial latency  
+# - High error counts: Server overload or network issues
+
+# Check server resources during tests:
+nvidia-smi  # GPU utilization
+htop        # CPU/RAM usage during bench runs
+```
+
+### Continuous Monitoring
+```bash
+# Run automated health checks
+python test/warmup.py --server localhost:8000 && echo "✅ Server OK" || echo "❌ Server Issues"
+
+# Benchmark trend monitoring  
+python test/bench.py --n 10 --concurrency 2 | grep "Δ(audio)"
+# Target: Δ(audio) avg < 100ms for production workloads
+```
 
 ## 🔌 Moshi Protocol Details
 
@@ -395,6 +480,11 @@ python -c "from test.utils import file_to_pcm16_mono_24k; print('OK' if file_to_
 # Activate Python environment
 source venv/bin/activate
 pip install -r requirements.txt
+
+# Check test outputs for detailed error analysis
+cat test/results/bench_errors.txt      # Connection/timeout errors
+cat test/results/warmup.txt            # Single session diagnostics  
+cat test/results/client_metrics.jsonl  # Interactive session metrics
 ```
 
 ## 📁 Directory Structure
@@ -416,7 +506,11 @@ yap-stt-api/
 │   ├── bench.py                    # Load testing & benchmarks
 │   ├── warmup.py                   # Server warm-up & health check
 │   ├── utils.py                    # Audio processing utilities
-│   └── results/                    # Test output and metrics
+│   └── results/                    # Test outputs (auto-created)
+│       ├── bench_metrics.jsonl     # Per-stream benchmark data
+│       ├── bench_errors.txt        # Connection/timeout errors
+│       ├── client_metrics.jsonl    # Interactive session metrics
+│       └── warmup.txt              # Single-session diagnostics
 ├── samples/                         # Test audio files
 │   ├── short-noisy.wav
 │   ├── mid.wav  
