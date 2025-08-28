@@ -53,7 +53,9 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
         "ping_interval": 20,
         "ping_timeout": 20,
         "max_queue": None,
-        "write_limit": 2**22
+        "write_limit": 2**22,
+        "open_timeout": 10,
+        "close_timeout": 0.2,
     }
 
     t0 = time.perf_counter()
@@ -245,14 +247,10 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
                     print(f"DEBUG: Accepting timeout with text: '{final_text}'")
             pass
         
-        # Proactively close; then await receiver task
-        with contextlib.suppress(websockets.exceptions.ConnectionClosed, 
-                                websockets.exceptions.ConnectionClosedError, 
-                                websockets.exceptions.ConnectionClosedOK):
-            await ws.close(code=1000, reason="client done")
-        
+        # Proactively close; don't block main path on close handshake
         with contextlib.suppress(Exception):
-            await recv_task
+            asyncio.create_task(ws.close(code=1000, reason="client done"))
+        # Receiver may still be draining; don't await it if we're done
 
     elapsed_s = time.perf_counter() - t0
     finalize_ms = ((final_recv_ts - last_signal_ts) * 1000.0) if (final_recv_ts and last_signal_ts) else 0.0
@@ -261,6 +259,13 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
         gaps = [b - a for a, b in zip(partial_ts[:-1], partial_ts[1:])]
         avg_gap_ms = (sum(gaps) / len(gaps)) * 1000.0
 
+    # Add wall_to_final (up to Final) and audio_streamed (file + pad + tail)
+    wall_to_final = (final_recv_ts - t0) if final_recv_ts else elapsed_s
+    hop = 1920
+    original_samples = int(duration * 24000)
+    pad_s = ((hop - (original_samples % hop)) / 24000.0) if (original_samples % hop) else 0.0
+    tail_s = (12 * 0.080) / rtf
+
     return {
         "text": final_text,
         "elapsed_s": elapsed_s,
@@ -268,6 +273,8 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
         "partials": len(partial_ts) if mode == "stream" else 0,
         "avg_partial_gap_ms": avg_gap_ms if mode == "stream" else 0.0,
         "finalize_ms": finalize_ms if mode == "stream" else 0.0,
+        "wall_to_final_s": wall_to_final,
+        "audio_streamed_s": float(duration + pad_s + tail_s),
         "mode": mode,
         "rtf": rtf,
     }

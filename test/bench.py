@@ -142,7 +142,9 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
         "ping_interval": 20,
         "ping_timeout": 20,
         "max_queue": None,
-        "write_limit": 2**22
+        "write_limit": 2**22,
+        "open_timeout": 10,
+        "close_timeout": 0.2,
     }
 
     async with websockets.connect(url, **ws_options) as ws:
@@ -289,17 +291,22 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
                     final_text = " ".join(words).strip()
             pass
         
-        # Proactively close; then await receiver task
-        with contextlib.suppress(websockets.exceptions.ConnectionClosed, 
-                                websockets.exceptions.ConnectionClosedError, 
-                                websockets.exceptions.ConnectionClosedOK):
-            await ws.close(code=1000, reason="client done")
-        
+        # Proactively close; don't block main path on close handshake
         with contextlib.suppress(Exception):
-            await recv_task
+            asyncio.create_task(ws.close(code=1000, reason="client done"))
+        # Receiver may still be draining; don't await it if we're done
 
     wall = time.perf_counter() - t0
     metrics = _metrics(audio_seconds, wall, ttfw_word, ttfw_text)
+    # Add wall_to_final (up to Final) and audio_streamed (file + pad + tail)
+    wall_to_final = (final_recv_ts - t0) if final_recv_ts else wall
+    metrics["wall_to_final_s"] = float(wall_to_final)
+    # Compute pad_s and tail_s (tail is 12 hops @ 80ms / rtf)
+    hop = 1920
+    original_samples = int(audio_seconds * 24000)
+    pad_s = ((hop - (original_samples % hop)) / 24000.0) if (original_samples % hop) else 0.0
+    tail_s = (12 * 0.080) / rtf
+    metrics["audio_streamed_s"] = float(audio_seconds + pad_s + tail_s)
     if len(partial_ts) >= 2:
         gaps = [b - a for a, b in zip(partial_ts[:-1], partial_ts[1:])]
         avg_gap_ms = (sum(gaps) / len(gaps)) * 1000.0
@@ -312,7 +319,7 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
         "final_len_chars": float(len(final_text)),
         "finalize_ms": float(((final_recv_ts - last_signal_ts) * 1000.0) if (final_recv_ts and last_signal_ts) else 0.0),
         "mode": mode,
-        "rtf": float(rtf),
+        "rtf_target": float(rtf),
     })
     return metrics
 

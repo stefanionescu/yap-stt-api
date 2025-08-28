@@ -96,7 +96,9 @@ async def run(args: argparse.Namespace) -> None:
         "ping_interval": 20,
         "ping_timeout": 20,
         "max_queue": None,
-        "write_limit": 2**22
+        "write_limit": 2**22,
+        "open_timeout": 10,
+        "close_timeout": 0.2,
     }
 
     t0 = time.perf_counter()
@@ -242,14 +244,10 @@ async def run(args: argparse.Namespace) -> None:
                 if not final_text and words:
                     final_text = " ".join(words).strip()
         
-        # Proactively close; then await receiver task
-        with contextlib.suppress(websockets.exceptions.ConnectionClosed, 
-                                websockets.exceptions.ConnectionClosedError, 
-                                websockets.exceptions.ConnectionClosedOK):
-            await ws.close(code=1000, reason="client done")
-        
+        # Proactively close; don't block main path on close handshake
         with contextlib.suppress(Exception):
-            await recv_task
+            asyncio.create_task(ws.close(code=1000, reason="client done"))
+        # Receiver may still be draining; don't await it if we're done
 
     if final_text:
         print("\n=== Transcription Result ===")
