@@ -19,6 +19,8 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 import websockets  # pip install websockets
+import numpy as np
+import msgpack
 from utils import file_to_pcm16_mono_24k, file_duration_seconds
 
 SAMPLES_DIR = "samples"
@@ -97,15 +99,13 @@ def summarize(title: str, results: List[Dict[str, float]]) -> None:
 
 
 def _ws_url(server: str, secure: bool) -> str:
-    """Generate WebSocket URL for Moshi server at root path"""
-    if server.startswith("ws://") or server.startswith("wss://"):
+    """Generate WebSocket URL for Moshi server ASR streaming endpoint"""
+    if server.startswith(("ws://", "wss://")):
         return server
-    else:
-        scheme = "wss" if secure else "ws"
-        # Strip any existing paths - moshi server uses root path
-        if "/" in server:
-            server = server.split("/")[0]  # Keep only host:port
-        return f"{scheme}://{server}"
+    scheme = "wss" if secure else "ws"
+    # always add the path moshi-server exposes
+    host = server.rstrip("/")
+    return f"{scheme}://{host}/api/asr-streaming"
 
 
 async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: float, mode: str) -> Dict[str, float]:
@@ -123,16 +123,20 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
     final_recv_ts = 0.0
     last_text = ""
     final_text = ""
+    ready_event = asyncio.Event()
+    done_event = asyncio.Event()
 
     # Moshi uses 24kHz, 80ms chunks
     samples_per_chunk = int(24000 * 0.080)  # 1920 samples
     bytes_per_chunk = samples_per_chunk * 2  # 3840 bytes
     chunk_ms = 80.0
 
-    # Moshi server doesn't need authentication headers
+    # Moshi server authentication
+    API_KEY = os.getenv("MOSHI_API_KEY", "public_token")
     ws_options = {
-        "max_size": None,
+        "extra_headers": [("kyutai-api-key", API_KEY)],
         "compression": None,
+        "max_size": None,
         "ping_interval": 20,
         "ping_timeout": 20,
         "max_queue": 4,
@@ -140,34 +144,28 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
     }
 
     async with websockets.connect(url, **ws_options) as ws:
-        # No handshake needed - start streaming immediately
-        done_event = asyncio.Event()
-        final_seen = False
         
-        # receiver: Handle Moshi JSON message types
+        # receiver: Handle Moshi MessagePack message types
         async def receiver():
-            nonlocal ttfw_word, ttfw_text, final_recv_ts, final_text, last_text, final_seen
+            nonlocal ttfw_word, ttfw_text, final_recv_ts, final_text, last_text
             try:
-                async for msg in ws:
-                    if isinstance(msg, (bytes, bytearray)):
-                        continue  # Skip binary messages
-                    
-                    try:
-                        j = json.loads(msg)
-                        msg_type = j.get("type", "")
+                async for raw in ws:
+                    # moshi-server only sends binary frames
+                    if isinstance(raw, (bytes, bytearray)):
+                        data = msgpack.unpackb(raw, raw=False)
+                        kind = data.get("type")
                         
                         now = time.perf_counter()
                         
-                        if msg_type == "Step":
-                            # Ignore server step messages
-                            continue
-                        elif msg_type == "Word":
+                        if kind == "Ready":
+                            ready_event.set()
+                        elif kind == "Word":
                             # First word for strict TTFW
                             if ttfw_word is None:
                                 ttfw_word = now - t0
-                        elif msg_type in ("Partial", "Text"):
+                        elif kind in ("Partial", "Text"):
                             # Running transcript
-                            txt = j.get("text", "").strip()
+                            txt = (data.get("text") or "").strip()
                             if txt:
                                 if ttfw_text is None:
                                     ttfw_text = now - t0
@@ -175,65 +173,73 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
                                     partial_ts.append(now - t0)
                                     last_text = txt
                                 final_text = txt
-                        elif msg_type in ("Marker", "Final"):
+                        elif kind in ("Marker", "Final"):
                             # End-of-utterance
-                            txt = j.get("text", "").strip()
+                            txt = (data.get("text") or "").strip()
                             if txt:
                                 final_text = txt
-                            final_seen = True
                             final_recv_ts = now
                             done_event.set()
-                            return
-                        elif msg_type == "EndWord":
+                            break
+                        elif kind == "Error":
+                            done_event.set()
+                            break
+                        elif kind == "Step":
+                            # Ignore server step messages
+                            continue
+                        elif kind == "EndWord":
                             # Word end event, ignore for metrics
                             continue
-                        else:
-                            # Unknown message type, treat as potential text
-                            txt = j.get("text", "").strip()
-                            if txt and ttfw_text is None:
-                                ttfw_text = now - t0
-                            if txt and txt != last_text:
-                                partial_ts.append(now - t0)
-                                last_text = txt
-                            if txt:
-                                final_text = txt
-                                
-                    except (json.JSONDecodeError, TypeError):
-                        # Non-JSON message, ignore
+                    else:
+                        # Skip text messages
                         continue
             except websockets.exceptions.ConnectionClosedOK:
                 # graceful close — okay
                 pass
             except websockets.exceptions.ConnectionClosedError as e:
-                # server closed without a close frame — accept if we already saw final
-                if not final_seen:
-                    raise
+                # server closed without a close frame
+                pass
                 
             # socket closed
-            final_recv_ts = time.perf_counter()
+            if final_recv_ts == 0.0:
+                final_recv_ts = time.perf_counter()
 
         recv_task = asyncio.create_task(receiver())
 
-        # Start streaming immediately - no handshake needed
-
-        # sender: stream audio in JSON frames
+        # wait for Ready
+        await asyncio.wait_for(ready_event.wait(), timeout=10.0)
+        
+        # Convert PCM16 bytes to float32 normalized [-1,1]
+        pcm_int16 = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+        
+        # sender: stream audio in MessagePack frames
         if mode == "stream":
             # realistic streaming with RTF control
-            for i in range(0, len(pcm_bytes), bytes_per_chunk):
-                chunk = pcm_bytes[i:i+bytes_per_chunk]
-                await ws.send(chunk)  # Send raw PCM bytes
+            # 80 ms @ 24k = 1920 samples
+            hop = 1920
+            for i in range(0, len(pcm_int16), hop):
+                pcm_chunk = pcm_int16[i:i+hop]
+                if len(pcm_chunk) == 0:
+                    break
+                msg = msgpack.packb({"type": "Audio", "pcm": pcm_chunk.tolist()},
+                                   use_bin_type=True, use_single_float=True)
+                await ws.send(msg)
                 last_chunk_sent_ts = time.perf_counter()
                 await asyncio.sleep(chunk_ms / 1000.0 / rtf)
         else:
             # oneshot: no sleeps; still chunk for reasonable frame sizes
-            big = 48000  # ~2 sec of 24k audio per frame
-            for i in range(0, len(pcm_bytes), big):
-                chunk = pcm_bytes[i:i+big]
-                await ws.send(chunk)  # Send raw PCM bytes
+            hop = int(24000 * 2.0)  # ~2 sec chunks
+            for i in range(0, len(pcm_int16), hop):
+                pcm_chunk = pcm_int16[i:i+hop]
+                if len(pcm_chunk) == 0:
+                    break
+                msg = msgpack.packb({"type": "Audio", "pcm": pcm_chunk.tolist()},
+                                   use_bin_type=True, use_single_float=True)
+                await ws.send(msg)
                 last_chunk_sent_ts = time.perf_counter()
 
-        # signal end
-        await ws.send("Done")
+        # flush + wait for final
+        await ws.send(msgpack.packb({"type": "Flush"}, use_bin_type=True))
         
         # Wait for server final (avoid indefinite waits)
         try:
@@ -312,7 +318,7 @@ async def bench_ws(server: str, file_path: str, total_reqs: int, concurrency: in
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="WebSocket streaming benchmark (Moshi)")
-    ap.add_argument("--server", default="localhost:8000", help="host:port or ws://host:port or full URL")
+    ap.add_argument("--server", default="127.0.0.1:8000", help="host:port or ws://host:port or full URL")
     ap.add_argument("--secure", action="store_true", help="(ignored unless you run wss)")
     ap.add_argument("--n", type=int, default=20, help="Total sessions")
     ap.add_argument("--concurrency", type=int, default=5, help="Max concurrent sessions")

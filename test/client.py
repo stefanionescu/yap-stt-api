@@ -14,6 +14,8 @@ import os
 import time
 from pathlib import Path
 import websockets
+import numpy as np
+import msgpack
 
 from utils import file_to_pcm16_mono_24k, file_duration_seconds
 
@@ -39,7 +41,7 @@ def find_sample_by_name(filename: str) -> str | None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="WebSocket Moshi client")
-    parser.add_argument("--server", default=os.getenv("MOSHI_SERVER", "localhost:8000"),
+    parser.add_argument("--server", default=os.getenv("MOSHI_SERVER", "127.0.0.1:8000"),
                         help="host:port or ws://host:port or full URL")
     parser.add_argument("--secure", action="store_true", help="Use WSS (requires cert on server)")
     parser.add_argument("--file", type=str, default="mid.wav", help="Audio file from samples/")
@@ -48,15 +50,13 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 def _ws_url(server: str, secure: bool) -> str:
-    """Generate WebSocket URL for Moshi server at root path"""
-    if server.startswith("ws://") or server.startswith("wss://"):
+    """Generate WebSocket URL for Moshi server ASR streaming endpoint"""
+    if server.startswith(("ws://", "wss://")):
         return server
-    else:
-        scheme = "wss" if secure else "ws"
-        # Strip any existing paths - moshi server uses root path
-        if "/" in server:
-            server = server.split("/")[0]  # Keep only host:port
-        return f"{scheme}://{server}"
+    scheme = "wss" if secure else "ws"
+    # always add the path moshi-server exposes
+    host = server.rstrip("/")
+    return f"{scheme}://{host}/api/asr-streaming"
 
 async def run(args: argparse.Namespace) -> None:
     file_path = find_sample_by_name(args.file)
@@ -85,10 +85,12 @@ async def run(args: argparse.Namespace) -> None:
     final_text = ""
     last_text = ""
 
-    # Moshi server doesn't need authentication headers
+    # Moshi server authentication
+    API_KEY = os.getenv("MOSHI_API_KEY", "public_token")
     ws_options = {
-        "max_size": None,
+        "extra_headers": [("kyutai-api-key", API_KEY)],
         "compression": None,
+        "max_size": None,
         "ping_interval": 20,
         "ping_timeout": 20,
         "max_queue": 4,
@@ -96,92 +98,100 @@ async def run(args: argparse.Namespace) -> None:
     }
 
     t0 = time.perf_counter()
+    ttfw = None
+    ready_event = asyncio.Event()
+    done_event = asyncio.Event()
     async with websockets.connect(url, **ws_options) as ws:
-        # No handshake needed - start streaming immediately
-        done_event = asyncio.Event()
-        final_seen = False
         
         async def receiver():
-            nonlocal final_text, final_recv_ts, last_text, final_seen
+            nonlocal final_text, final_recv_ts, last_text, ttfw
             try:
-                async for msg in ws:
-                    if isinstance(msg, (bytes, bytearray)):
-                        continue  # Skip binary messages
-                    
-                    try:
-                        j = json.loads(msg)
-                        msg_type = j.get("type", "")
+                async for raw in ws:
+                    # moshi-server only sends binary frames
+                    if isinstance(raw, (bytes, bytearray)):
+                        data = msgpack.unpackb(raw, raw=False)
+                        kind = data.get("type")
                         
                         now = time.perf_counter()
                         
-                        if msg_type == "Step":
-                            # Ignore server step messages
-                            continue
-                        elif msg_type == "Word":
-                            # Word-level events - can print if desired
-                            word = j.get("word", "")
+                        if kind == "Ready":
+                            ready_event.set()
+                        elif kind in ("Partial", "Text"):
+                            txt = (data.get("text") or "").strip()
+                            if txt:
+                                if ttfw is None:
+                                    ttfw = now - t0
+                                if txt != last_text:
+                                    partial_ts.append(now - t0)
+                                    print(f"PART: {txt}")
+                                    last_text = txt
+                                final_text = txt
+                        elif kind == "Word":
+                            if ttfw is None:
+                                ttfw = now - t0  # strict-ttfw on first word
+                            word = data.get("word", "")
                             if word:
                                 print(f"WORD: {word}")
-                        elif msg_type in ("Partial", "Text"):
-                            # Running transcript
-                            txt = j.get("text", "").strip()
-                            if txt and txt != last_text:
-                                partial_ts.append(now - t0)
-                                print(f"PART: {txt}")
-                                last_text = txt
+                        elif kind in ("Final", "Marker"):
+                            txt = (data.get("text") or "").strip()
                             if txt:
                                 final_text = txt
-                        elif msg_type in ("Marker", "Final"):
-                            # End-of-utterance
-                            txt = j.get("text", "").strip()
-                            if txt:
-                                final_text = txt
-                            final_seen = True
                             final_recv_ts = now
                             done_event.set()
-                            return
-                        elif msg_type == "EndWord":
+                            break
+                        elif kind == "Error":
+                            done_event.set()
+                            break
+                        elif kind == "Step":
+                            # Ignore server step messages
+                            continue
+                        elif kind == "EndWord":
                             # Word end event, ignore for display
                             continue
-                        else:
-                            # Unknown message type, treat as potential text
-                            txt = j.get("text", "").strip()
-                            if txt and txt != last_text:
-                                print(f"UNK: {txt}")
-                                partial_ts.append(now - t0)
-                                last_text = txt
-                            if txt:
-                                final_text = txt
-                                
-                    except (json.JSONDecodeError, TypeError):
-                        # Non-JSON message, ignore
+                    else:
+                        # Skip text messages
                         continue
             except websockets.exceptions.ConnectionClosedOK:
                 # graceful close — okay
                 pass
             except websockets.exceptions.ConnectionClosedError as e:
-                # server closed without a close frame — accept if we already saw final
-                if not final_seen:
-                    raise
+                # server closed without a close frame
+                pass
 
         recv_task = asyncio.create_task(receiver())
 
-        # Start streaming immediately - no handshake needed
-
+        # wait for Ready
+        await asyncio.wait_for(ready_event.wait(), timeout=10.0)
+        
+        # Convert PCM16 bytes to float32 normalized [-1,1]
+        pcm_int16 = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+        
         if args.mode == "stream":
-            for i in range(0, len(pcm), bytes_per_chunk):
-                chunk = pcm[i:i+bytes_per_chunk]
-                await ws.send(chunk)  # Send raw PCM bytes
+            # 80 ms @ 24k = 1920 samples
+            hop = 1920
+            for i in range(0, len(pcm_int16), hop):
+                pcm_chunk = pcm_int16[i:i+hop]
+                if len(pcm_chunk) == 0:
+                    break
+                msg = msgpack.packb({"type": "Audio", "pcm": pcm_chunk.tolist()},
+                                   use_bin_type=True, use_single_float=True)
+                await ws.send(msg)
                 last_chunk_sent_ts = time.perf_counter()
                 await asyncio.sleep(chunk_ms / 1000.0 / args.rtf)
         else:
-            big = 48000  # ~2 sec of 24k audio per frame
-            for i in range(0, len(pcm), big):
-                chunk = pcm[i:i+big]
-                await ws.send(chunk)  # Send raw PCM bytes
+            # oneshot: larger chunks
+            hop = int(24000 * 2.0)  # ~2 sec chunks
+            for i in range(0, len(pcm_int16), hop):
+                pcm_chunk = pcm_int16[i:i+hop]
+                if len(pcm_chunk) == 0:
+                    break
+                msg = msgpack.packb({"type": "Audio", "pcm": pcm_chunk.tolist()},
+                                   use_bin_type=True, use_single_float=True)
+                await ws.send(msg)
                 last_chunk_sent_ts = time.perf_counter()
 
-        await ws.send("Done")
+        # flush + wait for final
+        await ws.send(msgpack.packb({"type": "Flush"}, use_bin_type=True))
         
         # Wait for server final (avoid indefinite waits)
         try:
@@ -211,7 +221,9 @@ async def run(args: argparse.Namespace) -> None:
         avg_gap_ms = (sum(gaps) / len(gaps)) * 1000.0
     else:
         avg_gap_ms = 0.0
-    print(f"Elapsed: {elapsed_s:.3f}s  Partials: {len(partial_ts)}  Avg partial gap: {avg_gap_ms:.1f} ms  Finalize: {finalize_ms:.1f} ms")
+    
+    ttfw_ms = (ttfw * 1000.0) if ttfw is not None else 0.0
+    print(f"Elapsed: {elapsed_s:.3f}s  TTFW: {ttfw_ms:.1f}ms  Partials: {len(partial_ts)}  Avg partial gap: {avg_gap_ms:.1f} ms  Finalize: {finalize_ms:.1f} ms")
 
     # metrics out
     out_dir = Path("test/results")
@@ -219,6 +231,7 @@ async def run(args: argparse.Namespace) -> None:
     with open(out_dir / "client_metrics.jsonl", "w", encoding="utf-8") as f:
         f.write(json.dumps({
             "elapsed_s": elapsed_s,
+            "ttfw_ms": ttfw_ms,
             "partials": len(partial_ts),
             "avg_partial_gap_ms": avg_gap_ms,
             "finalize_ms": finalize_ms,
