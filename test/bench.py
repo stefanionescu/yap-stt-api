@@ -179,7 +179,8 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
                                 if ttfw_word is None:
                                     ttfw_word = now - t0
                                 words.append(w)  # accumulate words
-                                final_text = " ".join(words).strip()  # assemble running text
+                                # Ensure proper spacing between words
+                                final_text = " ".join(words).strip()
                                 if final_text != last_text:  # treat each new word as a partial
                                     partial_ts.append(now - t0)
                                     last_text = final_text
@@ -211,8 +212,13 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
                 if not done_event.is_set():
                     if words or final_text:
                         final_recv_ts = time.perf_counter()
-                        if not final_text and words:
-                            final_text = " ".join(words).strip()
+                        # Always use the assembled words as final text (may be more complete)
+                        if words:
+                            assembled = " ".join(words).strip()
+                            # Add basic sentence punctuation if missing
+                            if assembled and not assembled[-1] in '.!?':
+                                assembled += "."
+                            final_text = assembled
                         done_event.set()
                 pass
                 
@@ -271,8 +277,13 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
             else:
                 # set final_recv_ts for metrics even on timeout
                 final_recv_ts = time.perf_counter()
-                if not final_text and words:
-                    final_text = " ".join(words).strip()
+                # Always use the assembled words as final text (may be more complete)
+                if words:
+                    assembled = " ".join(words).strip()
+                    # Add basic sentence punctuation if missing
+                    if assembled and not assembled[-1] in '.!?':
+                        assembled += "."
+                    final_text = assembled
             pass
         
         # Proactively close; then await receiver task
