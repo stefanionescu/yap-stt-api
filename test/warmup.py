@@ -39,6 +39,7 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
     final_text = ""
     last_text = ""
     words = []  # fallback transcript from Word events
+    last_word = ""
     ready_event = asyncio.Event()
     done_event = asyncio.Event()
     ttfw = None
@@ -95,6 +96,7 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
                             if w:
                                 if ttfw is None:
                                     ttfw = now - t0  # strict TTFW on first word
+                                last_word = w
                                 words.append(w)  # accumulate words
                                 final_text = " ".join(words).strip()  # ALWAYS assemble running text
                                 if final_text != last_text:  # treat each new word as a partial
@@ -107,6 +109,10 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
                             txt = (data.get("text") or "").strip()
                             if txt:
                                 final_text = txt
+                            # prefer assembled words if it is longer (captures any last word)
+                            assembled = " ".join(words).strip()
+                            if assembled and len(assembled) > len(final_text or ""):
+                                final_text = assembled
                             final_recv_ts = now
                             done_event.set()
                             if debug:
@@ -119,9 +125,7 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
                             # Ignore server step messages
                             continue
                         elif kind == "EndWord":
-                            # Ensure assembled text is captured even if no Partial/Text
-                            if not final_text and words:
-                                final_text = " ".join(words).strip()
+                            # Word end event, ignore for metrics
                             continue
                         else:
                             # Unknown message type, treat as potential text
@@ -152,8 +156,9 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
                 if not done_event.is_set():
                     if words or final_text:
                         final_recv_ts = time.perf_counter()
-                        if not final_text and words:
-                            final_text = " ".join(words).strip()
+                        assembled = " ".join(words).strip()
+                        if assembled and (not final_text or len(assembled) > len(final_text)):
+                            final_text = assembled
                         done_event.set()
                         if debug:
                             print(f"DEBUG: Treating close as final, text: '{final_text}'")
@@ -226,18 +231,11 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, mode: str, debug: bool
             else:
                 # set final_recv_ts for metrics even on timeout
                 final_recv_ts = time.perf_counter()
-                if not final_text and words:
-                    final_text = " ".join(words).strip()
+                assembled = " ".join(words).strip()
+                if assembled and (not final_text or len(assembled) > len(final_text)):
+                    final_text = assembled
                 if debug:
                     print(f"DEBUG: Accepting timeout with text: '{final_text}'")
-            pass
-        
-        # brief drain to capture last in-flight Word frames
-        try:
-            if debug:
-                print("DEBUG: Draining for 200ms to catch trailing words")
-            await asyncio.sleep(0.2)
-        except Exception:
             pass
         
         # Proactively close; then await receiver task

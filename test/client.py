@@ -85,6 +85,7 @@ async def run(args: argparse.Namespace) -> None:
     final_text = ""
     last_text = ""
     words: list[str] = []  # fallback transcript from Word events
+    last_word = ""
 
     # Moshi server authentication
     API_KEY = os.getenv("MOSHI_API_KEY", "public_token")
@@ -134,6 +135,7 @@ async def run(args: argparse.Namespace) -> None:
                             if w:
                                 if ttfw is None:
                                     ttfw = now - t0  # strict TTFW on first word
+                                last_word = w
                                 words.append(w)  # accumulate words
                                 final_text = " ".join(words).strip()  # assemble running text
                                 if final_text != last_text:  # treat each new word as a partial
@@ -146,6 +148,9 @@ async def run(args: argparse.Namespace) -> None:
                             txt = (data.get("text") or "").strip()
                             if txt:
                                 final_text = txt
+                            assembled = " ".join(words).strip()
+                            if assembled and len(assembled) > len(final_text or ""):
+                                final_text = assembled
                             final_recv_ts = now
                             done_event.set()
                             break
@@ -156,9 +161,7 @@ async def run(args: argparse.Namespace) -> None:
                             # Ignore server step messages
                             continue
                         elif kind == "EndWord":
-                            # Ensure assembled text is captured even if no Partial/Text
-                            if not final_text and words:
-                                final_text = " ".join(words).strip()
+                            # Word end event, ignore for display
                             continue
                     else:
                         # Skip text messages
@@ -171,8 +174,9 @@ async def run(args: argparse.Namespace) -> None:
                 if not done_event.is_set():
                     if words or final_text:
                         final_recv_ts = time.perf_counter()
-                        if not final_text and words:
-                            final_text = " ".join(words).strip()
+                        assembled = " ".join(words).strip()
+                        if assembled and (not final_text or len(assembled) > len(final_text)):
+                            final_text = assembled
                         done_event.set()
                 pass
 
@@ -226,15 +230,10 @@ async def run(args: argparse.Namespace) -> None:
             else:
                 # set final_recv_ts for metrics even on timeout
                 final_recv_ts = time.perf_counter()
-                if not final_text and words:
-                    final_text = " ".join(words).strip()
+                assembled = " ".join(words).strip()
+                if assembled and (not final_text or len(assembled) > len(final_text)):
+                    final_text = assembled
         
-        # brief drain to capture last in-flight Word frames
-        try:
-            await asyncio.sleep(0.2)
-        except Exception:
-            pass
-
         # Proactively close; then await receiver task
         with contextlib.suppress(websockets.exceptions.ConnectionClosed, 
                                 websockets.exceptions.ConnectionClosedError, 
