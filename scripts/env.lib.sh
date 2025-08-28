@@ -30,9 +30,26 @@ export MOSHI_CONFIG="${MOSHI_CONFIG:-/workspace/moshi-stt.toml}"
 export TMUX_SESSION="${TMUX_SESSION:-moshi-stt}"
 export SMOKETEST_RTF="${SMOKETEST_RTF:-1}"
 
-# Auto-select toolkit version to match driver
-export CUDA_MM="${CUDA_MM:-$(detect_cuda_mm)}"      # e.g., "12.2"
-export CUDA_MM_PKG="${CUDA_MM_PKG:-${CUDA_MM//./-}}" # e.g., "12-2"
+# Auto-select toolkit version to match driver, but cap to 12.4 for stability
+SUPPORT_MM="${CUDA_MM:-$(detect_cuda_mm)}"
+case "${SUPPORT_MM}" in
+  12.6|12.5|12.4) TOOLKIT_MM=12.4 ;;  # cap to 12.4 unless you know your driver supports newer
+  *) TOOLKIT_MM="${SUPPORT_MM}" ;;
+esac
+export CUDA_MM="${TOOLKIT_MM}"
+export CUDA_MM_PKG="${CUDA_MM_PKG:-${CUDA_MM//./-}}" # e.g., "12-4"
 export CUDA_PREFIX="/usr/local/cuda-${CUDA_MM}"
+
+# Force loader to use versioned CUDA libs and set L40S compute capability
+# This approach handles pre-existing CUDA by:
+# 1. Prioritizing our versioned libs via LD_LIBRARY_PATH (runtime override)
+# 2. Using ldconfig to set system-wide library precedence (in 00_prereqs.sh)
+# 3. Setting all CUDA_* env vars to point to our version
+# 4. Using explicit versioned path /usr/local/cuda-X.Y (avoids symlink conflicts)
+export LD_LIBRARY_PATH="${CUDA_PREFIX}/lib64:${CUDA_PREFIX}/targets/x86_64-linux/lib:${LD_LIBRARY_PATH:-}"
+export CUDA_HOME="${CUDA_PREFIX}"
+export CUDA_PATH="${CUDA_PREFIX}"
+export CUDA_ROOT="${CUDA_PREFIX}"
+export CUDA_COMPUTE_CAP="${CUDA_COMPUTE_CAP:-89}"  # L40S = sm_89
 
 mkdir -p "${HF_HOME}" "${MOSHI_LOG_DIR}"

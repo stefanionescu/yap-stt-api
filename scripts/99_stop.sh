@@ -132,8 +132,18 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
       # Remove CUDA apt source that WE added
       rm -f /etc/apt/sources.list.d/cuda.list
       rm -f /usr/share/keyrings/cuda-archive-keyring.gpg
+      # Remove our ldconfig configuration
+      rm -f /etc/ld.so.conf.d/cuda-our-version.conf
+      ldconfig
+      echo "[99] ✓ Cleaned up CUDA ldconfig configuration"
     else
       echo "[99] Keeping RunPod's built-in CUDA toolkit (not installed by us)"
+      # Still clean up our ldconfig config if it exists
+      if [ -f "/etc/ld.so.conf.d/cuda-our-version.conf" ]; then
+        rm -f /etc/ld.so.conf.d/cuda-our-version.conf
+        ldconfig
+        echo "[99] ✓ Cleaned up our CUDA ldconfig configuration"
+      fi
     fi
     apt-get autoremove --purge -y 2>/dev/null || true
     echo "[99] ✓ Removed system packages installed by scripts"

@@ -2,13 +2,25 @@
 set -euo pipefail
 source "$(dirname "$0")/env.lib.sh"
 
-export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+export PATH="${CUDA_PREFIX}/bin:$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
 export HF_HOME HF_HUB_ENABLE_HF_TRANSFER
 
 LOG_FILE="${MOSHI_LOG_DIR}/moshi-server.log"
 SESSION="${TMUX_SESSION}"
 
 echo "[03] Starting moshi-server in tmux '${SESSION}'…"
+
+# CUDA sanity checks before starting server
+echo "[03] CUDA sanity:"
+echo "  Driver says CUDA: $(nvidia-smi | awk -F'CUDA Version: ' '/CUDA Version/ {print $2}' | awk '{print $1}' | head -n1)"
+echo "  nvcc: $(nvcc --version | sed -n 's/^.*release //p' | head -n1)"
+echo "  Using CUDA prefix: ${CUDA_PREFIX}"
+echo "  LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
+echo "  CUDA_COMPUTE_CAP: ${CUDA_COMPUTE_CAP}"
+echo "  NVRTC chosen: $(ldconfig -p | awk '/libnvrtc.so/{print $NF}' | head -1)"
+
+# Show all CUDA libs the loader will see first
+ldconfig -p | grep -E 'lib(cudart|nvrtc|cuda)\.so' | sort -u | sed 's/^/    /'
 
 # Show current batch_size configuration
 echo "[03] Current batch_size configuration:"
@@ -21,7 +33,8 @@ fi
 tmux has-session -t "${SESSION}" 2>/dev/null && tmux kill-session -t "${SESSION}"
 
 tmux new-session -d -s "${SESSION}" \
-  "MOSHI_ADDR=${MOSHI_ADDR} MOSHI_PORT=${MOSHI_PORT} HF_HOME=${HF_HOME} HF_HUB_ENABLE_HF_TRANSFER=${HF_HUB_ENABLE_HF_TRANSFER} \
+  "LD_LIBRARY_PATH='${LD_LIBRARY_PATH}' PATH='${PATH}' CUDA_HOME='${CUDA_HOME}' CUDA_PATH='${CUDA_PATH}' CUDA_ROOT='${CUDA_ROOT}' CUDA_COMPUTE_CAP='${CUDA_COMPUTE_CAP}' \
+   MOSHI_ADDR=${MOSHI_ADDR} MOSHI_PORT=${MOSHI_PORT} HF_HOME=${HF_HOME} HF_HUB_ENABLE_HF_TRANSFER=${HF_HUB_ENABLE_HF_TRANSFER} \
    moshi-server worker --config '${MOSHI_CONFIG}' --addr '${MOSHI_ADDR}' --port '${MOSHI_PORT}' 2>&1 | tee '${LOG_FILE}'"
 
 # Wait for port to listen
