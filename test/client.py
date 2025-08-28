@@ -95,7 +95,7 @@ async def run(args: argparse.Namespace) -> None:
         "max_size": None,
         "ping_interval": 20,
         "ping_timeout": 20,
-        "max_queue": 4,
+        "max_queue": None,
         "write_limit": 2**22
     }
 

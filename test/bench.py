@@ -141,7 +141,7 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
         "max_size": None,
         "ping_interval": 20,
         "ping_timeout": 20,
-        "max_queue": 4,
+        "max_queue": None,
         "write_limit": 2**22
     }
 
@@ -337,9 +337,9 @@ async def bench_ws(server: str, file_path: str, total_reqs: int, concurrency: in
     async def worker(req_idx: int):
         nonlocal errors_total
         async with sem:
-            # Stagger stream starts by ~80ms to avoid thundering-herd
+            # Stagger stream starts with jitter to avoid thundering-herd
             if req_idx > 0:
-                await asyncio.sleep((req_idx % 8) * 0.010)
+                await asyncio.sleep((req_idx % 32) * 0.025)  # up to ~800 ms stagger per wave
             try:
                 # Dynamic timeout: audio duration * 2 + 60s buffer (minimum 300s for long streams)
                 timeout = max(300.0, audio_seconds * 2 + 60.0)

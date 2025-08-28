@@ -298,7 +298,7 @@ websocket_options = {
     "compression": None,        # Disable compression  
     "ping_interval": 20,        # Keep-alive
     "ping_timeout": 20,         
-    "max_queue": 4,            # Send queue limit
+    "max_queue": None,            # Send queue limit
     "write_limit": 2**22,      # Write buffer size
     "extra_headers": headers   # API key authentication
 }

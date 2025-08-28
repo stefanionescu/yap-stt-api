@@ -59,6 +59,19 @@ bash -c 'cat >/etc/security/limits.d/moshi-nofile.conf <<EOF
 EOF'
 ulimit -n 1048576 || true
 
+# OS/network tuning (backlog, ports, buffers)
+cat >/etc/sysctl.d/99-moshi-net.conf <<'EOF'
+net.core.somaxconn = 4096
+net.ipv4.tcp_max_syn_backlog = 8192
+net.core.netdev_max_backlog = 16384
+net.ipv4.ip_local_port_range = 10240 65000
+net.ipv4.tcp_fin_timeout = 15
+net.ipv4.tcp_tw_reuse = 1
+net.core.rmem_max = 67108864
+net.core.wmem_max = 67108864
+EOF
+sysctl -p /etc/sysctl.d/99-moshi-net.conf || true
+
 echo "[00] cmake: $(cmake --version | head -n1 || echo N/A)"
 echo "[00] nvcc:  $(nvcc --version | head -n1 || echo N/A)"
 echo "[00] CUDA:  ${CUDA_PREFIX}"
