@@ -241,9 +241,14 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
         pcm_int16 = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
         hop = 1920  # 80 ms @ 24k
         
+        # right before the loop
+        t_stream0 = time.perf_counter()
+        samples_sent = 0
+        sr = 24000
+
         # sender: stream audio in MessagePack frames
         if mode == "stream":
-            # realistic streaming with RTF control
+            # realistic streaming with RTF control - pace by wall-clock against audio timeline
             for i in range(0, len(pcm_int16), hop):
                 pcm_chunk = pcm_int16[i:i+hop]
                 if len(pcm_chunk) == 0:
@@ -252,7 +257,13 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
                                    use_bin_type=True, use_single_float=True)
                 await ws.send(msg)
                 last_chunk_sent_ts = time.perf_counter()
-                await asyncio.sleep(chunk_ms / 1000.0 / rtf)
+
+                # advance timeline by the *actual* chunk duration
+                samples_sent += len(pcm_chunk)
+                target = t_stream0 + (samples_sent / sr) / max(rtf, 1e-6)
+                sleep_for = target - time.perf_counter()
+                if sleep_for > 0:
+                    await asyncio.sleep(sleep_for)
         else:
             # oneshot: no sleeps; still chunk for reasonable frame sizes
             hop = int(24000 * 2.0)  # ~2 sec chunks
