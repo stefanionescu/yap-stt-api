@@ -9,15 +9,11 @@ else
   git -C "${DSM_REPO_DIR}" pull --ff-only || true
 fi
 
-cp "${DSM_REPO_DIR}/configs/config-stt-en_fr-hf.toml" "${MOSHI_CONFIG}"
-
-# Update batch_size for higher concurrent stream support (from 64 to 192)
-echo "[02] Updating batch_size for concurrent stream support…"
-if grep -q "batch_size *= *64" "${MOSHI_CONFIG}"; then
-  sed -i 's/^batch_size *= *64/batch_size = 192/' "${MOSHI_CONFIG}"
-  echo "[02] ✓ Updated batch_size from 64 to 192"
-else
-  echo "[02] ⚠ batch_size=64 not found in config, manual verification needed"
-fi
-
 echo "[02] Using config: ${MOSHI_CONFIG}"
+if [ -f "${MOSHI_CONFIG}" ]; then
+  echo "[02] ✓ Found local config (no changes made)"
+else
+  echo "[02] ✗ Config not found at ${MOSHI_CONFIG}"
+  echo "    Please ensure your config exists, e.g., config/config-stt-en_fr-hf.toml"
+  exit 1
+fi

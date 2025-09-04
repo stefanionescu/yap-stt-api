@@ -25,19 +25,29 @@ ldconfig -p | grep -E 'lib(cudart|nvrtc|cuda)\.so' | sort -u | sed 's/^/    /'
 # Show config file being used
 echo "[03] Using config file: ${MOSHI_CONFIG}"
 
+# Ensure CUDARC_NVRTC_PATH is set for the server process
+export CUDARC_NVRTC_PATH="${CUDA_PREFIX}/lib64/libnvrtc.so"
+
 tmux has-session -t "${SESSION}" 2>/dev/null && tmux kill-session -t "${SESSION}"
 
 tmux new-session -d -s "${SESSION}" \
   "LD_LIBRARY_PATH='${LD_LIBRARY_PATH}' PATH='${PATH}' CUDA_HOME='${CUDA_HOME}' CUDA_PATH='${CUDA_PATH}' CUDA_ROOT='${CUDA_ROOT}' CUDA_COMPUTE_CAP='${CUDA_COMPUTE_CAP}' \
-   MOSHI_ADDR=${MOSHI_ADDR} MOSHI_PORT=${MOSHI_PORT} HF_HOME=${HF_HOME} HF_HUB_ENABLE_HF_TRANSFER=${HF_HUB_ENABLE_HF_TRANSFER} \
+   CUDARC_NVRTC_PATH='${CUDARC_NVRTC_PATH}' HF_HOME='${HF_HOME}' HF_HUB_ENABLE_HF_TRANSFER='${HF_HUB_ENABLE_HF_TRANSFER}' \
    moshi-server worker --config '${MOSHI_CONFIG}' --addr '${MOSHI_ADDR}' --port '${MOSHI_PORT}' 2>&1 | tee '${LOG_FILE}'"
 
-# Wait for port to listen
-for i in {1..30}; do
+# Wait for port to listen with explicit timeout
+READY_TIMEOUT=60
+for i in $(seq 1 ${READY_TIMEOUT}); do
   if (exec 3<>/dev/tcp/${MOSHI_CLIENT_HOST}/${MOSHI_PORT}) 2>/dev/null; then
     exec 3>&-; break
   fi
   sleep 1
+  if [ $i -eq ${READY_TIMEOUT} ]; then
+    echo "[03] ERROR: Server did not open port ${MOSHI_PORT} within ${READY_TIMEOUT}s" >&2
+    echo "[03] Last 50 log lines:" >&2
+    tail -n 50 "${LOG_FILE}" || true
+    exit 1
+  fi
 done
 
 LOCAL_URL="ws://${MOSHI_CLIENT_HOST}:${MOSHI_PORT}"

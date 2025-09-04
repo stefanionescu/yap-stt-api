@@ -18,7 +18,8 @@ MOSHI_ADDR=0.0.0.0
 MOSHI_PORT=8000
 MOSHI_LOG_DIR=/workspace/logs
 DSM_REPO_DIR=/workspace/delayed-streams-modeling
-MOSHI_CONFIG=/workspace/moshi-stt.toml
+# Point to your local repo config; leave unset to use scripts/env.lib.sh default
+# MOSHI_CONFIG=
 TMUX_SESSION=moshi-stt
 # Optional: real-time factor for smoke test (1 = realtime, 1000 = as fast as possible)
 SMOKETEST_RTF=1000
