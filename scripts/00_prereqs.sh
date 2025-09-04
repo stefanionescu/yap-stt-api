@@ -12,11 +12,11 @@ apt-get update -y
 # Core build/runtime deps (minimal)
 apt-get install -y --no-install-recommends \
   build-essential git curl pkg-config libssl-dev ca-certificates \
-  cmake libopus-dev tmux gnupg
+  cmake libopus-dev tmux gnupg ffmpeg
 
 # Optional: smoke-test tooling (Python, ffmpeg, uv)
 if [ "${ENABLE_SMOKE_TEST}" = "1" ]; then
-  apt-get install -y --no-install-recommends python3 python3-venv python3-pip ffmpeg
+  apt-get install -y --no-install-recommends python3 python3-venv python3-pip
 fi
 
 # Add NVIDIA CUDA repo (Ubuntu 22.04)
