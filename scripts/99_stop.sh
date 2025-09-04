@@ -19,13 +19,23 @@ else
   echo "[99] ✓ Session '${TMUX_SESSION}' was not running"
 fi
 
+# 1b. Kill any stray moshi-server processes not in tmux
+if pgrep -f "(^|/| )moshi-server( |$)" >/dev/null 2>&1; then
+  pkill -9 -f "(^|/| )moshi-server( |$)" || true
+  echo "[99] ✓ Killed stray moshi-server processes"
+fi
+
 # 2. Uninstall moshi-server binary
 if command -v moshi-server >/dev/null 2>&1; then
+  BIN_PATH="$(command -v moshi-server)"
   if command -v cargo >/dev/null 2>&1; then
-    cargo uninstall moshi-server
-    echo "[99] ✓ Uninstalled moshi-server binary"
+    cargo uninstall moshi-server 2>/dev/null || true
+  fi
+  if [ -x "$BIN_PATH" ]; then
+    rm -f "$BIN_PATH"
+    echo "[99] ✓ Removed moshi-server binary at $BIN_PATH"
   else
-    echo "[99] ✗ cargo not found, cannot uninstall moshi-server"
+    echo "[99] ✓ moshi-server binary removed by cargo uninstall"
   fi
 else
   echo "[99] ✓ moshi-server was not installed"
@@ -33,7 +43,19 @@ fi
 
 # 3. Remove cloned repositories and config files
 [ -d "${DSM_REPO_DIR}" ] && rm -rf "${DSM_REPO_DIR}" && echo "[99] ✓ Removed ${DSM_REPO_DIR}"
-[ -f "${MOSHI_CONFIG}" ] && rm -f "${MOSHI_CONFIG}" && echo "[99] ✓ Removed ${MOSHI_CONFIG}"
+
+# Preserve repo-tracked config files; only remove external config paths
+REPO_ROOT="$(cd "${ROOT_DIR}/.." && pwd)"
+if [ -f "${MOSHI_CONFIG}" ]; then
+  case "${MOSHI_CONFIG}" in
+    ${REPO_ROOT}/*)
+      echo "[99] ✓ Preserving repo config ${MOSHI_CONFIG}"
+      ;;
+    *)
+      rm -f "${MOSHI_CONFIG}" && echo "[99] ✓ Removed ${MOSHI_CONFIG}"
+      ;;
+  esac
+fi
 
 # 4. Remove log directory
 [ -d "${MOSHI_LOG_DIR}" ] && rm -rf "${MOSHI_LOG_DIR}" && echo "[99] ✓ Removed ${MOSHI_LOG_DIR}"
@@ -65,12 +87,19 @@ find /tmp -name "rustc-*" -type d -exec rm -rf {} + 2>/dev/null || true
 echo "[99] ✓ Cleaned up temporary build directories"
 
 # 5e. Remove any downloaded model files that might be cached elsewhere
-find /workspace -name "*.bin" -o -name "*.safetensors" -o -name "*.onnx" | while read -r model_file; do
-  # Only remove large model files (>10MB) to avoid deleting random binaries
-  if [ -f "$model_file" ] && [ "$(stat -f%z "$model_file" 2>/dev/null || stat -c%s "$model_file" 2>/dev/null)" -gt 10485760 ]; then
-    rm -f "$model_file"
-    echo "[99] ✓ Removed model file: $model_file"
-  fi
+find /workspace -type f \( -name "*.bin" -o -name "*.safetensors" -o -name "*.onnx" \) 2>/dev/null | while read -r model_file; do
+  case "$model_file" in
+    ${REPO_ROOT}/*)
+      # keep files inside the git repo
+      ;;
+    *)
+      # Only remove large model files (>10MB) to avoid deleting random binaries
+      if [ -f "$model_file" ] && [ "$(stat -f%z "$model_file" 2>/dev/null || stat -c%s "$model_file" 2>/dev/null)" -gt 10485760 ]; then
+        rm -f "$model_file"
+        echo "[99] ✓ Removed model file: $model_file"
+      fi
+      ;;
+  esac
 done 2>/dev/null || true
 
 # 5f. Clean Python pip cache (can be huge)
@@ -199,7 +228,7 @@ echo "[99]   • Rust toolchain (~/.rustup and ~/.cargo)"
 echo "[99]   • uv tool and ~/.local directory"
 echo "[99]   • All downloaded models and HF cache"
 echo "[99]   • All log files and tmux sessions"
-echo "[99]   • Configuration files and cloned repos"
+echo "[99]   • Configuration files (outside repo) and cloned repos"
 echo "[99]   • Python pip cache (~/.cache/pip)"
 echo "[99]   • System package caches (apt, debconf, fontconfig)"
 echo "[99]   • All common cache directories"

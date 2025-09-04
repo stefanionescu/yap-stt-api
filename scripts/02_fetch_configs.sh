@@ -14,6 +14,6 @@ if [ -f "${MOSHI_CONFIG}" ]; then
   echo "[02] ✓ Found local config (no changes made)"
 else
   echo "[02] ✗ Config not found at ${MOSHI_CONFIG}"
-  echo "    Please ensure your config exists, e.g., config/config-stt-en_fr-hf.toml"
+  echo "    Please ensure your repo contains config/config-stt-en_fr-hf.toml or set MOSHI_CONFIG in scripts/.env"
   exit 1
 fi
