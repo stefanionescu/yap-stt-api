@@ -28,6 +28,12 @@ echo "[03] Using config file: ${MOSHI_CONFIG}"
 # Ensure CUDARC_NVRTC_PATH is set for the server process
 export CUDARC_NVRTC_PATH="${CUDA_PREFIX}/lib64/libnvrtc.so"
 
+# Prefetch: validate config to trigger model/tokenizer downloads before starting the server
+echo "[03] Prefetching weights (validate)..."
+set +e
+moshi-server validate "${MOSHI_CONFIG}" || true
+set -e
+
 tmux has-session -t "${SESSION}" 2>/dev/null && tmux kill-session -t "${SESSION}"
 
 tmux new-session -d -s "${SESSION}" \
@@ -35,8 +41,8 @@ tmux new-session -d -s "${SESSION}" \
    CUDARC_NVRTC_PATH='${CUDARC_NVRTC_PATH}' HF_HOME='${HF_HOME}' HF_HUB_ENABLE_HF_TRANSFER='${HF_HUB_ENABLE_HF_TRANSFER}' \
    moshi-server worker --config '${MOSHI_CONFIG}' --addr '${MOSHI_ADDR}' --port '${MOSHI_PORT}' 2>&1 | tee '${LOG_FILE}'"
 
-# Wait for port to listen with explicit timeout
-READY_TIMEOUT=60
+# Wait for port to listen with explicit timeout (first run may download weights)
+READY_TIMEOUT=180
 for i in $(seq 1 ${READY_TIMEOUT}); do
   if (exec 3<>/dev/tcp/${MOSHI_CLIENT_HOST}/${MOSHI_PORT}) 2>/dev/null; then
     exec 3>&-; break
