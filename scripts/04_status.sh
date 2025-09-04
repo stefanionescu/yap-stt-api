@@ -8,10 +8,10 @@ tmux ls || true
 echo
 
 echo "Listening sockets:"
-ss -lntp | grep -E ":${MOSHI_PORT}\b" || echo "(none)"
+ss -lntp | grep -E ":${YAP_PORT}\b" || echo "(none)"
 echo
 
 echo "Last 20 log lines:"
-tail -n 20 "${MOSHI_LOG_DIR}/moshi-server.log" || echo "(no log yet)"
+tail -n 20 "${YAP_LOG_DIR}/yap-server.log" || echo "(no log yet)"
 
 

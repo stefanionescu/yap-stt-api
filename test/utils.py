@@ -69,7 +69,7 @@ def file_to_pcm16_mono_16k(path: str) -> bytes:
 
 def file_to_pcm16_mono_24k(path: str) -> bytes:
     """
-    Load arbitrary audio file and return PCM16 mono @24k bytes suitable for Moshi WS streaming.
+    Load arbitrary audio file and return PCM16 mono @24k bytes suitable for Yap WS streaming.
     Prefers soundfile; falls back to ffmpeg for MP3/others if needed.
     """
     try:

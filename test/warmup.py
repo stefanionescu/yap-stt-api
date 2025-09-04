@@ -17,18 +17,18 @@ RESULTS_DIR = Path("test/results")
 RESULTS_FILE = RESULTS_DIR / "warmup.txt"
 
 def _ws_url(server: str, secure: bool) -> str:
-    """Generate WebSocket URL for Moshi server ASR streaming endpoint"""
+    """Generate WebSocket URL for Yap server ASR streaming endpoint"""
     if server.startswith(("ws://", "wss://")):
         return server
     scheme = "wss" if secure else "ws"
-    # always add the path moshi-server exposes
+    # always add the path yap-server exposes
     host = server.rstrip("/")
     return f"{scheme}://{host}/api/asr-streaming"
 
 async def _run(server: str, pcm_bytes: bytes, rtf: float, debug: bool = False) -> dict:
     url = _ws_url(server, secure=False)
     
-    # Moshi uses 24kHz, 80ms chunks
+    # Yap uses 24kHz, 80ms chunks
     samples_per_chunk = int(24000 * 0.080)  # 1920 samples
     bytes_per_chunk = samples_per_chunk * 2  # 3840 bytes
     chunk_ms = 80.0
@@ -51,8 +51,8 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, debug: bool = False) -
     # Dynamic EOS settle gate
     eos_decider = EOSDecider()
 
-    # Moshi server authentication
-    API_KEY = os.getenv("MOSHI_API_KEY", "public_token")
+    # Yap server authentication
+    API_KEY = os.getenv("YAP_API_KEY", "public_token")
     ws_options = {
         "extra_headers": [("kyutai-api-key", API_KEY)],
         "compression": None,
@@ -72,7 +72,7 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, debug: bool = False) -
             nonlocal final_text, final_recv_ts, last_text, ttfw, words
             try:
                 async for raw in ws:
-                    # moshi-server only sends binary frames
+                    # yap-server only sends binary frames
                     if isinstance(raw, (bytes, bytearray)):
                         if debug:
                             print(f"DEBUG: Received binary message (length: {len(raw)})")
@@ -337,7 +337,7 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, debug: bool = False) -
     }
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Warmup via Moshi WebSocket streaming")
+    parser = argparse.ArgumentParser(description="Warmup via Yap WebSocket streaming")
     parser.add_argument("--server", type=str, default="127.0.0.1:8000", help="host:port or ws://host:port or full URL")
     parser.add_argument("--secure", action="store_true")
     parser.add_argument("--file", type=str, default="mid.wav", help="Audio file. Absolute path or name in samples/")

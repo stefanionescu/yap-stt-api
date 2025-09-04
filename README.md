@@ -1,6 +1,6 @@
 # Yap STT Service
 
-One-command deployment for **Moshi STT Server** with GPU acceleration. Automated CUDA 12.4 setup, Rust compilation, and production-ready WebSocket server.
+One-command deployment for **Yap STT Server** with GPU acceleration. Automated CUDA 12.4 setup, Rust compilation, and production-ready WebSocket server.
 
 ## ✨ Features
 
@@ -14,13 +14,13 @@ One-command deployment for **Moshi STT Server** with GPU acceleration. Automated
 
 ### Complete Setup + Deployment
 ```bash
-# Download, compile, configure, and start Moshi STT server
+# Download, compile, configure, and start Yap STT server
 bash scripts/main.sh
 ```
 
 **This will:**
 1. Install CUDA 12.4 toolkit (purges conflicting versions)
-2. Install Rust toolchain and compile moshi-server with CUDA
+2. Install Rust toolchain and compile yap-server (yap-server) with CUDA
 3. Fetch Kyutai STT configs and models
 4. Start server in tmux session on port 8000
 5. Run smoke test to verify functionality
@@ -32,22 +32,22 @@ bash scripts/main.sh
 ### Check Server Status
 ```bash
 # View tmux sessions, listening ports, recent logs
-bash scripts/05_status.sh
+bash scripts/04_status.sh
 ```
 
 ### Monitor Server Logs
 ```bash
 # Tail live server logs
-tail -f /workspace/logs/moshi-server.log
+tail -f /workspace/logs/yap-server.log
 
 # Attach to tmux session
-tmux attach -t moshi-stt
+tmux attach -t yap-stt
 ```
 
 ### Stop Service
 ```bash
 # Graceful shutdown (keeps installation)
-tmux kill-session -t moshi-stt
+tmux kill-session -t yap-stt
 
 # Complete cleanup
 bash scripts/99_stop.sh
@@ -61,7 +61,7 @@ For development or custom deployments:
 # 1. Install system dependencies (CUDA, Rust, Python, ffmpeg)
 bash scripts/00_prereqs.sh
 
-# 2. Compile and install moshi-server with CUDA support
+# 2. Compile and install yap-server (yap-server) with CUDA support
 bash scripts/01_install_yap_server.sh
 
 # 3. Fetch Kyutai configs and STT model definitions
@@ -71,10 +71,10 @@ bash scripts/02_fetch_configs.sh
 bash scripts/03_start_server.sh
 
 # 5. Check status and verify port binding
-bash scripts/05_status.sh
+bash scripts/04_status.sh
 
-# 6. Run smoke test with reference client
-bash scripts/04_smoke_test.sh
+# 6. Run smoke test with reference client (if enabled)
+bash scripts/05_smoke_test.sh
 ```
 
 ## 🌐 Runpod Deployment
@@ -99,8 +99,8 @@ bash scripts/04_smoke_test.sh
 **Environment Variables** (optional):
 ```bash
 # Server settings  
-MOSHI_ADDR=0.0.0.0     # Bind address
-MOSHI_PORT=8000        # Server port
+YAP_ADDR=0.0.0.0     # Bind address
+YAP_PORT=8000        # Server port
 HF_HOME=/workspace/hf_cache    # Model cache location
 ```
 
@@ -118,7 +118,7 @@ The service uses Kyutai's official STT config (`config-stt-en_fr-hf.toml`) suppo
 **GPU Memory Optimization:**
 ```bash
 # Edit config after setup
-vim /workspace/moshi-stt.toml
+vim server/config-stt-en_fr-hf.toml
 
 # Key parameters:
 # - batch_size: Concurrent streams (adjust for VRAM)
@@ -174,10 +174,10 @@ cat test/results/bench_errors.txt
 cat test/results/warmup.txt
 
 # Monitor server logs during testing
-tail -f /workspace/logs/moshi-server.log
+tail -f /workspace/logs/yap-server.log
 
 # Check server status
-scripts/05_status.sh
+scripts/04_status.sh
 ```
 
 ### Test Files
@@ -206,10 +206,10 @@ grep -E '"delta_to_audio_ms":[0-9]+' test/results/bench_metrics.jsonl | head -3
 grep -i "timeout\|connection\|refused" test/results/bench_errors.txt
 
 # Look for CUDA/GPU errors in server logs
-grep -i "cuda\|gpu\|memory" /workspace/logs/moshi-server.log
+grep -i "cuda\|gpu\|memory" /workspace/logs/yap-server.log
 
 # Monitor real-time performance during tests
-tail -f /workspace/logs/moshi-server.log | grep -i "batch\|worker"
+tail -f /workspace/logs/yap-server.log | grep -i "batch\|worker"
 ```
 
 ## 🔌 Protocol
@@ -242,13 +242,13 @@ tail -f /workspace/logs/moshi-server.log | grep -i "batch\|worker"
 nvidia-smi && nvcc --version
 
 # View server logs (live)
-tail -f /workspace/logs/moshi-server.log
+tail -f /workspace/logs/yap-server.log
 
 # Check specific errors in logs
-cat /workspace/logs/moshi-server.log | grep -i error
+cat /workspace/logs/yap-server.log | grep -i error
 
 # Check tmux session
-tmux attach -t moshi-stt
+tmux attach -t yap-stt
 ```
 
 ### Connection Issues  
@@ -271,7 +271,7 @@ cat test/results/bench_errors.txt | tail -10
 nvidia-smi -l 1
 
 # View server resource usage
-top -p $(pgrep moshi-server)
+top -p $(pgrep yap-server)
 
 # Find slow sessions in results
 grep -E '"delta_to_audio_ms":[5-9][0-9][0-9]|[0-9]{4}' test/results/bench_metrics.jsonl
@@ -280,7 +280,7 @@ grep -E '"delta_to_audio_ms":[5-9][0-9][0-9]|[0-9]{4}' test/results/bench_metric
 ### CUDA Issues
 ```bash
 # Check for CUDA errors in logs
-grep -i "cuda\|ptx\|driver" /workspace/logs/moshi-server.log
+grep -i "cuda\|ptx\|driver" /workspace/logs/yap-server.log
 
 # Clean install if CUDA problems
 scripts/99_stop.sh  
@@ -296,7 +296,7 @@ scripts/main.sh
 │   ├── 01_install_yap_server.sh # Compile server
 │   ├── 02_fetch_configs.sh        # Get STT configs
 │   ├── 03_start_server.sh         # Start in tmux
-│   ├── 05_status.sh               # Monitor server
+│   ├── 04_status.sh               # Monitor server
 │   └── 99_stop.sh                 # Complete cleanup
 ├── test/              # Testing suite
 │   ├── client.py     # Interactive client
@@ -314,7 +314,7 @@ scripts/99_stop.sh
 ```
 
 **Removes**:
-- moshi-server binary + Rust toolchain
+- yap-server binary + Rust toolchain
 - All CUDA installations and configs
 - HuggingFace model cache and logs  
 - tmux sessions and build artifacts

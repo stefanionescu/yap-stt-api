@@ -20,13 +20,13 @@ detect_cuda_mm() {
 
 export HF_HOME="${HF_HOME:-/workspace/hf_cache}"
 export HF_HUB_ENABLE_HF_TRANSFER="${HF_HUB_ENABLE_HF_TRANSFER:-1}"
-export MOSHI_ADDR="${MOSHI_ADDR:-0.0.0.0}"
-export MOSHI_PORT="${MOSHI_PORT:-8000}"
-export MOSHI_CLIENT_HOST="${MOSHI_CLIENT_HOST:-127.0.0.1}"
-export MOSHI_PUBLIC_WS_URL="${MOSHI_PUBLIC_WS_URL:-}"
-export MOSHI_LOG_DIR="${MOSHI_LOG_DIR:-/workspace/logs}"
+export YAP_ADDR="${YAP_ADDR:-0.0.0.0}"
+export YAP_PORT="${YAP_PORT:-8000}"
+export YAP_CLIENT_HOST="${YAP_CLIENT_HOST:-127.0.0.1}"
+export YAP_PUBLIC_WS_URL="${YAP_PUBLIC_WS_URL:-}"
+export YAP_LOG_DIR="${YAP_LOG_DIR:-/workspace/logs}"
 export DSM_REPO_DIR="${DSM_REPO_DIR:-/workspace/delayed-streams-modeling}"
-export MOSHI_CONFIG="${MOSHI_CONFIG:-${ROOT_DIR}/../server/config-stt-en_fr-hf.toml}"
+export YAP_CONFIG="${YAP_CONFIG:-${ROOT_DIR}/../server/config-stt-en_fr-hf.toml}"
 export TMUX_SESSION="${TMUX_SESSION:-yap-stt}"
 export SMOKETEST_RTF="${SMOKETEST_RTF:-1}"
 
@@ -48,4 +48,4 @@ export CUDA_PATH="${CUDA_PREFIX}"
 export CUDA_ROOT="${CUDA_PREFIX}"
 export CUDA_COMPUTE_CAP="${CUDA_COMPUTE_CAP:-89}"  # L40S = sm_89
 
-mkdir -p "${HF_HOME}" "${MOSHI_LOG_DIR}"
+mkdir -p "${HF_HOME}" "${YAP_LOG_DIR}"

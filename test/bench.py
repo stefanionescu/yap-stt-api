@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Benchmark WebSocket streaming for Moshi ASR server.
+Benchmark WebSocket streaming for Yap ASR server.
 
 Streams PCM16@24k from audio files in JSON frames to simulate realtime voice.
 Measures latency (wall), time-to-first-word, and throughput under concurrency.
@@ -113,18 +113,18 @@ def summarize(title: str, results: List[Dict[str, float]]) -> None:
 
 
 def _ws_url(server: str, secure: bool) -> str:
-    """Generate WebSocket URL for Moshi server ASR streaming endpoint"""
+    """Generate WebSocket URL for Yap server ASR streaming endpoint"""
     if server.startswith(("ws://", "wss://")):
         return server
     scheme = "wss" if secure else "ws"
-    # always add the path moshi-server exposes
+    # always add the path yap-server exposes
     host = server.rstrip("/")
     return f"{scheme}://{host}/api/asr-streaming"
 
 
 async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: float) -> Dict[str, float]:
     """
-    One session over WebSocket using Moshi protocol with streaming mode.
+    One session over WebSocket using Yap protocol with streaming mode.
     rtf: Real-time factor for throttling (1.0 for realtime, higher for faster)
     """
     url = _ws_url(server, secure=False)
@@ -148,13 +148,13 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
     orig_samples = len(pcm_bytes) // 2
     file_duration_s = orig_samples / 24000.0
 
-    # Moshi uses 24kHz, 80ms chunks
+    # Yap uses 24kHz, 80ms chunks
     samples_per_chunk = int(24000 * 0.080)  # 1920 samples
     bytes_per_chunk = samples_per_chunk * 2  # 3840 bytes
     chunk_ms = 80.0
 
-    # Moshi server authentication
-    API_KEY = os.getenv("MOSHI_API_KEY", "public_token")
+    # Yap server authentication
+    API_KEY = os.getenv("YAP_API_KEY", "public_token")
     ws_options = {
         "extra_headers": [("kyutai-api-key", API_KEY)],
         "compression": None,
@@ -169,12 +169,12 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
 
     async with websockets.connect(url, **ws_options) as ws:
         
-        # receiver: Handle Moshi MessagePack message types
+        # receiver: Handle Yap MessagePack message types
         async def receiver():
             nonlocal ttfw_word, ttfw_text, final_recv_ts, final_text, last_text, words
             try:
                 async for raw in ws:
-                    # moshi-server only sends binary frames
+                    # yap-server only sends binary frames
                     if isinstance(raw, (bytes, bytearray)):
                         data = msgpack.unpackb(raw, raw=False)
                         kind = data.get("type")
@@ -389,7 +389,7 @@ async def bench_ws(server: str, file_path: str, total_reqs: int, concurrency: in
     rejected = 0
     errors_total = 0
 
-    # Use 24k PCM for Moshi, precompute once
+    # Use 24k PCM for Yap, precompute once
     pcm = file_to_pcm16_mono_24k(file_path)
     audio_seconds = file_duration_seconds(file_path)
 
@@ -418,7 +418,7 @@ async def bench_ws(server: str, file_path: str, total_reqs: int, concurrency: in
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="WebSocket streaming benchmark (Moshi)")
+    ap = argparse.ArgumentParser(description="WebSocket streaming benchmark (Yap)")
     ap.add_argument("--server", default="127.0.0.1:8000", help="host:port or ws://host:port or full URL")
     ap.add_argument("--secure", action="store_true", help="(ignored unless you run wss)")
     ap.add_argument("--n", type=int, default=20, help="Total sessions")

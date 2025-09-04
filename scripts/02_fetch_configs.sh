@@ -9,11 +9,11 @@ else
   git -C "${DSM_REPO_DIR}" pull --ff-only || true
 fi
 
-echo "[02] Using config: ${MOSHI_CONFIG}"
-if [ -f "${MOSHI_CONFIG}" ]; then
+echo "[02] Using config: ${YAP_CONFIG}"
+if [ -f "${YAP_CONFIG}" ]; then
   echo "[02] ✓ Found local config (no changes made)"
 else
-  echo "[02] ✗ Config not found at ${MOSHI_CONFIG}"
-  echo "    Please ensure your repo contains server/config-stt-en_fr-hf.toml or set MOSHI_CONFIG in scripts/.env"
+  echo "[02] ✗ Config not found at ${YAP_CONFIG}"
+  echo "    Please ensure your repo contains server/config-stt-en_fr-hf.toml or set YAP_CONFIG in scripts/.env"
   exit 1
 fi

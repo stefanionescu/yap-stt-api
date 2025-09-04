@@ -14,12 +14,12 @@ else
 # -------- KYUTAI STT RUNPOD ENV --------
 HF_HOME=/workspace/hf_cache
 HF_HUB_ENABLE_HF_TRANSFER=1
-MOSHI_ADDR=0.0.0.0
-MOSHI_PORT=8000
-MOSHI_LOG_DIR=/workspace/logs
+YAP_ADDR=0.0.0.0
+YAP_PORT=8000
+YAP_LOG_DIR=/workspace/logs
 DSM_REPO_DIR=/workspace/delayed-streams-modeling
 # Point to your local repo config; leave unset to use scripts/env.lib.sh default
-# MOSHI_CONFIG=
+# YAP_CONFIG=
 TMUX_SESSION=yap-stt
 # Optional features
 ENABLE_SMOKE_TEST=0
@@ -56,6 +56,6 @@ else
 fi
 
 echo
-echo "=== All done. Server is running in tmux session '${TMUX_SESSION}' on ${MOSHI_ADDR}:${MOSHI_PORT} ==="
+echo "=== All done. Server is running in tmux session '${TMUX_SESSION}' on ${YAP_ADDR}:${YAP_PORT} ==="
 echo "Use: scripts/04_status.sh   (tail logs, health)"
 echo "Use: scripts/99_stop.sh     (stop and clean session)"

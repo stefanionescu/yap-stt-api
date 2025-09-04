@@ -2,7 +2,7 @@
 set -euo pipefail
 source "$(dirname "$0")/env.lib.sh"
 
-echo "[99] Stopping and cleaning up moshi-server installation..."
+echo "[99] Stopping and cleaning up yap-server installation..."
 echo
 echo "[99] === DISK USAGE BEFORE CLEANUP ==="
 df -h | head -2
@@ -19,32 +19,19 @@ else
   echo "[99] ✓ Session '${TMUX_SESSION}' was not running"
 fi
 
-# 1b. Kill any stray moshi-server processes not in tmux
-if pgrep -f "(^|/| )(yap-server|moshi-server)( |$)" >/dev/null 2>&1; then
-  pkill -9 -f "(^|/| )(yap-server|moshi-server)( |$)" || true
-  echo "[99] ✓ Killed stray moshi-server processes"
+# 1b. Kill any stray yap-server processes not in tmux
+if pgrep -f "(^|/| )yap-server( |$)" >/dev/null 2>&1; then
+  pkill -9 -f "(^|/| )yap-server( |$)" || true
+  echo "[99] ✓ Killed stray yap-server processes"
 fi
 
-# 2. Uninstall moshi-server binary
-if command -v yap-server >/dev/null 2>&1 || command -v moshi-server >/dev/null 2>&1; then
-  BIN_PATH="$(command -v yap-server || command -v moshi-server)"
-  if command -v cargo >/dev/null 2>&1; then
-    cargo uninstall moshi-server 2>/dev/null || true
-  fi
-  if [ -x "$BIN_PATH" ]; then
-    rm -f "$BIN_PATH"
-    echo "[99] ✓ Removed moshi-server binary at $BIN_PATH"
-  else
-    echo "[99] ✓ moshi-server binary removed by cargo uninstall"
-  fi
+# 2. Uninstall yap-server binary
+if command -v yap-server >/dev/null 2>&1; then
+  BIN_PATH="$(command -v yap-server)"
+  rm -f "$BIN_PATH"
+  echo "[99] ✓ Removed yap-server binary at $BIN_PATH"
 else
-  echo "[99] ✓ moshi-server was not installed"
-fi
-
-# Remove yap-server symlink if present
-if [ -L "/usr/local/bin/yap-server" ]; then
-  rm -f "/usr/local/bin/yap-server"
-  echo "[99] ✓ Removed yap-server symlink"
+  echo "[99] ✓ yap-server was not installed"
 fi
 
 # 3. Remove cloned repositories and config files
@@ -52,19 +39,19 @@ fi
 
 # Preserve repo-tracked config files; only remove external config paths
 REPO_ROOT="$(cd "${ROOT_DIR}/.." && pwd)"
-if [ -f "${MOSHI_CONFIG}" ]; then
-  case "${MOSHI_CONFIG}" in
+if [ -f "${YAP_CONFIG}" ]; then
+  case "${YAP_CONFIG}" in
     ${REPO_ROOT}/*)
-      echo "[99] ✓ Preserving repo config ${MOSHI_CONFIG}"
+      echo "[99] ✓ Preserving repo config ${YAP_CONFIG}"
       ;;
     *)
-      rm -f "${MOSHI_CONFIG}" && echo "[99] ✓ Removed ${MOSHI_CONFIG}"
+      rm -f "${YAP_CONFIG}" && echo "[99] ✓ Removed ${YAP_CONFIG}"
       ;;
   esac
 fi
 
 # 4. Remove log directory
-[ -d "${MOSHI_LOG_DIR}" ] && rm -rf "${MOSHI_LOG_DIR}" && echo "[99] ✓ Removed ${MOSHI_LOG_DIR}"
+[ -d "${YAP_LOG_DIR}" ] && rm -rf "${YAP_LOG_DIR}" && echo "[99] ✓ Removed ${YAP_LOG_DIR}"
 
 # 5. Remove HuggingFace cache
 [ -d "${HF_HOME}" ] && rm -rf "${HF_HOME}" && echo "[99] ✓ Removed HF cache ${HF_HOME}"
@@ -229,7 +216,7 @@ echo "[99]   • Git repository and your code"
 echo "[99]   • System packages that came with RunPod image"
 echo
 echo "[99] Removed:"
-echo "[99]   • moshi-server binary"
+echo "[99]   • yap-server binary"
 echo "[99]   • Rust toolchain (~/.rustup and ~/.cargo)"
 echo "[99]   • uv tool and ~/.local directory"
 echo "[99]   • All downloaded models and HF cache"
