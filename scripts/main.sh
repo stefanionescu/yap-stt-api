@@ -20,7 +20,7 @@ MOSHI_LOG_DIR=/workspace/logs
 DSM_REPO_DIR=/workspace/delayed-streams-modeling
 # Point to your local repo config; leave unset to use scripts/env.lib.sh default
 # MOSHI_CONFIG=
-TMUX_SESSION=moshi-stt
+TMUX_SESSION=yap-stt
 # Optional features
 ENABLE_SMOKE_TEST=0
 ENABLE_NET_TUNING=0
@@ -40,7 +40,7 @@ done
 
 # Run the minimal phases
 "${BASE_DIR}/00_prereqs.sh"
-"${BASE_DIR}/01_install_moshi_server.sh"
+"${BASE_DIR}/01_install_yap_server.sh"
 
 # Optional: fetch DSM and run smoke test
 if [ "${ENABLE_SMOKE_TEST}" = "1" ]; then

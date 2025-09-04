@@ -27,7 +27,7 @@ export MOSHI_PUBLIC_WS_URL="${MOSHI_PUBLIC_WS_URL:-}"
 export MOSHI_LOG_DIR="${MOSHI_LOG_DIR:-/workspace/logs}"
 export DSM_REPO_DIR="${DSM_REPO_DIR:-/workspace/delayed-streams-modeling}"
 export MOSHI_CONFIG="${MOSHI_CONFIG:-${ROOT_DIR}/../server/config-stt-en_fr-hf.toml}"
-export TMUX_SESSION="${TMUX_SESSION:-moshi-stt}"
+export TMUX_SESSION="${TMUX_SESSION:-yap-stt}"
 export SMOKETEST_RTF="${SMOKETEST_RTF:-1}"
 
 # Always target CUDA 12.4 unless explicitly overridden

@@ -62,7 +62,7 @@ For development or custom deployments:
 bash scripts/00_prereqs.sh
 
 # 2. Compile and install moshi-server with CUDA support
-bash scripts/01_install_moshi_server.sh
+bash scripts/01_install_yap_server.sh
 
 # 3. Fetch Kyutai configs and STT model definitions
 bash scripts/02_fetch_configs.sh
@@ -293,7 +293,7 @@ scripts/main.sh
 ├── scripts/           # Deployment scripts
 │   ├── main.sh       # One-command setup
 │   ├── 00_prereqs.sh # CUDA 12.4 + dependencies
-│   ├── 01_install_moshi_server.sh # Compile server
+│   ├── 01_install_yap_server.sh # Compile server
 │   ├── 02_fetch_configs.sh        # Get STT configs
 │   ├── 03_start_server.sh         # Start in tmux
 │   ├── 05_status.sh               # Monitor server

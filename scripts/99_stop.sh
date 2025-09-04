@@ -20,14 +20,14 @@ else
 fi
 
 # 1b. Kill any stray moshi-server processes not in tmux
-if pgrep -f "(^|/| )moshi-server( |$)" >/dev/null 2>&1; then
-  pkill -9 -f "(^|/| )moshi-server( |$)" || true
+if pgrep -f "(^|/| )(yap-server|moshi-server)( |$)" >/dev/null 2>&1; then
+  pkill -9 -f "(^|/| )(yap-server|moshi-server)( |$)" || true
   echo "[99] ✓ Killed stray moshi-server processes"
 fi
 
 # 2. Uninstall moshi-server binary
-if command -v moshi-server >/dev/null 2>&1; then
-  BIN_PATH="$(command -v moshi-server)"
+if command -v yap-server >/dev/null 2>&1 || command -v moshi-server >/dev/null 2>&1; then
+  BIN_PATH="$(command -v yap-server || command -v moshi-server)"
   if command -v cargo >/dev/null 2>&1; then
     cargo uninstall moshi-server 2>/dev/null || true
   fi
@@ -39,6 +39,12 @@ if command -v moshi-server >/dev/null 2>&1; then
   fi
 else
   echo "[99] ✓ moshi-server was not installed"
+fi
+
+# Remove yap-server symlink if present
+if [ -L "/usr/local/bin/yap-server" ]; then
+  rm -f "/usr/local/bin/yap-server"
+  echo "[99] ✓ Removed yap-server symlink"
 fi
 
 # 3. Remove cloned repositories and config files

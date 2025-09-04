@@ -8,6 +8,10 @@ keywords.workspace = true
 categories.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "yap-server"
+path = "src/main.rs"
+
 [dependencies]
 anyhow = { workspace = true }
 axum = { workspace = true }
