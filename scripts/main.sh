@@ -21,6 +21,9 @@ DSM_REPO_DIR=/workspace/delayed-streams-modeling
 # Point to your local repo config; leave unset to use scripts/env.lib.sh default
 # MOSHI_CONFIG=
 TMUX_SESSION=moshi-stt
+# Optional features
+ENABLE_SMOKE_TEST=0
+ENABLE_NET_TUNING=0
 # Optional: real-time factor for smoke test (1 = realtime, 1000 = as fast as possible)
 SMOKETEST_RTF=1000
 EOF
@@ -35,16 +38,24 @@ for script in "${BASE_DIR}"/*.sh; do
   fi
 done
 
-# Run each phase
+# Run the minimal phases
 "${BASE_DIR}/00_prereqs.sh"
 "${BASE_DIR}/01_install_moshi_server.sh"
-"${BASE_DIR}/02_fetch_configs.sh"
-"${BASE_DIR}/03_start_server.sh"
-sleep 10
-"${BASE_DIR}/05_status.sh"
-"${BASE_DIR}/04_smoke_test.sh"
+
+# Optional: fetch DSM and run smoke test
+if [ "${ENABLE_SMOKE_TEST}" = "1" ]; then
+  "${BASE_DIR}/02_fetch_configs.sh"
+  "${BASE_DIR}/03_start_server.sh"
+  sleep 10
+  "${BASE_DIR}/04_status.sh"
+  "${BASE_DIR}/05_smoke_test.sh"
+else
+  "${BASE_DIR}/03_start_server.sh"
+  sleep 10
+  "${BASE_DIR}/04_status.sh"
+fi
 
 echo
 echo "=== All done. Server is running in tmux session '${TMUX_SESSION}' on ${MOSHI_ADDR}:${MOSHI_PORT} ==="
-echo "Use: scripts/05_status.sh   (tail logs, health)"
+echo "Use: scripts/04_status.sh   (tail logs, health)"
 echo "Use: scripts/99_stop.sh     (stop and clean session)"

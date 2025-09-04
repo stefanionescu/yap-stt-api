@@ -3,12 +3,21 @@ set -euo pipefail
 source "$(dirname "$0")/env.lib.sh"
 echo "[00] Installing prerequisites… (driver supports CUDA ${CUDA_MM})"
 
+# Feature flags
+ENABLE_SMOKE_TEST="${ENABLE_SMOKE_TEST:-0}"
+ENABLE_NET_TUNING="${ENABLE_NET_TUNING:-0}"
+
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
+# Core build/runtime deps (minimal)
 apt-get install -y --no-install-recommends \
   build-essential git curl pkg-config libssl-dev ca-certificates \
-  python3 python3-venv python3-pip ffmpeg tmux jq gnupg \
-  cmake libopus-dev
+  cmake libopus-dev tmux gnupg
+
+# Optional: smoke-test tooling (Python, ffmpeg, uv)
+if [ "${ENABLE_SMOKE_TEST}" = "1" ]; then
+  apt-get install -y --no-install-recommends python3 python3-venv python3-pip ffmpeg
+fi
 
 # Add NVIDIA CUDA repo (Ubuntu 22.04)
 if [ ! -f /usr/share/keyrings/cuda-archive-keyring.gpg ]; then
@@ -110,18 +119,20 @@ if [ -d "${CUDA_PREFIX}/bin" ]; then
   grep -q "CUDA_COMPUTE_CAP=" ~/.bashrc || echo "export CUDA_COMPUTE_CAP=89  # L40S = sm_89" >> ~/.bashrc
 fi
 
-# Rust & uv
+# Rust & optional uv
 if ! command -v cargo >/dev/null 2>&1; then
   curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable
   echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.bashrc
 fi
 export PATH="$HOME/.cargo/bin:$PATH"
 
-if ! command -v uv >/dev/null 2>&1; then
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+if [ "${ENABLE_SMOKE_TEST}" = "1" ]; then
+  if ! command -v uv >/dev/null 2>&1; then
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+  fi
+  export PATH="$HOME/.local/bin:$PATH"
 fi
-export PATH="$HOME/.local/bin:$PATH"
 
 # FD limits
 bash -c 'cat >/etc/security/limits.d/moshi-nofile.conf <<EOF
@@ -130,8 +141,9 @@ bash -c 'cat >/etc/security/limits.d/moshi-nofile.conf <<EOF
 EOF'
 ulimit -n 1048576 || true
 
-# OS/network tuning (backlog, ports, buffers)
-cat >/etc/sysctl.d/99-moshi-net.conf <<'EOF'
+# OS/network tuning (optional)
+if [ "${ENABLE_NET_TUNING}" = "1" ] && [ -w /proc/sys ]; then
+  cat >/etc/sysctl.d/99-moshi-net.conf <<'EOF'
 net.core.somaxconn = 4096
 net.ipv4.tcp_max_syn_backlog = 8192
 net.core.netdev_max_backlog = 16384
@@ -141,7 +153,10 @@ net.ipv4.tcp_tw_reuse = 1
 net.core.rmem_max = 67108864
 net.core.wmem_max = 67108864
 EOF
-sysctl -p /etc/sysctl.d/99-moshi-net.conf || true
+  sysctl -p /etc/sysctl.d/99-moshi-net.conf || true
+else
+  echo "[00] Skipping net tuning (ENABLE_NET_TUNING=0 or read-only fs)"
+fi
 
 echo "[00] cmake: $(cmake --version | head -n1 || echo N/A)"
 echo "[00] nvcc:  $(nvcc --version | head -n1 || echo N/A)"
