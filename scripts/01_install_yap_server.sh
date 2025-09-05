@@ -91,4 +91,4 @@ else
   echo "[01] yap-server already installed."
 fi
 
-echo "[01] yap-server: $(command -v yap-server || echo <not found>)"
+echo "[01] yap-server: $(command -v yap-server || echo '<not found>')"

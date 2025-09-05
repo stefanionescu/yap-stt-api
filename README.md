@@ -23,7 +23,7 @@ bash scripts/main.sh
 2. Install Rust toolchain and compile yap-server (yap-server) with CUDA
 3. Fetch STT configs and models
 4. Start server in tmux session on port 8000
-5. Run smoke test to verify functionality
+5. Optionally run a smoke test to verify functionality
 
 **Result:** GPU-accelerated STT server at `ws://localhost:8000` ready for connections.
 
