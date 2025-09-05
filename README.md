@@ -21,7 +21,7 @@ bash scripts/main.sh
 **This will:**
 1. Install CUDA 12.4 toolkit (purges conflicting versions)
 2. Install Rust toolchain and compile yap-server (yap-server) with CUDA
-3. Fetch Kyutai STT configs and models
+3. Fetch STT configs and models
 4. Start server in tmux session on port 8000
 5. Run smoke test to verify functionality
 
@@ -102,12 +102,14 @@ bash scripts/05_smoke_test.sh
 YAP_ADDR=0.0.0.0     # Bind address
 YAP_PORT=8000        # Server port
 HF_HOME=/workspace/hf_cache    # Model cache location
+# Auth
+YAP_API_KEY=public_token  # Clients must send header: yap-api-key: $YAP_API_KEY
 ```
 
 ## 🔧 Configuration
 
 ### Server Configuration
-The service uses Kyutai's official STT config (`config-stt-en_fr-hf.toml`) supporting:
+The service uses the provided STT config (`config-stt-en_fr-hf.toml`) supporting:
 - **Languages**: English + French  
 - **Models**: Streaming optimized Transformer architecture
 - **GPU**: CUDA acceleration with automatic mixed precision
@@ -144,19 +146,19 @@ pip install -r requirements.txt
 ### Basic Testing
 ```bash
 # Interactive client with network latency measurement (realtime)
-python test/client.py --server localhost:8000 --rtf 1.0
+YAP_API_KEY=public_token python test/client.py --server localhost:8000 --rtf 1.0
 
 # Interactive client (fast)
-python test/client.py --server localhost:8000 --rtf 10.0
+YAP_API_KEY=public_token python test/client.py --server localhost:8000 --rtf 10.0
 
 # Load testing (realtime)
-python test/bench.py --n 20 --concurrency 5 --rtf 1.0
+YAP_API_KEY=public_token python test/bench.py --n 20 --concurrency 5 --rtf 1.0
 
 # Load testing (fast)
-python test/bench.py --n 20 --concurrency 5 --rtf 100.0
+YAP_API_KEY=public_token python test/bench.py --n 20 --concurrency 5 --rtf 100.0
 
 # Health check (fast warmup)
-python test/warmup.py --rtf 1000.0
+YAP_API_KEY=public_token python test/warmup.py --rtf 1000.0
 ```
 
 ### Checking Test Results & Logs
@@ -232,6 +234,25 @@ tail -f /workspace/logs/yap-server.log | grep -i "batch\|worker"
 {"type":"Word","word":"hello"}                 // Word tokens
 {"type":"Partial","text":"hello world"}       // Partial results
 {"type":"Final","text":"hello world"}         // Final transcript
+```
+
+### Authentication
+
+- **Header**: `yap-api-key: <your_api_key>`
+- **Server config**: `scripts/03_start_server.sh` injects your key into `authorized_ids` at runtime.
+- **Set your key**:
+
+```bash
+# Option A: set once (default .env written by scripts/main.sh)
+sed -i.bak 's/^YAP_API_KEY=.*/YAP_API_KEY=my_secret_123/' scripts/.env
+
+# Option B: export before starting
+export YAP_API_KEY=my_secret_123
+scripts/03_start_server.sh
+
+# Clients:
+export YAP_API_KEY=my_secret_123
+python test/client.py --server localhost:8000
 ```
 
 ## 🐛 Troubleshooting

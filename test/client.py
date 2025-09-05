@@ -96,7 +96,7 @@ async def run(args: argparse.Namespace) -> None:
     # Yap server authentication
     API_KEY = os.getenv("YAP_API_KEY", "public_token")
     ws_options = {
-        "extra_headers": [("kyutai-api-key", API_KEY)],
+        "extra_headers": [("yap-api-key", API_KEY)],
         "compression": None,
         "max_size": None,
         "ping_interval": 20,

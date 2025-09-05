@@ -25,7 +25,7 @@ mod tts;
 mod tts_preprocess;
 mod utils;
 
-const ID_HEADER: &str = "kyutai-api-key";
+const ID_HEADER: &str = "yap-api-key";
 const ROOM_ID_HEADER: &str = "room_id";
 
 pub const TTS_PY: &[u8] = include_bytes!("../tts.py");
@@ -62,7 +62,7 @@ enum Command {
 }
 
 #[derive(clap::Parser, Debug)]
-#[clap(name = "server", about = "Kyutai moshi server")]
+#[clap(name = "server", about = "Yap STT server")]
 struct Args {
     #[command(subcommand)]
     command: Command,

@@ -156,7 +156,7 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
     # Yap server authentication
     API_KEY = os.getenv("YAP_API_KEY", "public_token")
     ws_options = {
-        "extra_headers": [("kyutai-api-key", API_KEY)],
+        "extra_headers": [("yap-api-key", API_KEY)],
         "compression": None,
         "max_size": None,
         "ping_interval": 20,
