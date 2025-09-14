@@ -11,7 +11,7 @@ if [ -f "${BASE_DIR}/.env" ]; then
 else
   # Create a default .env if missing
   cat > "${BASE_DIR}/.env" <<'EOF'
-# -------- KYUTAI STT RUNPOD ENV --------
+# -------- YAP STT RUNPOD ENV --------
 HF_HOME=/workspace/hf_cache
 HF_HUB_ENABLE_HF_TRANSFER=1
 YAP_ADDR=0.0.0.0

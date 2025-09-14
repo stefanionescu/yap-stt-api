@@ -19,6 +19,13 @@ import msgpack
 
 from utils import file_to_pcm16_mono_24k, file_duration_seconds, EOSDecider
 
+# Optionally load .env to pick up RUNPOD_* defaults if present
+try:
+    from dotenv import load_dotenv  # type: ignore
+    load_dotenv(override=True)
+except Exception:
+    pass
+
 SAMPLES_DIR = "samples"
 EXTS = {".wav", ".flac", ".ogg", ".mp3"}
 
@@ -41,8 +48,15 @@ def find_sample_by_name(filename: str) -> str | None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="WebSocket Yap client")
-    parser.add_argument("--server", default=os.getenv("YAP_SERVER", "127.0.0.1:8000"),
-                        help="host:port or ws://host:port or full URL")
+    # Prefer RUNPOD_TCP_HOST/PORT when available, else fall back to YAP_SERVER or localhost
+    runpod_host = os.getenv("RUNPOD_TCP_HOST")
+    runpod_port = os.getenv("RUNPOD_TCP_PORT") or "8000"
+    if runpod_host:
+        default_server = f"{runpod_host}:{runpod_port}"
+    else:
+        default_server = os.getenv("YAP_SERVER", "127.0.0.1:8000")
+    parser.add_argument("--server", default=default_server,
+                        help="host:port or ws://host:port or full URL (uses RUNPOD_TCP_HOST/PORT if set)")
     parser.add_argument("--secure", action="store_true", help="Use WSS (requires cert on server)")
     parser.add_argument("--file", type=str, default="mid.wav", help="Audio file from samples/")
     parser.add_argument("--rtf", type=float, default=1.0, help="Real-time factor (1.0=realtime, higher=faster)")
@@ -57,6 +71,10 @@ def _ws_url(server: str, secure: bool) -> str:
     host = server.rstrip("/")
     return f"{scheme}://{host}/api/asr-streaming"
 
+def _is_runpod_host(server: str) -> bool:
+    s = (server or "").strip().lower()
+    return "runpod.net" in s
+
 async def run(args: argparse.Namespace) -> None:
     file_path = find_sample_by_name(args.file)
     if not file_path:
@@ -69,7 +87,8 @@ async def run(args: argparse.Namespace) -> None:
     pcm = file_to_pcm16_mono_24k(file_path)
     duration = file_duration_seconds(file_path)
 
-    url = _ws_url(args.server, args.secure)
+    # Auto-enable TLS when targeting RunPod hosts unless explicitly overridden by scheme
+    url = _ws_url(args.server, args.secure or _is_runpod_host(args.server))
     print(f"Connecting to: {url}")
     print(f"File: {os.path.basename(file_path)} ({duration:.2f}s)")
 
@@ -93,8 +112,8 @@ async def run(args: argparse.Namespace) -> None:
     # Dynamic EOS settle gate
     eos_decider = EOSDecider()
 
-    # Yap server authentication
-    API_KEY = os.getenv("YAP_API_KEY", "public_token")
+    # Yap server authentication (prefer RunPod key if provided)
+    API_KEY = os.getenv("RUNPOD_API_KEY") or os.getenv("YAP_API_KEY") or "public_token"
     ws_options = {
         "extra_headers": [("yap-api-key", API_KEY)],
         "compression": None,
