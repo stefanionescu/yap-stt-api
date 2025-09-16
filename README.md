@@ -311,20 +311,20 @@ scripts/main.sh
 ## 📁 Structure
 
 ```
-├── scripts/           # Deployment scripts
-│   ├── main.sh       # One-command setup
-│   ├── 00_prereqs.sh # CUDA 12.4 + dependencies
-│   ├── 01_install_yap_server.sh # Compile server
+├── scripts/                       # Deployment scripts
+│   ├── main.sh                    # One-command setup
+│   ├── 00_prereqs.sh              # CUDA 12.4 + dependencies
+│   ├── 01_install_yap_server.sh   # Compile server
 │   ├── 02_fetch_configs.sh        # Get STT configs
 │   ├── 03_start_server.sh         # Start in tmux
 │   ├── 04_status.sh               # Monitor server
 │   └── 99_stop.sh                 # Complete cleanup
-├── test/              # Testing suite
-│   ├── client.py     # Interactive client
-│   ├── bench.py      # Load testing
-│   └── warmup.py     # Health checks
-├── samples/           # Test audio files
-└── requirements.txt   # Python deps
+├── test/                          # Testing suite
+│   ├── client.py                  # Interactive client
+│   ├── bench.py                   # Load testing
+│   └── warmup.py                  # Health checks
+├── samples/                       # Test audio files
+└── requirements.txt               # Python deps
 ```
 
 ## 🧹 Cleanup
