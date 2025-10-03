@@ -99,11 +99,11 @@ bash scripts/05_smoke_test.sh
 **Environment Variables** (optional):
 ```bash
 # Server settings  
-YAP_ADDR=0.0.0.0     # Bind address
-YAP_PORT=8000        # Server port
+YAP_ADDR=0.0.0.0               # Bind address
+YAP_PORT=8000                  # Server port
 HF_HOME=/workspace/hf_cache    # Model cache location
-# Auth
-YAP_API_KEY=public_token  # Clients must send header: yap-api-key: $YAP_API_KEY
+# Auth (Kyutai server key — NOT your RunPod API key)
+KYUTAI_API_KEY=public_token    # Clients must send header: kyutai-api-key: $KYUTAI_API_KEY
 ```
 
 ## 🔧 Configuration
@@ -146,19 +146,20 @@ pip install -r requirements.txt
 ### Basic Testing
 ```bash
 # Interactive client with network latency measurement (realtime)
-YAP_API_KEY=public_token python test/client.py --server localhost:8000 --rtf 1.0
+# Use the Kyutai API key (different from your RunPod API key)
+KYUTAI_API_KEY=public_token python test/client.py --server localhost:8000 --rtf 1.0
 
 # Interactive client (fast)
-YAP_API_KEY=public_token python test/client.py --server localhost:8000 --rtf 10.0
+KYUTAI_API_KEY=public_token python test/client.py --server localhost:8000 --rtf 10.0
 
 # Load testing (realtime)
-YAP_API_KEY=public_token python test/bench.py --n 20 --concurrency 5 --rtf 1.0
+KYUTAI_API_KEY=public_token python test/bench.py --n 20 --concurrency 5 --rtf 1.0
 
 # Load testing (fast)
-YAP_API_KEY=public_token python test/bench.py --n 20 --concurrency 5 --rtf 100.0
+KYUTAI_API_KEY=public_token python test/bench.py --n 20 --concurrency 5 --rtf 100.0
 
 # Health check (fast warmup)
-YAP_API_KEY=public_token python test/warmup.py --rtf 1000.0
+KYUTAI_API_KEY=public_token python test/warmup.py --rtf 1000.0
 ```
 
 ### Checking Test Results & Logs
@@ -238,21 +239,28 @@ tail -f /workspace/logs/yap-server.log | grep -i "batch\|worker"
 
 ### Authentication
 
-- **Header**: `yap-api-key: <your_api_key>`
+- **Header**: `kyutai-api-key: <your_api_key>` (Kyutai server key; do NOT use your RunPod key)
 - **Server config**: `scripts/03_start_server.sh` injects your key into `authorized_ids` at runtime.
 - **Set your key**:
 
 ```bash
 # Option A: set once (default .env written by scripts/main.sh)
-sed -i.bak 's/^YAP_API_KEY=.*/YAP_API_KEY=my_secret_123/' scripts/.env
+sed -i.bak 's/^KYUTAI_API_KEY=.*/KYUTAI_API_KEY=my_secret_123/' scripts/.env
 
-# Option B: export before starting
-export YAP_API_KEY=my_secret_123
+# Option B: export before starting (Kyutai key)
+export KYUTAI_API_KEY=my_secret_123
 scripts/03_start_server.sh
 
-# Clients:
-export YAP_API_KEY=my_secret_123
+# Clients (Kyutai key):
+export KYUTAI_API_KEY=my_secret_123
 python test/client.py --server localhost:8000
+
+For RunPod-hosted servers, you must also export your RunPod token and the client will pass it upstream:
+```bash
+export KYUTAI_API_KEY=my_secret_123
+export RUNPOD_API_KEY=rp_xxx
+python test/client.py --server your-pod-id-12345-uc.a.runpod.net:8000
+```
 ```
 
 ## 🐛 Troubleshooting

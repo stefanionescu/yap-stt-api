@@ -25,7 +25,7 @@ mod tts;
 mod tts_preprocess;
 mod utils;
 
-const ID_HEADER: &str = "yap-api-key";
+const ID_HEADER: &str = "kyutai-api-key";
 const ROOM_ID_HEADER: &str = "room_id";
 
 pub const TTS_PY: &[u8] = include_bytes!("../tts.py");
@@ -540,6 +540,11 @@ async fn main_() -> Result<()> {
             use axum::routing::get;
 
             let config = Config::load(&args.config)?;
+            if config.authorized_ids.is_empty() {
+                return Err(anyhow::format_err!(
+                    "No authorized_ids configured. Set KYUTAI_API_KEY or populate authorized_ids in the server config"
+                ));
+            }
             if std::env::var("RUST_LOG").is_err() {
                 std::env::set_var("RUST_LOG", format!("{},hyper=info,mio=info", args.log_level))
             }

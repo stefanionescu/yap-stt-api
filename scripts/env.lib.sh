@@ -29,6 +29,9 @@ export DSM_REPO_DIR="${DSM_REPO_DIR:-/workspace/delayed-streams-modeling}"
 export YAP_CONFIG="${YAP_CONFIG:-${ROOT_DIR}/../server/config-stt-en_fr-hf.toml}"
 export TMUX_SESSION="${TMUX_SESSION:-yap-stt}"
 export SMOKETEST_RTF="${SMOKETEST_RTF:-1}"
+# Kyutai server authentication key (not your RunPod API key)
+# Backward compatibility: accept legacy YAP_API_KEY if set
+export KYUTAI_API_KEY="${KYUTAI_API_KEY:-${YAP_API_KEY:-}}"
 
 # Always target CUDA 12.4 unless explicitly overridden
 # If a newer CUDA is present on the image, 00_prereqs.sh will purge it and install 12.4

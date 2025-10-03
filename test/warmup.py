@@ -51,10 +51,12 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, debug: bool = False) -
     # Dynamic EOS settle gate
     eos_decider = EOSDecider()
 
-    # Yap server authentication
-    API_KEY = os.getenv("YAP_API_KEY", "public_token")
+    # Kyutai model authentication (do not use RunPod API key)
+    API_KEY = os.getenv("KYUTAI_API_KEY")
+    if not API_KEY:
+        raise RuntimeError("KYUTAI_API_KEY is required for internal calls (warmup).")
     ws_options = {
-        "extra_headers": [("yap-api-key", API_KEY)],
+        "extra_headers": [("kyutai-api-key", API_KEY)],
         "compression": None,
         "max_size": None,
         "ping_interval": 20,

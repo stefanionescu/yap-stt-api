@@ -112,10 +112,20 @@ async def run(args: argparse.Namespace) -> None:
     # Dynamic EOS settle gate
     eos_decider = EOSDecider()
 
-    # Yap server authentication (prefer RunPod key if provided)
-    API_KEY = os.getenv("RUNPOD_API_KEY") or os.getenv("YAP_API_KEY") or "public_token"
+    # Authentication: always send Kyutai key to the model, and if routing through RunPod,
+    # include the RunPod API key for the upstream gateway.
+    KYUTAI_KEY = os.getenv("KYUTAI_API_KEY") or os.getenv("YAP_API_KEY")
+    if not KYUTAI_KEY:
+        raise RuntimeError("KYUTAI_API_KEY is required (client)")
+    extra_headers = [("kyutai-api-key", KYUTAI_KEY)]
+    RUNPOD_KEY = os.getenv("RUNPOD_API_KEY")
+    if _is_runpod_host(args.server):
+        if not RUNPOD_KEY:
+            raise RuntimeError("RUNPOD_API_KEY is required when targeting a RunPod host")
+        # Common RunPod pattern is Authorization: Bearer <token>
+        extra_headers.append(("Authorization", f"Bearer {RUNPOD_KEY}"))
     ws_options = {
-        "extra_headers": [("yap-api-key", API_KEY)],
+        "extra_headers": extra_headers,
         "compression": None,
         "max_size": None,
         "ping_interval": 20,

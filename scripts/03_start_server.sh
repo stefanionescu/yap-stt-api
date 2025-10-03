@@ -28,11 +28,14 @@ echo "[03] Using config file: ${YAP_CONFIG}"
 # Ensure CUDARC_NVRTC_PATH is set for the server process
 export CUDARC_NVRTC_PATH="${CUDA_PREFIX}/lib64/libnvrtc.so"
 
-# Prepare runtime config with API key injected into authorized_ids (if YAP_API_KEY is set)
+# Prepare runtime config with Kyutai API key injected into authorized_ids
+# Note: This is the Kyutai server key, not a RunPod token
 TMP_CONFIG="${YAP_CONFIG}.runtime"
-if [ "${YAP_API_KEY:-}" != "" ]; then
-  echo "[03] Writing runtime config with authorized_ids = ['${YAP_API_KEY}'] -> ${TMP_CONFIG}"
-  awk -v key="${YAP_API_KEY}" '
+if [ "${KYUTAI_API_KEY:-${YAP_API_KEY:-}}" != "" ]; then
+  # Prefer KYUTAI_API_KEY if set, else fallback to legacy YAP_API_KEY
+  EFFECTIVE_KEY="${KYUTAI_API_KEY:-${YAP_API_KEY:-}}"
+  echo "[03] Writing runtime config with authorized_ids = ['${EFFECTIVE_KEY}'] -> ${TMP_CONFIG}"
+  awk -v key="${EFFECTIVE_KEY}" '
     BEGIN{done=0}
     /^authorized_ids\s*=\s*\[/ {
       print "authorized_ids = [\x27" key "\x27]"; done=1; next
@@ -42,7 +45,7 @@ if [ "${YAP_API_KEY:-}" != "" ]; then
   ' "${YAP_CONFIG}" > "${TMP_CONFIG}"
   export YAP_CONFIG="${TMP_CONFIG}"
 else
-  echo "[03] YAP_API_KEY not set; using existing authorized_ids in ${YAP_CONFIG}"
+  echo "[03] KYUTAI_API_KEY not set; using existing authorized_ids in ${YAP_CONFIG}"
 fi
 
 # Prefetch: validate config to trigger model/tokenizer downloads before starting the server

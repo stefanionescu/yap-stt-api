@@ -11,9 +11,16 @@ AUDIO="${DSM_REPO_DIR}/audio/bria.mp3"
 SERVER_URL="${YAP_PUBLIC_WS_URL:-ws://${YAP_CLIENT_HOST}:${YAP_PORT}}"
 echo "[05] Server: ${SERVER_URL} | RTF=${SMOKETEST_RTF}"
 
+# Pass auth header if KYUTAI_API_KEY is set (legacy clients handled in script)
+EXTRA_ARGS=()
+if [ -n "${KYUTAI_API_KEY:-}" ]; then
+  EXTRA_ARGS+=("--header" "kyutai-api-key: ${KYUTAI_API_KEY}")
+fi
+
 uv run "${DSM_REPO_DIR}/scripts/stt_from_file_rust_server.py" \
   --url "${SERVER_URL}" \
   --rtf "${SMOKETEST_RTF}" \
+  "${EXTRA_ARGS[@]}" \
   "${AUDIO}"
 
 

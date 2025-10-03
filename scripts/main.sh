@@ -26,9 +26,9 @@ ENABLE_SMOKE_TEST=0
 ENABLE_NET_TUNING=0
 # Optional: real-time factor for smoke test (1 = realtime, 1000 = as fast as possible)
 SMOKETEST_RTF=1000
-# Authentication
+# Authentication (Kyutai server key, NOT your RunPod API key)
 # Change this to a random secret for production. Clients must send header: kyutai-api-key: <value>
-YAP_API_KEY=public_token
+KYUTAI_API_KEY=public_token
 EOF
   echo "[main] Wrote default .env"
   set -a; source "${BASE_DIR}/.env"; set +a
