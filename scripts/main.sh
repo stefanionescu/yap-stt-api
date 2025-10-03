@@ -5,6 +5,12 @@ set -euo pipefail
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export BASE_DIR
 
+# Require Kyutai API key to be exported before running any scripts
+if [ -z "${KYUTAI_API_KEY:-}" ]; then
+  echo "[main] ERROR: KYUTAI_API_KEY not set. Please 'export KYUTAI_API_KEY=your_secret' before running scripts/main.sh" >&2
+  exit 1
+fi
+
 # Load/initialize env
 if [ -f "${BASE_DIR}/.env" ]; then
   set -a; source "${BASE_DIR}/.env"; set +a
@@ -26,9 +32,7 @@ ENABLE_SMOKE_TEST=0
 ENABLE_NET_TUNING=0
 # Optional: real-time factor for smoke test (1 = realtime, 1000 = as fast as possible)
 SMOKETEST_RTF=1000
-# Authentication (Kyutai server key, NOT your RunPod API key)
-# Change this to a random secret for production. Clients must send header: kyutai-api-key: <value>
-KYUTAI_API_KEY=public_token
+# Authentication: DO NOT put secrets here. Export KYUTAI_API_KEY in your shell before running scripts.
 EOF
   echo "[main] Wrote default .env"
   set -a; source "${BASE_DIR}/.env"; set +a

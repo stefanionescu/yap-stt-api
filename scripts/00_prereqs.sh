@@ -3,6 +3,12 @@ set -euo pipefail
 source "$(dirname "$0")/env.lib.sh"
 echo "[00] Installing prerequisites… (driver supports CUDA ${CUDA_MM})"
 
+# Require Kyutai API key early to avoid wasted setup time
+if [ -z "${KYUTAI_API_KEY:-}" ]; then
+  echo "[00] ERROR: KYUTAI_API_KEY not set. Please 'export KYUTAI_API_KEY=your_secret' before running scripts." >&2
+  exit 1
+fi
+
 # Feature flags
 ENABLE_SMOKE_TEST="${ENABLE_SMOKE_TEST:-0}"
 ENABLE_NET_TUNING="${ENABLE_NET_TUNING:-0}"

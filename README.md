@@ -2,19 +2,22 @@
 
 One-command deployment for **Yap STT Server** with GPU acceleration. Automated CUDA 12.4 setup, Rust compilation, and production-ready WebSocket server.
 
-## ✨ Features
+## Features
 
-- 🚀 **One-command setup** - Complete deployment in ~10 minutes
-- ⚡ **CUDA 12.4 optimized** - Automatic GPU setup for L40S/A100/RTX cards  
-- 📊 **Production ready** - tmux sessions, logging, monitoring
-- 🧪 **Testing suite** - Load testing, benchmarks, real-time clients
-- 🌐 **RunPod compatible** - Tested on cloud GPU instances
+- **One-command setup** - Complete deployment in ~10 minutes
+- **CUDA 12.4 optimized** - Automatic GPU setup for L40S/A100/RTX cards  
+- **Production ready** - tmux sessions, logging, monitoring
+- **Testing suite** - Load testing, benchmarks, real-time clients
+- **RunPod compatible** - Tested on cloud GPU instances
 
-## 🚀 Quick Start (One Command)
+## Quick Start (One Command)
 
 ### Complete Setup + Deployment
 ```bash
-# Download, compile, configure, and start Yap STT server
+# 0) Export your Kyutai server key (required by all scripts)
+export KYUTAI_API_KEY=your_secret_here
+
+# 1) Download, compile, configure, and start Yap STT server
 bash scripts/main.sh
 ```
 
@@ -27,7 +30,7 @@ bash scripts/main.sh
 
 **Result:** GPU-accelerated STT server at `ws://localhost:8000` ready for connections.
 
-## 📊 Service Management
+## Service Management
 
 ### Check Server Status
 ```bash
@@ -77,7 +80,7 @@ bash scripts/04_status.sh
 bash scripts/05_smoke_test.sh
 ```
 
-## 🌐 Runpod Deployment
+## Runpod Deployment
 
 ### RunPod Setup
 1. **Launch Instance**: Ubuntu 22.04 + L40S/A100/RTX 4090
@@ -96,17 +99,17 @@ bash scripts/05_smoke_test.sh
 - **Storage**: 10GB+ free space
 - **Network**: Port 8000 exposed publicly
 
-**Environment Variables** (optional):
+**Environment Variables** (required/optional):
 ```bash
 # Server settings  
 YAP_ADDR=0.0.0.0               # Bind address
 YAP_PORT=8000                  # Server port
 HF_HOME=/workspace/hf_cache    # Model cache location
-# Auth (Kyutai server key — NOT your RunPod API key)
-KYUTAI_API_KEY=public_token    # Clients must send header: kyutai-api-key: $KYUTAI_API_KEY
+# Auth (Kyutai server key — NOT your RunPod API key) — must be exported before running scripts
+# Example: export KYUTAI_API_KEY=your_secret_here
 ```
 
-## 🔧 Configuration
+## Configuration
 
 ### Server Configuration
 The service uses the provided STT config (`config-stt-en_fr-hf.toml`) supporting:
@@ -135,7 +138,7 @@ ulimit -n 1048576  # High file descriptor limit
 # Supports hundreds of concurrent WebSocket connections
 ```
 
-## 🧪 Testing
+## Testing
 
 Install Python dependencies:
 ```bash
@@ -215,7 +218,7 @@ grep -i "cuda\|gpu\|memory" /workspace/logs/yap-server.log
 tail -f /workspace/logs/yap-server.log | grep -i "batch\|worker"
 ```
 
-## 🔌 Protocol
+## Protocol
 
 **WebSocket Endpoint**: `ws://localhost:8000` 
 
@@ -263,7 +266,7 @@ python test/client.py --server your-pod-id-12345-uc.a.runpod.net:8000
 ```
 ```
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 ### Server Won't Start
 ```bash
@@ -316,7 +319,7 @@ scripts/99_stop.sh
 scripts/main.sh
 ```
 
-## 📁 Structure
+## Structure
 
 ```
 ├── scripts/                       # Deployment scripts
@@ -335,7 +338,7 @@ scripts/main.sh
 └── requirements.txt               # Python deps
 ```
 
-## 🧹 Cleanup
+## Cleanup
 
 ```bash
 # Complete removal
