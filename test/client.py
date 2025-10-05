@@ -114,7 +114,7 @@ async def run(args: argparse.Namespace) -> None:
 
     # Authentication: always send Kyutai key to the model, and if routing through RunPod,
     # include the RunPod API key for the upstream gateway.
-    KYUTAI_KEY = os.getenv("KYUTAI_API_KEY") or os.getenv("YAP_API_KEY")
+    KYUTAI_KEY = os.getenv("KYUTAI_API_KEY")
     if not KYUTAI_KEY:
         raise RuntimeError("KYUTAI_API_KEY is required (client)")
     extra_headers = [("kyutai-api-key", KYUTAI_KEY)]

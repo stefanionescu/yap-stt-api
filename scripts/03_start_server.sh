@@ -31,9 +31,8 @@ export CUDARC_NVRTC_PATH="${CUDA_PREFIX}/lib64/libnvrtc.so"
 # Prepare runtime config with Kyutai API key injected into authorized_ids
 # Note: This is the Kyutai server key, not a RunPod token
 TMP_CONFIG="${YAP_CONFIG}.runtime"
-if [ "${KYUTAI_API_KEY:-${YAP_API_KEY:-}}" != "" ]; then
-  # Prefer KYUTAI_API_KEY if set, else fallback to legacy YAP_API_KEY
-  EFFECTIVE_KEY="${KYUTAI_API_KEY:-${YAP_API_KEY:-}}"
+if [ "${KYUTAI_API_KEY:-}" != "" ]; then
+  EFFECTIVE_KEY="${KYUTAI_API_KEY:-}"
   echo "[03] Writing runtime config with authorized_ids = ['${EFFECTIVE_KEY}'] -> ${TMP_CONFIG}"
   awk -v key="${EFFECTIVE_KEY}" '
     BEGIN{done=0}
