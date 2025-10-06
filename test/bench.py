@@ -23,6 +23,9 @@ import numpy as np
 import msgpack
 from utils import file_to_pcm16_mono_24k, file_duration_seconds, EOSDecider
 
+class CapacityRejected(Exception):
+    pass
+
 SAMPLES_DIR = "samples"
 EXTS = {".wav", ".flac", ".ogg", ".mp3"}
 RESULTS_DIR = Path("test/results")
@@ -141,6 +144,7 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
     words = []  # fallback transcript from Word events
     ready_event = asyncio.Event()
     done_event = asyncio.Event()
+    reject_reason = None
     
     # Dynamic EOS settle gate
     eos_decider = EOSDecider()
@@ -173,7 +177,7 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
         
         # receiver: Handle Yap MessagePack message types
         async def receiver():
-            nonlocal ttfw_word, ttfw_text, final_recv_ts, final_text, last_text, words
+            nonlocal ttfw_word, ttfw_text, final_recv_ts, final_text, last_text, words, reject_reason
             try:
                 async for raw in ws:
                     # yap-server only sends binary frames
@@ -229,6 +233,9 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
                             done_event.set()
                             break
                         elif kind == "Error":
+                            msg_txt = (data.get("message") or data.get("error") or "").strip().lower()
+                            if "no free channels" in msg_txt:
+                                reject_reason = "capacity"
                             done_event.set()
                             break
                         elif kind == "Step":
@@ -268,11 +275,15 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
 
         recv_task = asyncio.create_task(receiver())
 
-        # Optional grace period for Ready (don't block if server doesn't send it)
+        # Optional grace period for Ready, but also check for immediate Error (capacity)
         try:
             await asyncio.wait_for(ready_event.wait(), timeout=0.2)
         except asyncio.TimeoutError:
             pass  # proceed to send anyway
+        if done_event.is_set() and reject_reason == "capacity":
+            with contextlib.suppress(Exception):
+                asyncio.create_task(ws.close(code=1000, reason="capacity"))
+            raise CapacityRejected("no free channels")
         
         # Convert PCM16 bytes to float32 normalized [-1,1] (no pre-padding)
         pcm_int16 = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
@@ -396,7 +407,7 @@ async def bench_ws(server: str, file_path: str, total_reqs: int, concurrency: in
     audio_seconds = file_duration_seconds(file_path)
 
     async def worker(req_idx: int):
-        nonlocal errors_total
+        nonlocal errors_total, rejected
         async with sem:
             # Stagger stream starts with jitter to avoid thundering-herd
             if req_idx > 0:
@@ -406,6 +417,13 @@ async def bench_ws(server: str, file_path: str, total_reqs: int, concurrency: in
                 timeout = max(300.0, audio_seconds * 2 + 60.0)
                 r = await asyncio.wait_for(_ws_one(server, pcm, audio_seconds, rtf), timeout=timeout)
                 results.append(r)
+            except CapacityRejected as e:
+                rejected += 1
+                try:
+                    with open(ERRORS_FILE, "a", encoding="utf-8") as ef:
+                        ef.write(f"{datetime.utcnow().isoformat()}Z idx={req_idx} REJECTED capacity: {e}\n")
+                except Exception:
+                    pass
             except Exception as e:
                 errors_total += 1
                 try:
