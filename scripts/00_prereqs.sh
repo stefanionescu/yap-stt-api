@@ -97,12 +97,43 @@ echo "[00] System CUDA libraries found:"
     | sed -n '1,10{s/^/  /;p;}'
 ) || true
 
-# Always install CUDA 12.4 toolkit (or minimal equivalent) if not present
+# Always install CUDA 12.4 toolkit (or curated equivalent) if not present
 CUDA_SENTINEL="/var/lib/yap/cuda-${CUDA_MM}.installed"
+CUDA_FALLBACK_PACKAGES=(
+  "cuda-minimal-build-${CUDA_MM_PKG}"
+  "cuda-command-line-tools-${CUDA_MM_PKG}"
+  "cuda-compiler-${CUDA_MM_PKG}"
+  "cuda-nvcc-${CUDA_MM_PKG}"
+  "cuda-cudart-${CUDA_MM_PKG}"
+  "cuda-cudart-dev-${CUDA_MM_PKG}"
+  "cuda-libraries-${CUDA_MM_PKG}"
+  "cuda-libraries-dev-${CUDA_MM_PKG}"
+  "cuda-nvrtc-${CUDA_MM_PKG}"
+  "cuda-nvrtc-dev-${CUDA_MM_PKG}"
+)
+
+install_cuda_curated() {
+  echo "[00] Installing curated CUDA ${CUDA_MM} components (nvcc + libs)…"
+  apt-get install -y --no-install-recommends "${CUDA_FALLBACK_PACKAGES[@]}"
+  mkdir -p "$(dirname "${CUDA_SENTINEL}")"
+  touch "${CUDA_SENTINEL}"
+  if [ ! -x "${CUDA_PREFIX}/bin/nvcc" ]; then
+    echo "[00] ERROR: nvcc missing in ${CUDA_PREFIX}/bin after curated install." >&2
+    exit 1
+  fi
+}
+
 if dpkg -s "cuda-toolkit-${CUDA_MM_PKG}" >/dev/null 2>&1; then
   echo "[00] cuda-toolkit-${CUDA_MM_PKG} already installed."
+  mkdir -p "$(dirname "${CUDA_SENTINEL}")"
+  touch "${CUDA_SENTINEL}"
 elif [ -f "${CUDA_SENTINEL}" ]; then
-  echo "[00] CUDA ${CUDA_MM} previously installed via minimal package set."
+  if [ -x "${CUDA_PREFIX}/bin/nvcc" ]; then
+    echo "[00] CUDA ${CUDA_MM} previously installed via curated package set."
+  else
+    echo "[00] nvcc missing despite sentinel; reinstalling curated CUDA packages…"
+    install_cuda_curated
+  fi
 else
   echo "[00] Installing cuda-toolkit-${CUDA_MM_PKG} (force ${CUDA_MM})…"
   if apt-get install -y --no-install-recommends "cuda-toolkit-${CUDA_MM_PKG}"; then
@@ -110,17 +141,7 @@ else
     touch "${CUDA_SENTINEL}"
   else
     echo "[00] cuda-toolkit-${CUDA_MM_PKG} failed (likely nsight/libtinfo5 on Ubuntu 24.04). Falling back to curated package set..."
-    CUDA_FALLBACK_PACKAGES=(
-      "cuda-minimal-build-${CUDA_MM_PKG}"
-      "cuda-command-line-tools-${CUDA_MM_PKG}"
-      "cuda-libraries-${CUDA_MM_PKG}"
-      "cuda-libraries-dev-${CUDA_MM_PKG}"
-      "cuda-nvrtc-${CUDA_MM_PKG}"
-      "cuda-nvrtc-dev-${CUDA_MM_PKG}"
-    )
-    apt-get install -y --no-install-recommends "${CUDA_FALLBACK_PACKAGES[@]}"
-    mkdir -p "$(dirname "${CUDA_SENTINEL}")"
-    touch "${CUDA_SENTINEL}"
+    install_cuda_curated
   fi
 fi
 
