@@ -25,14 +25,36 @@ if [ "${ENABLE_SMOKE_TEST}" = "1" ]; then
   apt-get install -y --no-install-recommends python3 python3-venv python3-pip
 fi
 
-# Add NVIDIA CUDA repo (Ubuntu 22.04)
-if [ ! -f /usr/share/keyrings/cuda-archive-keyring.gpg ]; then
-  curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/3bf863cc.pub \
-    | gpg --dearmor -o /usr/share/keyrings/cuda-archive-keyring.gpg
-  echo "deb [signed-by=/usr/share/keyrings/cuda-archive-keyring.gpg] https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/ /" \
-    > /etc/apt/sources.list.d/cuda.list
-  apt-get update -y
+# Add NVIDIA CUDA repo matching the host distribution
+CUDA_REPO_SUFFIX="ubuntu2204"
+if [ -r /etc/os-release ]; then
+  # shellcheck disable=SC1091
+  . /etc/os-release
+  case "${ID:-}" in
+    ubuntu)
+      case "${VERSION_ID:-}" in
+        22.04*) CUDA_REPO_SUFFIX="ubuntu2204" ;;
+        24.04*) CUDA_REPO_SUFFIX="ubuntu2404" ;;
+        20.04*) CUDA_REPO_SUFFIX="ubuntu2004" ;;
+      esac
+      ;;
+    debian)
+      case "${VERSION_ID:-}" in
+        12*) CUDA_REPO_SUFFIX="debian12" ;;
+        11*) CUDA_REPO_SUFFIX="debian11" ;;
+      esac
+      ;;
+  esac
 fi
+
+CUDA_REPO_URL="https://developer.download.nvidia.com/compute/cuda/repos/${CUDA_REPO_SUFFIX}/x86_64/"
+if [ ! -f /usr/share/keyrings/cuda-archive-keyring.gpg ]; then
+  curl -fsSL "${CUDA_REPO_URL}3bf863cc.pub" \
+    | gpg --dearmor -o /usr/share/keyrings/cuda-archive-keyring.gpg
+fi
+echo "deb [signed-by=/usr/share/keyrings/cuda-archive-keyring.gpg] ${CUDA_REPO_URL} /" \
+  > /etc/apt/sources.list.d/cuda.list
+apt-get update -y
 
 # Detect and handle pre-existing CUDA installations (nuke >12.4)
 echo "[00] Auditing existing CUDA installations..."
