@@ -14,11 +14,8 @@ One-command deployment for **Yap STT Server** with GPU acceleration. Automated C
 
 ### Complete Setup + Deployment
 ```bash
-# 0) Export your Kyutai server key (required by all scripts)
-export KYUTAI_API_KEY=your_secret_here
-
-# 1) Download, compile, configure, and start Yap STT server
-bash scripts/main.sh
+# Export your API key and then download, compile, configure, and start Yap STT server
+KYUTAI_API_KEY=your_secret_here bash scripts/main.sh
 ```
 
 **This will:**

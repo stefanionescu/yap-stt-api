@@ -35,12 +35,21 @@ if [ "${KYUTAI_API_KEY:-}" != "" ]; then
   EFFECTIVE_KEY="${KYUTAI_API_KEY:-}"
   echo "[03] Writing runtime config with authorized_ids = ['${EFFECTIVE_KEY}'] -> ${TMP_CONFIG}"
   awk -v key="${EFFECTIVE_KEY}" '
-    BEGIN{done=0}
-    /^authorized_ids\s*=\s*\[/ {
-      print "authorized_ids = [\x27" key "\x27]"; done=1; next
+    BEGIN { replaced = 0 }
+    # Replace any existing authorized_ids line (allow leading spaces) and skip duplicates
+    /^[[:space:]]*authorized_ids[[:space:]]*=/ {
+      if (!replaced) {
+        print "authorized_ids = [\047" key "\047]"
+        replaced = 1
+      }
+      next
     }
     { print }
-    END{ if (!done) print "authorized_ids = [\x27" key "\x27]" }
+    END {
+      if (!replaced) {
+        print "authorized_ids = [\047" key "\047]"
+      }
+    }
   ' "${YAP_CONFIG}" > "${TMP_CONFIG}"
   export YAP_CONFIG="${TMP_CONFIG}"
 else
