@@ -73,6 +73,20 @@ refresh_cuda_env_vars() {
 adjust_cuda_version_for_os
 refresh_cuda_env_vars
 
+purge_legacy_cuda() {
+  local pattern="cuda-12-4"
+  local packages
+  packages=$(dpkg -l | awk -v pat="$pattern" '$2 ~ pat {print $2}')
+  if [ -n "${packages}" ]; then
+    echo "[00] Removing legacy CUDA 12.4 packages: ${packages}" >&2
+    apt-get remove --purge -y ${packages} || true
+    dpkg --purge ${packages} 2>/dev/null || true
+    apt-get autoremove -y 2>/dev/null || true
+  fi
+  # Clean up any partially configured packages
+  apt-get -y --fix-broken install 2>/dev/null || true
+}
+
 echo "[00] Installing prerequisites… (driver supports CUDA ${CUDA_MM})"
 
 # Require Kyutai API key early to avoid wasted setup time
@@ -96,6 +110,8 @@ apt-get install -y --no-install-recommends \
 if [ "${ENABLE_SMOKE_TEST}" = "1" ]; then
   apt-get install -y --no-install-recommends python3 python3-venv python3-pip
 fi
+
+purge_legacy_cuda
 
 # Add NVIDIA CUDA repo matching the host distribution + requested CUDA version
 CUDA_REPO_SUFFIX="ubuntu2204"
