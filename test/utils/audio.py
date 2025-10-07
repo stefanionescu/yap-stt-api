@@ -1,106 +1,37 @@
+"""Audio processing and streaming utilities."""
 from __future__ import annotations
 import asyncio
 import os
-import subprocess
 import time
-from pathlib import Path
-from typing import Tuple
 
 import numpy as np
-import soundfile as sf
-
-SAMPLES_DIR = Path("samples")
+import msgpack
 
 
-def _ffmpeg_decode_to_pcm16_mono_16k(path: str) -> Tuple[np.ndarray, int]:
-    """
-    Decode any audio via ffmpeg to PCM16 mono 16 kHz and return bytes + duration samples.
-    """
-    cmd = [
-        "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
-        "-i", path,
-        "-f", "s16le",
-        "-acodec", "pcm_s16le",
-        "-ac", "1",
-        "-ar", "16000",
-        "pipe:1",
-    ]
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-    pcm = np.frombuffer(p.stdout, dtype=np.int16)
-    return pcm, 16000
+def pcm16_to_float32(pcm_bytes: bytes) -> np.ndarray:
+    """Convert PCM16 bytes to float32 in [-1, 1]."""
+    return np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
 
 
-def _ffmpeg_decode_to_pcm16_mono_24k(path: str) -> Tuple[np.ndarray, int]:
-    """
-    Decode any audio via ffmpeg to PCM16 mono 24 kHz and return bytes + duration samples.
-    """
-    cmd = [
-        "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
-        "-i", path,
-        "-f", "s16le",
-        "-acodec", "pcm_s16le",
-        "-ac", "1",
-        "-ar", "24000",
-        "pipe:1",
-    ]
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-    pcm = np.frombuffer(p.stdout, dtype=np.int16)
-    return pcm, 24000
+def iter_chunks(arr: np.ndarray, hop: int):
+    """Yield contiguous chunks of size hop from a 1-D numpy array."""
+    for i in range(0, len(arr), hop):
+        chunk = arr[i:i + hop]
+        if len(chunk) == 0:
+            break
+        yield chunk
 
 
-def file_to_pcm16_mono_16k(path: str) -> bytes:
-    """
-    Load arbitrary audio file and return PCM16 mono @16k bytes suitable for WS streaming.
-    Prefers soundfile; falls back to ffmpeg for MP3/others if needed.
-    """
-    try:
-        x, sr = sf.read(path, dtype="int16", always_2d=False)
-        if x.ndim > 1:
-            x = x[:, 0]
-        if sr != 16000:
-            # simple resample via ffmpeg for reliability across formats
-            pcm, _ = _ffmpeg_decode_to_pcm16_mono_16k(path)
-            return pcm.tobytes()
-        return x.tobytes()
-    except Exception:
-        pcm, _ = _ffmpeg_decode_to_pcm16_mono_16k(path)
-        return pcm.tobytes()
-
-
-def file_to_pcm16_mono_24k(path: str) -> bytes:
-    """
-    Load arbitrary audio file and return PCM16 mono @24k bytes suitable for Yap WS streaming.
-    Prefers soundfile; falls back to ffmpeg for MP3/others if needed.
-    """
-    try:
-        x, sr = sf.read(path, dtype="int16", always_2d=False)
-        if x.ndim > 1:
-            x = x[:, 0]
-        if sr != 24000:
-            # simple resample via ffmpeg for reliability across formats
-            pcm, _ = _ffmpeg_decode_to_pcm16_mono_24k(path)
-            return pcm.tobytes()
-        return x.tobytes()
-    except Exception:
-        pcm, _ = _ffmpeg_decode_to_pcm16_mono_24k(path)
-        return pcm.tobytes()
-
-
-def file_duration_seconds(path: str) -> float:
-    try:
-        f = sf.SoundFile(path)
-        return float(len(f) / f.samplerate)
-    except Exception:
-        # fallback: decode to find length (can be expensive, but ok for tests)
-        pcm, sr = _ffmpeg_decode_to_pcm16_mono_16k(path)
-        return float(len(pcm) / sr)
+def average_gap_ms(partial_timestamps: list[float]) -> float:
+    """Compute average gap between consecutive partial timestamps in ms."""
+    if len(partial_timestamps) < 2:
+        return 0.0
+    gaps = [b - a for a, b in zip(partial_timestamps[:-1], partial_timestamps[1:])]
+    return (sum(gaps) / len(gaps)) * 1000.0
 
 
 class EOSDecider:
-    """
-    Dynamic EOS "settle gate" that waits for evidence utterance is over.
-    Replaces fixed padding with data-driven approach.
-    """
+    """Dynamic EOS 'settle gate' that waits for evidence utterance is over."""
     
     def __init__(self):
         # Configuration from environment variables
@@ -182,13 +113,7 @@ class EOSDecider:
         return max(0, needed)
     
     async def wait_for_settle(self, max_wait_ms: float = 600) -> None:
-        """
-        Wait until we have enough evidence that the user finished speaking.
-        Uses whichever comes first:
-        - VAD-off hangover for ≥ quiet_ms
-        - Decoder quiet for ≥ quiet_ms  
-        - EndWord + shorter quiet period
-        """
+        """Wait until we have enough evidence that the user finished speaking."""
         deadline = time.perf_counter() + (max_wait_ms / 1000.0)
         
         while time.perf_counter() < deadline:
@@ -197,3 +122,63 @@ class EOSDecider:
             await asyncio.sleep(0.010)  # Check every 10ms
 
 
+class AudioStreamer:
+    """Handles audio streaming with RTF control."""
+    
+    def __init__(self, pcm_bytes: bytes, rtf: float, debug: bool = False):
+        self.pcm_int16 = pcm16_to_float32(pcm_bytes)
+        self.rtf = rtf
+        self.debug = debug
+        self.hop = 1920  # 80 ms @ 24k
+        self.sr = 24000
+        self.last_chunk_sent_ts = 0.0
+        
+    async def stream_audio(self, ws, eos_decider: EOSDecider):
+        """Stream audio chunks with RTF control."""
+        if self.debug:
+            print("DEBUG: Starting audio stream")
+        
+        t_stream0 = time.perf_counter()
+        samples_sent = 0
+        
+        for pcm_chunk in iter_chunks(self.pcm_int16, self.hop):
+            msg = msgpack.packb({"type": "Audio", "pcm": pcm_chunk.tolist()},
+                               use_bin_type=True, use_single_float=True)
+            await ws.send(msg)
+            self.last_chunk_sent_ts = time.perf_counter()
+            
+            samples_sent += len(pcm_chunk)
+            target = t_stream0 + (samples_sent / self.sr) / max(self.rtf, 1e-6)
+            sleep_for = target - time.perf_counter()
+            if sleep_for > 0:
+                await asyncio.sleep(sleep_for)
+        
+        # Dynamic EOS settle gate
+        if self.debug:
+            print("DEBUG: Starting dynamic EOS settle gate")
+        
+        await eos_decider.wait_for_settle(max_wait_ms=600)
+        
+        if self.debug:
+            observed = eos_decider.observed_silence_ms()
+            needed = eos_decider.needed_padding_ms()
+            print(f"DEBUG: Settle complete - observed: {observed:.1f}ms, needed padding: {needed:.1f}ms")
+        
+        # Add silence padding
+        needed_ms = eos_decider.needed_padding_ms()
+        frames = max(1, int((needed_ms + 79) // 80))  # At least 1 frame
+        
+        if frames > 0:
+            if self.debug:
+                print(f"DEBUG: Adding {frames} silence frames ({frames * 80:.0f}ms)")
+            silence = np.zeros(1920, dtype=np.float32).tolist()
+            for _ in range(frames):
+                await ws.send(msgpack.packb({"type": "Audio", "pcm": silence},
+                                            use_bin_type=True, use_single_float=True))
+        
+        # Final flush
+        await ws.send(msgpack.packb({"type": "Flush"}, use_bin_type=True))
+        if self.debug:
+            print("DEBUG: Sent final Flush")
+        
+        return time.perf_counter()
