@@ -97,52 +97,61 @@ echo "[00] System CUDA libraries found:"
     | sed -n '1,10{s/^/  /;p;}'
 ) || true
 
-# Always install CUDA 12.4 toolkit (or curated equivalent) if not present
+# Always install CUDA 12.4 toolkit if not present
 CUDA_SENTINEL="/var/lib/yap/cuda-${CUDA_MM}.installed"
-CUDA_FALLBACK_PACKAGES=(
-  "cuda-minimal-build-${CUDA_MM_PKG}"
-  "cuda-command-line-tools-${CUDA_MM_PKG}"
-  "cuda-libraries-${CUDA_MM_PKG}"
-  "cuda-libraries-dev-${CUDA_MM_PKG}"
-  "cuda-nvrtc-${CUDA_MM_PKG}"
-  "cuda-nvrtc-dev-${CUDA_MM_PKG}"
-  "cuda-cudart-${CUDA_MM_PKG}"
-  "cuda-cudart-dev-${CUDA_MM_PKG}"
-  "cuda-nvcc-${CUDA_MM_PKG}"
-)
 
-install_cuda_curated() {
-  echo "[00] Installing curated CUDA ${CUDA_MM} components (nvcc + libs)…"
-  apt-get -y --no-install-recommends -o Dpkg::Options::="--force-overwrite" \
-    install "${CUDA_FALLBACK_PACKAGES[@]}"
-  mkdir -p "$(dirname "${CUDA_SENTINEL}")"
-  touch "${CUDA_SENTINEL}"
-  if [ ! -x "${CUDA_PREFIX}/bin/nvcc" ]; then
-    echo "[00] ERROR: nvcc missing in ${CUDA_PREFIX}/bin after curated install." >&2
-    exit 1
+ensure_libtinfo5() {
+  if [ -r /etc/os-release ]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    if [ "${ID}" = "ubuntu" ] && [[ "${VERSION_ID}" == 24.04* ]]; then
+      if ! dpkg -s libtinfo5 >/dev/null 2>&1; then
+        echo "[00] Installing libtinfo5 compatibility package for Ubuntu 24.04..."
+        TMP_DEB=$(mktemp /tmp/libtinfo5_XXXX.deb)
+        curl -fsSL http://archive.ubuntu.com/ubuntu/pool/main/n/ncurses/libtinfo5_6.3-2_amd64.deb -o "${TMP_DEB}"
+        dpkg -i "${TMP_DEB}" 2>/dev/null || apt-get -y --fix-broken install
+        rm -f "${TMP_DEB}"
+      fi
+    fi
   fi
+}
+
+install_cuda_toolkit() {
+  local attempt=1
+  while [ $attempt -le 2 ]; do
+    echo "[00] Installing cuda-toolkit-${CUDA_MM_PKG} (attempt ${attempt})…"
+    if apt-get install -y --no-install-recommends -o Dpkg::Options::="--force-overwrite" "cuda-toolkit-${CUDA_MM_PKG}"; then
+      mkdir -p "$(dirname "${CUDA_SENTINEL}")"
+      touch "${CUDA_SENTINEL}"
+      return 0
+    fi
+    echo "[00] cuda-toolkit-${CUDA_MM_PKG} install failed." >&2
+    if [ $attempt -eq 1 ]; then
+      ensure_libtinfo5
+      apt-get -y --fix-broken install || true
+      apt-get remove --purge -y "cuda-toolkit-${CUDA_MM_PKG}" "cuda-compiler-${CUDA_MM_PKG}" \
+        "cuda-minimal-build-${CUDA_MM_PKG}" "cuda-command-line-tools-${CUDA_MM_PKG}" \
+        "cuda-nvcc-${CUDA_MM_PKG}" "cuda-nvrtc-${CUDA_MM_PKG}" "cuda-nvrtc-dev-${CUDA_MM_PKG}" \
+        "cuda-cudart-${CUDA_MM_PKG}" "cuda-cudart-dev-${CUDA_MM_PKG}" "cuda-cccl-${CUDA_MM_PKG}" 2>/dev/null || true
+      apt-get autoremove -y 2>/dev/null || true
+    else
+      break
+    fi
+    attempt=$((attempt + 1))
+  done
+  echo "[00] ERROR: Failed to install cuda-toolkit-${CUDA_MM_PKG}." >&2
+  exit 1
 }
 
 if dpkg -s "cuda-toolkit-${CUDA_MM_PKG}" >/dev/null 2>&1; then
   echo "[00] cuda-toolkit-${CUDA_MM_PKG} already installed."
   mkdir -p "$(dirname "${CUDA_SENTINEL}")"
   touch "${CUDA_SENTINEL}"
-elif [ -f "${CUDA_SENTINEL}" ]; then
-  if [ -x "${CUDA_PREFIX}/bin/nvcc" ]; then
-    echo "[00] CUDA ${CUDA_MM} previously installed via curated package set."
-  else
-    echo "[00] nvcc missing despite sentinel; reinstalling curated CUDA packages…"
-    install_cuda_curated
-  fi
+elif [ -f "${CUDA_SENTINEL}" ] && [ -x "${CUDA_PREFIX}/bin/nvcc" ]; then
+  echo "[00] CUDA ${CUDA_MM} previously installed."
 else
-  echo "[00] Installing cuda-toolkit-${CUDA_MM_PKG} (force ${CUDA_MM})…"
-  if apt-get install -y --no-install-recommends "cuda-toolkit-${CUDA_MM_PKG}"; then
-    mkdir -p "$(dirname "${CUDA_SENTINEL}")"
-    touch "${CUDA_SENTINEL}"
-  else
-    echo "[00] cuda-toolkit-${CUDA_MM_PKG} failed (likely nsight/libtinfo5 on Ubuntu 24.04). Falling back to curated package set..."
-    install_cuda_curated
-  fi
+  ensure_libtinfo5
+  install_cuda_toolkit
 fi
 
 # Set up CUDA 12.4 environment
