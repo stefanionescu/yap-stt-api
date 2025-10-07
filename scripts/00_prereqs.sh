@@ -1,6 +1,78 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source "$(dirname "$0")/env.lib.sh"
+
+adjust_cuda_version_for_os() {
+  local env_file="${ROOT_DIR}/.env"
+  if [ -r /etc/os-release ]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    if [ "${ID}" = "ubuntu" ] && [[ "${VERSION_ID}" == 24.04* ]] && [[ "${CUDA_MM}" == 12.4* ]]; then
+      local new_cuda="12.6"
+      echo "[00] NOTE: Ubuntu 24.04 detected; switching CUDA target from ${CUDA_MM} to ${new_cuda}."
+      CUDA_MM="${new_cuda}"
+      export CUDA_MM
+      if [ -f "${env_file}" ]; then
+        if grep -q '^CUDA_MM=' "${env_file}"; then
+          sed -i "s/^CUDA_MM=.*/CUDA_MM=${CUDA_MM}/" "${env_file}"
+        else
+          echo "CUDA_MM=${CUDA_MM}" >> "${env_file}"
+        fi
+        if grep -q '^CUDA_MM_PKG=' "${env_file}"; then
+          sed -i "s/^CUDA_MM_PKG=.*/CUDA_MM_PKG=${CUDA_MM//./-}/" "${env_file}"
+        else
+          echo "CUDA_MM_PKG=${CUDA_MM//./-}" >> "${env_file}"
+        fi
+      fi
+    fi
+  fi
+}
+
+strip_cuda_from_pathlike() {
+  local original="${1:-}"
+  local trimmed=""
+  local part
+  IFS=':' read -r -a parts <<< "${original}"
+  for part in "${parts[@]}"; do
+    if [[ -n "${part}" && ${part} != /usr/local/cuda-* ]]; then
+      if [ -n "${trimmed}" ]; then
+        trimmed+=":${part}"
+      else
+        trimmed="${part}"
+      fi
+    fi
+  done
+  printf '%s' "${trimmed}"
+}
+
+refresh_cuda_env_vars() {
+  export CUDA_MM_PKG="${CUDA_MM//./-}"
+  export CUDA_PREFIX="/usr/local/cuda-${CUDA_MM}"
+
+  local base_path
+  base_path=$(strip_cuda_from_pathlike "${PATH:-}")
+  if [ -n "${base_path}" ]; then
+    export PATH="${CUDA_PREFIX}/bin:${base_path}"
+  else
+    export PATH="${CUDA_PREFIX}/bin"
+  fi
+
+  local base_ld
+  base_ld=$(strip_cuda_from_pathlike "${LD_LIBRARY_PATH:-}")
+  if [ -n "${base_ld}" ]; then
+    export LD_LIBRARY_PATH="${CUDA_PREFIX}/lib64:${CUDA_PREFIX}/targets/x86_64-linux/lib:${base_ld}"
+  else
+    export LD_LIBRARY_PATH="${CUDA_PREFIX}/lib64:${CUDA_PREFIX}/targets/x86_64-linux/lib"
+  fi
+
+  export CUDA_HOME="${CUDA_PREFIX}"
+  export CUDA_PATH="${CUDA_PREFIX}"
+  export CUDA_ROOT="${CUDA_PREFIX}"
+}
+
+adjust_cuda_version_for_os
+refresh_cuda_env_vars
+
 echo "[00] Installing prerequisites… (driver supports CUDA ${CUDA_MM})"
 
 # Require Kyutai API key early to avoid wasted setup time
@@ -97,7 +169,7 @@ echo "[00] System CUDA libraries found:"
     | sed -n '1,10{s/^/  /;p;}'
 ) || true
 
-# Always install CUDA 12.4 toolkit if not present
+# Always install the requested CUDA toolkit if not present
 CUDA_SENTINEL="/var/lib/yap/cuda-${CUDA_MM}.installed"
 
 ensure_libtinfo5() {
