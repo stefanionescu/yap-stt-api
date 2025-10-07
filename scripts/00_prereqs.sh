@@ -25,7 +25,7 @@ if [ "${ENABLE_SMOKE_TEST}" = "1" ]; then
   apt-get install -y --no-install-recommends python3 python3-venv python3-pip
 fi
 
-# Add NVIDIA CUDA repo matching the host distribution
+# Add NVIDIA CUDA repo matching the host distribution + requested CUDA version
 CUDA_REPO_SUFFIX="ubuntu2204"
 if [ -r /etc/os-release ]; then
   # shellcheck disable=SC1091
@@ -33,8 +33,14 @@ if [ -r /etc/os-release ]; then
   case "${ID:-}" in
     ubuntu)
       case "${VERSION_ID:-}" in
+        24.04*)
+          if [[ "${CUDA_MM}" == 12.4* ]]; then
+            CUDA_REPO_SUFFIX="ubuntu2204"  # 12.4 not published for noble yet
+          else
+            CUDA_REPO_SUFFIX="ubuntu2404"
+          fi
+          ;;
         22.04*) CUDA_REPO_SUFFIX="ubuntu2204" ;;
-        24.04*) CUDA_REPO_SUFFIX="ubuntu2404" ;;
         20.04*) CUDA_REPO_SUFFIX="ubuntu2004" ;;
       esac
       ;;
