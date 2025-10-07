@@ -200,10 +200,11 @@ class BenchMessageHandler(MessageHandler):
 class ClientMessageHandler(MessageHandler):
     """Client-specific message handler with printing and first response tracking."""
     
-    def __init__(self, debug: bool = False):
+    def __init__(self, debug: bool = False, quiet: bool = False):
         super().__init__(debug=debug, track_word_ttfw=False)
         self.first_response_time = None
         self.first_audio_sent = None
+        self.quiet = quiet
     
     def set_first_audio_sent(self, timestamp: float):
         """Set the timestamp when first audio was sent."""
@@ -218,7 +219,7 @@ class ClientMessageHandler(MessageHandler):
             # Track first response latency
             if self.first_response_time is None and self.first_audio_sent is not None:
                 self.first_response_time = now - self.first_audio_sent
-            if txt != self.last_text:
+            if (not self.quiet) and txt != self.last_text:
                 print(f"PART: {txt}")
     
     def handle_word(self, data: dict, now: float, t0: float):
@@ -230,7 +231,7 @@ class ClientMessageHandler(MessageHandler):
             if self.first_response_time is None and self.first_audio_sent is not None:
                 self.first_response_time = now - self.first_audio_sent
             # Print occasional words, not every single one
-            if len(self.words) % 5 == 1 or len(self.words) <= 3:
+            if (not self.quiet) and (len(self.words) % 5 == 1 or len(self.words) <= 3):
                 print(f"WORD: {w!r}, assembled: {self.final_text!r}")
     
     def handle_final_marker(self, data: dict, now: float):
@@ -238,7 +239,8 @@ class ClientMessageHandler(MessageHandler):
         pending = self.eos_decider.get_pending_word()
         if pending:
             self.words.append(pending)
-            print(f"Added pending word on Final: {pending!r}")
+            if not self.quiet:
+                print(f"Added pending word on Final: {pending!r}")
             if (not self.final_text) or len(self.final_text.split()) < len(self.words):
                 self.final_text = " ".join(self.words).strip()
         
