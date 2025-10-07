@@ -39,7 +39,18 @@ fi
 
 # Preserve repo-tracked config files; only remove external config paths
 REPO_ROOT="$(cd "${ROOT_DIR}/.." && pwd)"
-if [ -f "${YAP_CONFIG}" ]; then
+
+# Always delete generated runtime configs (*.runtime) even if they live inside the repo tree
+if [ -n "${YAP_CONFIG:-}" ] && [[ "${YAP_CONFIG}" == *.runtime ]] && [ -f "${YAP_CONFIG}" ]; then
+  rm -f "${YAP_CONFIG}"
+  echo "[99] ✓ Removed generated runtime config ${YAP_CONFIG}"
+fi
+if [ -f "${REPO_ROOT}/server/config-stt-en_fr-hf.toml.runtime" ]; then
+  rm -f "${REPO_ROOT}/server/config-stt-en_fr-hf.toml.runtime"
+  echo "[99] ✓ Removed server/config-stt-en_fr-hf.toml.runtime"
+fi
+
+if [ -n "${YAP_CONFIG:-}" ] && [ -f "${YAP_CONFIG}" ]; then
   case "${YAP_CONFIG}" in
     ${REPO_ROOT}/*)
       echo "[99] ✓ Preserving repo config ${YAP_CONFIG}"
@@ -133,6 +144,32 @@ find /workspace /tmp /root -type f -size +50M 2>/dev/null | while read -r large_
     echo "[99] ✓ Removed large file: $large_file"
   fi
 done
+
+# 5k. Offer to remove repo-local build artifacts and virtual environments
+read -p "[99] Remove repo virtualenvs, Rust targets, and __pycache__ directories? [y/N]: " -n 1 -r REPO_REPLY
+echo
+if [[ ${REPO_REPLY:-} =~ ^[Yy]$ ]]; then
+  REPO_ARTIFACT_DIRS=(
+    "${REPO_ROOT}/.venv"
+    "${REPO_ROOT}/venv"
+    "${REPO_ROOT}/server/.venv"
+    "${REPO_ROOT}/server/venv"
+    "${REPO_ROOT}/server/moshi-server/.venv"
+    "${REPO_ROOT}/server/target"
+    "${REPO_ROOT}/target"
+    "${REPO_ROOT}/test/results"
+  )
+  for artifact in "${REPO_ARTIFACT_DIRS[@]}"; do
+    if [ -e "$artifact" ]; then
+      rm -rf "$artifact"
+      echo "[99] ✓ Removed repo artifact: $artifact"
+    fi
+  done
+  find "${REPO_ROOT}" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null && \
+    echo "[99] ✓ Purged Python __pycache__ directories"
+else
+  echo "[99] ✓ Keeping repo-local build artifacts"
+fi
 
 # 5j. NUCLEAR OPTION: Remove even the system packages we installed
 echo
@@ -236,4 +273,3 @@ du -sh /workspace/* /root/.* /tmp/* /var/cache/* 2>/dev/null | sort -hr | head -
 echo
 echo "[99] To reinstall: run './main.sh' again"
 echo "[99] For maximum cleanup: run 'bash scripts/99_stop.sh --nuclear'"
-
