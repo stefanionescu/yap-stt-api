@@ -74,17 +74,34 @@ adjust_cuda_version_for_os
 refresh_cuda_env_vars
 
 purge_legacy_cuda() {
-  local pattern="cuda-12-4"
-  local packages
-  packages=$(dpkg -l | awk -v pat="$pattern" '$2 ~ pat {print $2}')
-  if [ -n "${packages}" ]; then
-    echo "[00] Removing legacy CUDA 12.4 packages: ${packages}" >&2
-    apt-get remove --purge -y ${packages} || true
-    dpkg --purge ${packages} 2>/dev/null || true
+  local pkg
+  local pkgs=()
+
+  while IFS= read -r pkg; do
+    [ -n "${pkg}" ] && pkgs+=("${pkg}")
+  done < <(dpkg --get-selections 2>/dev/null | awk '{print $1}' | grep -E '^cuda.*12-4' || true)
+
+  if [ ${#pkgs[@]} -gt 0 ]; then
+    echo "[00] Removing legacy CUDA 12.4 packages: ${pkgs[*]}"
+    apt-get remove --purge -y "${pkgs[@]}" 2>/dev/null || true
+    for pkg in "${pkgs[@]}"; do
+      dpkg --purge --force-all "${pkg}" 2>/dev/null || true
+    done
     apt-get autoremove -y 2>/dev/null || true
   fi
-  # Clean up any partially configured packages
-  apt-get -y --fix-broken install 2>/dev/null || true
+
+  rm -f /var/lib/yap/cuda-12.4.installed
+  rm -rf /usr/local/cuda-12.4 2>/dev/null || true
+  # Remove stale /usr/local/cuda symlink pointing to 12.4; recreated later
+  if [ -L /usr/local/cuda ]; then
+    local target
+    target=$(readlink -f /usr/local/cuda)
+    if [[ "${target}" == /usr/local/cuda-12.4* ]]; then
+      rm -f /usr/local/cuda
+    fi
+  fi
+
+  dpkg --configure -a 2>/dev/null || true
 }
 
 echo "[00] Installing prerequisites… (driver supports CUDA ${CUDA_MM})"
@@ -100,6 +117,7 @@ ENABLE_SMOKE_TEST="${ENABLE_SMOKE_TEST:-0}"
 ENABLE_NET_TUNING="${ENABLE_NET_TUNING:-0}"
 
 export DEBIAN_FRONTEND=noninteractive
+purge_legacy_cuda
 apt-get update -y
 # Core build/runtime deps (minimal)
 apt-get install -y --no-install-recommends \
@@ -110,8 +128,6 @@ apt-get install -y --no-install-recommends \
 if [ "${ENABLE_SMOKE_TEST}" = "1" ]; then
   apt-get install -y --no-install-recommends python3 python3-venv python3-pip
 fi
-
-purge_legacy_cuda
 
 # Add NVIDIA CUDA repo matching the host distribution + requested CUDA version
 CUDA_REPO_SUFFIX="ubuntu2204"
