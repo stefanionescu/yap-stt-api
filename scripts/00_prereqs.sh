@@ -102,19 +102,19 @@ CUDA_SENTINEL="/var/lib/yap/cuda-${CUDA_MM}.installed"
 CUDA_FALLBACK_PACKAGES=(
   "cuda-minimal-build-${CUDA_MM_PKG}"
   "cuda-command-line-tools-${CUDA_MM_PKG}"
-  "cuda-compiler-${CUDA_MM_PKG}"
-  "cuda-nvcc-${CUDA_MM_PKG}"
-  "cuda-cudart-${CUDA_MM_PKG}"
-  "cuda-cudart-dev-${CUDA_MM_PKG}"
   "cuda-libraries-${CUDA_MM_PKG}"
   "cuda-libraries-dev-${CUDA_MM_PKG}"
   "cuda-nvrtc-${CUDA_MM_PKG}"
   "cuda-nvrtc-dev-${CUDA_MM_PKG}"
+  "cuda-cudart-${CUDA_MM_PKG}"
+  "cuda-cudart-dev-${CUDA_MM_PKG}"
+  "cuda-nvcc-${CUDA_MM_PKG}"
 )
 
 install_cuda_curated() {
   echo "[00] Installing curated CUDA ${CUDA_MM} components (nvcc + libs)…"
-  apt-get install -y --no-install-recommends "${CUDA_FALLBACK_PACKAGES[@]}"
+  apt-get -y --no-install-recommends -o Dpkg::Options::="--force-overwrite" \
+    install "${CUDA_FALLBACK_PACKAGES[@]}"
   mkdir -p "$(dirname "${CUDA_SENTINEL}")"
   touch "${CUDA_SENTINEL}"
   if [ ! -x "${CUDA_PREFIX}/bin/nvcc" ]; then
