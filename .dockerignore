@@ -1,0 +1,72 @@
+# Version control
+.git
+.gitignore
+
+# Python caches and virtual environments
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.venv
+venv
+
+# Node / frontend dependencies
+node_modules
+
+# Generic build artifacts
+dist
+build
+
+# Rust / Cargo artifacts
+target
+server/target
+server/moshi-core/target
+server/moshi-server/target
+Cargo.lock
+server/Cargo.lock
+
+# OS / editor cruft
+**/.DS_Store
+.vscode
+.idea
+
+# Logs and temporary files
+**/*.log
+logs
+workspace
+*.bak
+*.tmp
+
+.git
+.gitignore
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.venv
+venv
+node_modules
+dist
+build
+target
+Cargo.lock
+server/target
+server/Cargo.lock
+server/moshi-core/target
+server/moshi-server/target
+**/.DS_Store
+**/*.log
+logs
+workspace
+.vscode
+.idea
+*.bak
+*.tmp
+
+

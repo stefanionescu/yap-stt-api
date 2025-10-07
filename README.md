@@ -27,6 +27,64 @@ KYUTAI_API_KEY=your_secret_here bash scripts/main.sh
 
 **Result:** GPU-accelerated STT server at `ws://localhost:8000` ready for connections.
 
+## Docker
+
+### Build
+```bash
+# From repo root, referencing docker/Dockerfile
+docker build -f docker/Dockerfile -t your-dockerhub-username/yap-stt-api:latest .
+```
+
+### Push
+```bash
+docker push your-dockerhub-username/yap-stt-api:latest
+```
+
+### Run (local GPU)
+```bash
+# Run with GPU, map port 8000, set API key at runtime (not baked into image)
+docker run --rm -it \
+  --gpus all \
+  -p 8000:8000 \
+  -e KYUTAI_API_KEY=your_secret_here \
+  -e HF_HOME=/workspace/hf_cache \
+  your-dockerhub-username/yap-stt-api:latest
+
+# Logs are in /workspace/logs inside the container
+```
+
+### Run (RunPod or remote GPU)
+Provide the image in your template, then set the environment at start:
+```bash
+# Example: via docker CLI on the remote host
+docker run -d \
+  --gpus all \
+  -p 8000:8000 \
+  -e KYUTAI_API_KEY=your_deploy_secret \
+  -e HF_HOME=/workspace/hf_cache \
+  your-dockerhub-username/yap-stt-api:latest
+```
+
+Notes:
+- The API key is injected into a runtime config inside the container; it is not stored in the image.
+- The server expects header `kyutai-api-key: <your_api_key>` from clients.
+- You can persist HuggingFace cache with `-v /path/to/cache:/workspace/hf_cache` to avoid re-downloads across runs.
+
+### Run tests inside the container
+```bash
+# Health check
+docker exec -e KYUTAI_API_KEY=your_secret_here <container_id> \
+  python3 /workspace/test/warmup.py --server 127.0.0.1:8000 --rtf 1000
+
+# Interactive client
+docker exec -e KYUTAI_API_KEY=your_secret_here <container_id> \
+  python3 /workspace/test/client.py --server 127.0.0.1:8000 --rtf 1.0
+
+# Load testing
+docker exec -e KYUTAI_API_KEY=your_secret_here <container_id> \
+  python3 /workspace/test/bench.py --n 10 --concurrency 2 --rtf 1.0
+```
+
 ## Service Management
 
 ### Check Server Status

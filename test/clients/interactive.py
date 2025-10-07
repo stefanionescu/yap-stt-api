@@ -5,9 +5,9 @@ import os
 import time
 from pathlib import Path
 
-from ..utils import is_runpod_host
-from ..utils.messages import ClientMessageHandler
-from .base import YapClient
+from utils import is_runpod_host
+from utils.messages import ClientMessageHandler
+from clients.base import YapClient
 
 
 class InteractiveClient(YapClient):

@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ..utils.messages import MessageHandler
-from ..utils.metrics import calculate_detailed_metrics
-from .base import QueryAuthClient
+from utils.messages import MessageHandler
+from utils.metrics import calculate_detailed_metrics
+from clients.base import QueryAuthClient
 
 
 class WarmupClient(QueryAuthClient):

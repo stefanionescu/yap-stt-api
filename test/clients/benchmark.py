@@ -7,9 +7,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-from ..utils.messages import BenchMessageHandler
-from ..utils.metrics import calculate_basic_metrics, calculate_detailed_metrics
-from .base import QueryAuthClient
+from utils.messages import BenchMessageHandler
+from utils.metrics import calculate_basic_metrics, calculate_detailed_metrics
+from clients.base import QueryAuthClient
 
 
 class CapacityRejected(Exception):

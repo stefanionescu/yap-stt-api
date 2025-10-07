@@ -8,8 +8,8 @@ from typing import Dict, Any
 
 import websockets
 
-from ..utils import ws_url, append_auth_query, AudioStreamer
-from ..utils.messages import MessageHandler
+from utils import ws_url, append_auth_query, AudioStreamer
+from utils.messages import MessageHandler
 
 
 class YapClient:
