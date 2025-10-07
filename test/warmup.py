@@ -25,13 +25,9 @@ def _ws_url(server: str, secure: bool) -> str:
     host = server.rstrip("/")
     return f"{scheme}://{host}/api/asr-streaming"
 
-async def _run(server: str, pcm_bytes: bytes, rtf: float, debug: bool = False) -> dict:
+async def _run(server: str, pcm_bytes: bytes, rtf: float, debug: bool = False, kyutai_key: str | None = None) -> dict:
     url = _ws_url(server, secure=False)
     
-    # Yap uses 24kHz, 80ms chunks
-    samples_per_chunk = int(24000 * 0.080)  # 1920 samples
-    bytes_per_chunk = samples_per_chunk * 2  # 3840 bytes
-    chunk_ms = 80.0
     # original audio duration (based on the 24k PCM16 you built)
     orig_samples = len(pcm_bytes) // 2
     file_duration_s = orig_samples / 24000.0
@@ -52,11 +48,11 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, debug: bool = False) -
     eos_decider = EOSDecider()
 
     # Kyutai model authentication (do not use RunPod API key)
-    API_KEY = os.getenv("KYUTAI_API_KEY")
-    if not API_KEY:
+    api_key = kyutai_key or os.getenv("KYUTAI_API_KEY")
+    if not api_key:
         raise RuntimeError("KYUTAI_API_KEY is required for internal calls (warmup).")
     ws_options = {
-        "extra_headers": [("kyutai-api-key", API_KEY)],
+        "extra_headers": [("kyutai-api-key", api_key)],
         "compression": None,
         "max_size": None,
         "ping_interval": 20,
@@ -345,6 +341,7 @@ def main() -> int:
     parser.add_argument("--file", type=str, default="mid.wav", help="Audio file. Absolute path or name in samples/")
     parser.add_argument("--rtf", type=float, default=1000.0, help="Real-time factor (1000=fast warmup, 1.0=realtime)")
     parser.add_argument("--debug", action="store_true", help="Print debug info including raw server messages")
+    parser.add_argument("--kyutai-key", type=str, default=None, help="Kyutai API key (overrides KYUTAI_API_KEY env)")
     args = parser.parse_args()
 
     # Resolve path: allow absolute path; otherwise look under samples/
@@ -360,7 +357,12 @@ def main() -> int:
     pcm_bytes = file_to_pcm16_mono_24k(str(audio_path))
     duration = file_duration_seconds(str(audio_path))
 
-    res = asyncio.run(_run(args.server, pcm_bytes, args.rtf, args.debug))
+    kyutai_key = args.kyutai_key or os.getenv("KYUTAI_API_KEY")
+    if not kyutai_key:
+        print("Error: Kyutai API key missing. Use --kyutai-key or set KYUTAI_API_KEY env.")
+        return 1
+
+    res = asyncio.run(_run(args.server, pcm_bytes, args.rtf, args.debug, kyutai_key))
 
     if res.get("error"):
         print(f"Warmup error: {res['error']}")

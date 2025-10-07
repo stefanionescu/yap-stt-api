@@ -125,7 +125,7 @@ def _ws_url(server: str, secure: bool) -> str:
     return f"{scheme}://{host}/api/asr-streaming"
 
 
-async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: float) -> Dict[str, float]:
+async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: float, kyutai_key: str) -> Dict[str, float]:
     """
     One session over WebSocket using Yap protocol with streaming mode.
     rtf: Real-time factor for throttling (1.0 for realtime, higher for faster)
@@ -152,17 +152,8 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
     orig_samples = len(pcm_bytes) // 2
     file_duration_s = orig_samples / 24000.0
 
-    # Yap uses 24kHz, 80ms chunks
-    samples_per_chunk = int(24000 * 0.080)  # 1920 samples
-    bytes_per_chunk = samples_per_chunk * 2  # 3840 bytes
-    chunk_ms = 80.0
-
-    # Kyutai model authentication (do not use RunPod API key)
-    API_KEY = os.getenv("KYUTAI_API_KEY")
-    if not API_KEY:
-        raise RuntimeError("KYUTAI_API_KEY is required for internal calls (bench).")
     ws_options = {
-        "extra_headers": [("kyutai-api-key", API_KEY)],
+        "extra_headers": [("kyutai-api-key", kyutai_key)],
         "compression": None,
         "max_size": None,
         "ping_interval": 20,
@@ -389,7 +380,7 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
     return metrics
 
 
-async def bench_ws(server: str, file_path: str, total_reqs: int, concurrency: int, rtf: float) -> Tuple[List[Dict[str, float]], int, int]:
+async def bench_ws(server: str, file_path: str, total_reqs: int, concurrency: int, rtf: float, kyutai_key: str) -> Tuple[List[Dict[str, float]], int, int]:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     try:
         with open(ERRORS_FILE, "w", encoding="utf-8") as ef:
@@ -415,7 +406,7 @@ async def bench_ws(server: str, file_path: str, total_reqs: int, concurrency: in
             try:
                 # Dynamic timeout: audio duration * 2 + 60s buffer (minimum 300s for long streams)
                 timeout = max(300.0, audio_seconds * 2 + 60.0)
-                r = await asyncio.wait_for(_ws_one(server, pcm, audio_seconds, rtf), timeout=timeout)
+                r = await asyncio.wait_for(_ws_one(server, pcm, audio_seconds, rtf, kyutai_key), timeout=timeout)
                 results.append(r)
             except CapacityRejected as e:
                 rejected += 1
@@ -445,6 +436,7 @@ def main() -> None:
     ap.add_argument("--concurrency", type=int, default=5, help="Max concurrent sessions")
     ap.add_argument("--file", type=str, default="mid.wav", help="Audio file from samples/")
     ap.add_argument("--rtf", type=float, default=1.0, help="Real-time factor (1.0=realtime, higher=faster)")
+    ap.add_argument("--kyutai-key", type=str, default=None, help="Kyutai API key (overrides KYUTAI_API_KEY env)")
     args = ap.parse_args()
 
     file_path = find_sample_by_name(args.file)
@@ -455,12 +447,17 @@ def main() -> None:
             print(f"Available files: {[os.path.basename(f) for f in available]}")
         return
 
+    kyutai_key = args.kyutai_key or os.getenv("KYUTAI_API_KEY")
+    if not kyutai_key:
+        print("Error: Kyutai API key missing. Use --kyutai-key or set KYUTAI_API_KEY env.")
+        return
+
     print(f"Benchmark → WS (streaming) | n={args.n} | concurrency={args.concurrency} | rtf={args.rtf} | server={args.server}")
     print(f"File: {os.path.basename(file_path)}")
 
     t0 = time.time()
     results, rejected, errors = asyncio.run(
-        bench_ws(args.server, file_path, args.n, args.concurrency, args.rtf)
+        bench_ws(args.server, file_path, args.n, args.concurrency, args.rtf, kyutai_key)
     )
     elapsed = time.time() - t0
 
