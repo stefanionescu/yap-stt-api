@@ -75,20 +75,26 @@ refresh_cuda_env_vars
 
 purge_legacy_cuda() {
   local pkg
-  local pkgs=()
+  local pkgs
 
-  while IFS= read -r pkg; do
-    [ -n "${pkg}" ] && pkgs+=("${pkg}")
-  done < <(dpkg --get-selections 2>/dev/null | awk '{print $1}' | grep -E '^cuda.*12-4' || true)
+  while true; do
+    pkgs=()
+    while IFS= read -r pkg; do
+      [ -n "${pkg}" ] && pkgs+=("${pkg}")
+    done < <(dpkg-query -W -f='${Package}\n' 2>/dev/null \
+      | grep -E '^(cuda|libcu|libnpp|libnv|libcudnn|libnccl).*12-4$' || true)
 
-  if [ ${#pkgs[@]} -gt 0 ]; then
+    if [ ${#pkgs[@]} -eq 0 ]; then
+      break
+    fi
+
     echo "[00] Removing legacy CUDA 12.4 packages: ${pkgs[*]}"
-    apt-get remove --purge -y "${pkgs[@]}" 2>/dev/null || true
     for pkg in "${pkgs[@]}"; do
       dpkg --purge --force-all "${pkg}" 2>/dev/null || true
     done
+    apt-get remove --purge -y "${pkgs[@]}" 2>/dev/null || true
     apt-get autoremove -y 2>/dev/null || true
-  fi
+  done
 
   rm -f /var/lib/yap/cuda-12.4.installed
   rm -rf /usr/local/cuda-12.4 2>/dev/null || true
