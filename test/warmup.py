@@ -6,6 +6,7 @@ import json
 import os
 import time
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 import websockets
 import numpy as np
 import msgpack
@@ -51,8 +52,22 @@ async def _run(server: str, pcm_bytes: bytes, rtf: float, debug: bool = False, k
     api_key = kyutai_key or os.getenv("KYUTAI_API_KEY")
     if not api_key:
         raise RuntimeError("KYUTAI_API_KEY is required for internal calls (warmup).")
+
+    parsed_url = urlparse(url)
+    query_params = dict(parse_qsl(parsed_url.query, keep_blank_values=True))
+    query_params.setdefault("auth_id", api_key)
+    url = urlunparse(
+        (
+            parsed_url.scheme,
+            parsed_url.netloc,
+            parsed_url.path,
+            parsed_url.params,
+            urlencode(query_params),
+            parsed_url.fragment,
+        )
+    )
+
     ws_options = {
-        "extra_headers": [("kyutai-api-key", api_key)],
         "compression": None,
         "max_size": None,
         "ping_interval": 20,

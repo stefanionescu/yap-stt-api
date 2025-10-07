@@ -21,6 +21,7 @@ from typing import Dict, List, Tuple
 import websockets  # pip install websockets
 import numpy as np
 import msgpack
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from utils import file_to_pcm16_mono_24k, file_duration_seconds, EOSDecider
 
 class CapacityRejected(Exception):
@@ -152,8 +153,21 @@ async def _ws_one(server: str, pcm_bytes: bytes, audio_seconds: float, rtf: floa
     orig_samples = len(pcm_bytes) // 2
     file_duration_s = orig_samples / 24000.0
 
+    parsed_url = urlparse(url)
+    query_params = dict(parse_qsl(parsed_url.query, keep_blank_values=True))
+    query_params["auth_id"] = kyutai_key
+    url = urlunparse(
+        (
+            parsed_url.scheme,
+            parsed_url.netloc,
+            parsed_url.path,
+            parsed_url.params,
+            urlencode(query_params),
+            parsed_url.fragment,
+        )
+    )
+
     ws_options = {
-        "extra_headers": [("kyutai-api-key", kyutai_key)],
         "compression": None,
         "max_size": None,
         "ping_interval": 20,
