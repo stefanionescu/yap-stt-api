@@ -217,10 +217,16 @@ ensure_libtinfo5() {
     if [ "${ID}" = "ubuntu" ] && [[ "${VERSION_ID}" == 24.04* ]]; then
       if ! dpkg -s libtinfo5 >/dev/null 2>&1; then
         echo "[00] Installing libtinfo5 compatibility package for Ubuntu 24.04..."
-        TMP_DEB=$(mktemp /tmp/libtinfo5_XXXX.deb)
-        curl -fsSL http://archive.ubuntu.com/ubuntu/pool/main/n/ncurses/libtinfo5_6.3-2_amd64.deb -o "${TMP_DEB}"
-        dpkg -i "${TMP_DEB}" 2>/dev/null || apt-get -y --fix-broken install
-        rm -f "${TMP_DEB}"
+        local tmp_deb
+        tmp_deb=$(mktemp /tmp/libtinfo5_XXXX.deb)
+        if curl -fsSL http://archive.ubuntu.com/ubuntu/pool/main/n/ncurses/libtinfo5_6.3-2_amd64.deb -o "${tmp_deb}"; then
+          dpkg -i "${tmp_deb}" 2>/dev/null || apt-get -y --fix-broken install
+        elif curl -fsSL http://archive.ubuntu.com/ubuntu/pool/main/n/ncurses/libtinfo5_6.4-4_amd64.deb -o "${tmp_deb}"; then
+          dpkg -i "${tmp_deb}" 2>/dev/null || apt-get -y --fix-broken install
+        else
+          echo "[00] WARNING: Unable to download libtinfo5 compatibility package." >&2
+        fi
+        rm -f "${tmp_deb}"
       fi
     fi
   fi
