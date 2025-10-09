@@ -103,9 +103,11 @@ CONTAINER_ID=$(docker ps -q --filter "ancestor=myusername/yap-stt-api:latest")
 docker exec -e KYUTAI_API_KEY=your_secret_here $CONTAINER_ID \
   python3 /workspace/test/warmup.py --server 127.0.0.1:8000 --rtf 1000
 
-# Interactive test
-docker exec -it -e KYUTAI_API_KEY=your_secret_here $CONTAINER_ID \
-  python3 /workspace/test/client.py --server 127.0.0.1:8000 --rtf 1.0
+# Check server status
+docker exec $CONTAINER_ID status
+
+# Run smoke test
+docker exec $CONTAINER_ID test
 
 # Load test
 docker exec -e KYUTAI_API_KEY=your_secret_here $CONTAINER_ID \

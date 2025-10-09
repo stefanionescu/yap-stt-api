@@ -23,7 +23,6 @@ HF_HUB_ENABLE_HF_TRANSFER=1
 YAP_ADDR=0.0.0.0
 YAP_PORT=8000
 YAP_LOG_DIR=/workspace/logs
-DSM_REPO_DIR=/workspace/delayed-streams-modeling
 # Point to your local repo config; leave unset to use scripts/env.lib.sh default
 # YAP_CONFIG=
 TMUX_SESSION=yap-stt
@@ -49,17 +48,13 @@ done
 "${BASE_DIR}/00_prereqs.sh"
 "${BASE_DIR}/01_install_yap_server.sh"
 
-# Optional: fetch DSM and run smoke test
+# Start server and optionally run smoke test
+"${BASE_DIR}/03_start_server.sh"
+sleep 10
+"${BASE_DIR}/04_status.sh"
+
 if [ "${ENABLE_SMOKE_TEST}" = "1" ]; then
-  "${BASE_DIR}/02_fetch_configs.sh"
-  "${BASE_DIR}/03_start_server.sh"
-  sleep 10
-  "${BASE_DIR}/04_status.sh"
   "${BASE_DIR}/05_smoke_test.sh"
-else
-  "${BASE_DIR}/03_start_server.sh"
-  sleep 10
-  "${BASE_DIR}/04_status.sh"
 fi
 
 echo

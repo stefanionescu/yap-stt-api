@@ -2,25 +2,28 @@
 set -euo pipefail
 source "$(dirname "$0")/env.lib.sh"
 
-export PATH="$HOME/.local/bin:$PATH"
-echo "[05] Smoke test…"
+echo "[05] Smoke test using warmup.py..."
 
-AUDIO="${DSM_REPO_DIR}/audio/bria.mp3"
-[ -f "${AUDIO}" ] || { echo "[05] Missing audio at ${AUDIO}"; exit 1; }
-
-SERVER_URL="${YAP_PUBLIC_WS_URL:-ws://${YAP_CLIENT_HOST}:${YAP_PORT}}"
-echo "[05] Server: ${SERVER_URL} | RTF=${SMOKETEST_RTF}"
-
-# Pass auth header if KYUTAI_API_KEY is set (legacy clients handled in script)
-EXTRA_ARGS=()
-if [ -n "${KYUTAI_API_KEY:-}" ]; then
-  EXTRA_ARGS+=("--header" "kyutai-api-key: ${KYUTAI_API_KEY}")
+# Use local samples instead of external DSM repo
+AUDIO_FILE="samples/mid.wav"
+if [ ! -f "${AUDIO_FILE}" ]; then
+    echo "[05] Missing audio file: ${AUDIO_FILE}" >&2
+    exit 1
 fi
 
-uv run "${DSM_REPO_DIR}/scripts/stt_from_file_rust_server.py" \
-  --url "${SERVER_URL}" \
-  --rtf "${SMOKETEST_RTF}" \
-  "${EXTRA_ARGS[@]}" \
-  "${AUDIO}"
+SERVER_URL="ws://${YAP_CLIENT_HOST}:${YAP_PORT}"
+echo "[05] Server: ${SERVER_URL} | RTF=${SMOKETEST_RTF}"
 
-
+# Run warmup.py as smoke test
+if [ -n "${KYUTAI_API_KEY:-}" ]; then
+    cd "$(dirname "$0")/.."
+    python3 test/warmup.py \
+        --server "${YAP_CLIENT_HOST}:${YAP_PORT}" \
+        --rtf "${SMOKETEST_RTF}" \
+        --kyutai-key "${KYUTAI_API_KEY}" \
+        --file "${AUDIO_FILE}"
+    echo "[05] ✅ Smoke test completed"
+else
+    echo "[05] ERROR: KYUTAI_API_KEY not set. Cannot run smoke test." >&2
+    exit 1
+fi

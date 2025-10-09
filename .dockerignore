@@ -2,7 +2,20 @@
 .git
 .gitignore
 
-# Python caches and virtual environments
+# Environment and config files (secrets should not be in image)
+.env
+.env.*
+scripts/.env
+
+# Documentation and development files
+README.md
+*.md
+docs/
+
+# Scripts (functionality replicated in entrypoint.sh)
+scripts/
+
+# Development Python environment
 **/__pycache__
 **/*.pyc
 **/*.pyo
@@ -11,62 +24,36 @@
 **/.mypy_cache
 **/.ruff_cache
 **/.venv
-venv
+venv/
+.python-version
 
-# Node / frontend dependencies
-node_modules
-
-# Generic build artifacts
-dist
-build
-
-# Rust / Cargo artifacts
-target
-server/target
-server/moshi-core/target
-server/moshi-server/target
+# Rust build artifacts
+target/
+server/target/
+server/moshi-core/target/
+server/moshi-server/target/
 Cargo.lock
 server/Cargo.lock
 
-# OS / editor cruft
-**/.DS_Store
-.vscode
-.idea
-
-# Logs and temporary files
+# Test results and logs
+test/results/
 **/*.log
-logs
-workspace
+logs/
+workspace/
+
+# OS and editor files
+**/.DS_Store
+.vscode/
+.idea/
 *.bak
 *.tmp
+*.swp
+*~
 
-.git
-.gitignore
-**/__pycache__
-**/*.pyc
-**/*.pyo
-**/*.pyd
-**/.pytest_cache
-**/.mypy_cache
-**/.ruff_cache
-**/.venv
-venv
-node_modules
-dist
-build
-target
-Cargo.lock
-server/target
-server/Cargo.lock
-server/moshi-core/target
-server/moshi-server/target
-**/.DS_Store
-**/*.log
-logs
-workspace
-.vscode
-.idea
-*.bak
-*.tmp
+# Node/frontend (if any)
+node_modules/
+dist/
+build/
 
-
+# Exclude specific test file as requested
+test/client.py
