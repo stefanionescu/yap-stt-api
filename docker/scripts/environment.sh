@@ -29,4 +29,4 @@ export TMUX_SESSION="${TMUX_SESSION:-yap-stt}"
 
 # Optional features
 export ENABLE_SMOKE_TEST="${ENABLE_SMOKE_TEST:-0}"
-export SMOKETEST_RTF="${SMOKETEST_RTF:-1000}"
+export SMOKETEST_RTF="${SMOKETEST_RTF:-1}"

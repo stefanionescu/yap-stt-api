@@ -9,23 +9,18 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # Default values
 PLATFORM="linux/amd64"
-BUILD_ONLY=false
-PUSH_ONLY=false
-NO_CACHE=false
 
 usage() {
     cat << 'EOF'
 Usage: ./docker/build.sh [OPTIONS] <username/image:tag>
 
 Build and push Yap STT API Docker image to DockerHub.
+Always builds with cache, then pushes to registry.
 
 ARGUMENTS:
   <username/image:tag>    Full image name (e.g., myuser/yap-stt-api:latest)
 
 OPTIONS:
-  -b, --build-only       Only build, don't push
-  -p, --push-only        Only push (assumes image exists)
-  --no-cache            Build without cache
   --platform PLATFORM   Target platform (default: linux/amd64)
   -h, --help            Show this help
 
@@ -33,14 +28,8 @@ EXAMPLES:
   # Build and push latest
   ./docker/build.sh myuser/yap-stt-api:latest
   
-  # Build only (for testing)
-  ./docker/build.sh --build-only myuser/yap-stt-api:dev
-  
-  # Push existing image
-  ./docker/build.sh --push-only myuser/yap-stt-api:v1.0.0
-  
-  # Build without cache
-  ./docker/build.sh --no-cache myuser/yap-stt-api:latest
+  # Build for specific platform
+  ./docker/build.sh --platform linux/arm64 myuser/yap-stt-api:latest
 
 REQUIREMENTS:
   - Docker with BuildKit enabled
@@ -53,18 +42,6 @@ EOF
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -b|--build-only)
-            BUILD_ONLY=true
-            shift
-            ;;
-        -p|--push-only)
-            PUSH_ONLY=true
-            shift
-            ;;
-        --no-cache)
-            NO_CACHE=true
-            shift
-            ;;
         --platform)
             PLATFORM="$2"
             shift 2
@@ -116,9 +93,6 @@ echo "Image: $IMAGE_NAME"
 echo "Tag: $TAG"
 echo "Full: $IMAGE_TAG"
 echo "Platform: $PLATFORM"
-echo "Build only: $BUILD_ONLY"
-echo "Push only: $PUSH_ONLY"
-echo "No cache: $NO_CACHE"
 echo
 
 # Check Docker
@@ -127,62 +101,50 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
-# Check if we're logged in to DockerHub (unless build-only)
-if [ "$BUILD_ONLY" = false ] && [ "$PUSH_ONLY" = false ]; then
-    # Simple check - if we can't push, Docker will tell us
-    echo "Checking DockerHub login..."
-    if ! docker system info >/dev/null 2>&1; then
-        echo "Warning: Docker daemon not accessible"
-    fi
-    # Skip login check - let Docker handle auth errors during push
+# Check DockerHub access
+echo "Checking DockerHub login..."
+if ! docker system info >/dev/null 2>&1; then
+    echo "Warning: Docker daemon not accessible"
 fi
+# Skip login check - let Docker handle auth errors during push
 
 cd "$REPO_ROOT"
 
 # Build phase
-if [ "$PUSH_ONLY" = false ]; then
-    echo "=== Building Docker image ==="
-    
-    BUILD_ARGS=(
-        "build"
-        "-f" "docker/Dockerfile"
-        "-t" "$IMAGE_TAG"
-        "--platform" "$PLATFORM"
-    )
-    
-    if [ "$NO_CACHE" = true ]; then
-        BUILD_ARGS+=("--no-cache")
-    fi
-    
-    BUILD_ARGS+=(".")
-    
-    echo "Running: docker ${BUILD_ARGS[*]}"
-    if ! DOCKER_BUILDKIT=1 docker "${BUILD_ARGS[@]}"; then
-        echo "❌ Build failed!" >&2
-        exit 1
-    fi
-    
-    echo "✅ Build complete: $IMAGE_TAG"
-    
-    # Show image info
-    docker images "$IMAGE_TAG" --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}"
+echo "=== Building Docker image ==="
+
+BUILD_ARGS=(
+    "build"
+    "-f" "docker/Dockerfile"
+    "-t" "$IMAGE_TAG"
+    "--platform" "$PLATFORM"
+    "."
+)
+
+echo "Running: docker ${BUILD_ARGS[*]}"
+if ! DOCKER_BUILDKIT=1 docker "${BUILD_ARGS[@]}"; then
+    echo "❌ Build failed!" >&2
+    exit 1
 fi
 
+echo "✅ Build complete: $IMAGE_TAG"
+
+# Show image info
+docker images "$IMAGE_TAG" --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}"
+
 # Push phase
-if [ "$BUILD_ONLY" = false ]; then
-    echo
-    echo "=== Pushing to DockerHub ==="
-    
-    echo "Running: docker push $IMAGE_TAG"
-    if ! docker push "$IMAGE_TAG"; then
-        echo "❌ Push failed!" >&2
-        exit 1
-    fi
-    
-    echo "✅ Push complete: $IMAGE_TAG"
-    echo
-    echo "Image available at: https://hub.docker.com/r/$USERNAME/$IMAGE_NAME"
+echo
+echo "=== Pushing to DockerHub ==="
+
+echo "Running: docker push $IMAGE_TAG"
+if ! docker push "$IMAGE_TAG"; then
+    echo "❌ Push failed!" >&2
+    exit 1
 fi
+
+echo "✅ Push complete: $IMAGE_TAG"
+echo
+echo "Image available at: https://hub.docker.com/r/$USERNAME/$IMAGE_NAME"
 
 echo
 echo "=== Usage Instructions ==="

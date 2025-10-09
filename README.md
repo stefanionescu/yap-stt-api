@@ -10,9 +10,8 @@ One-command deployment for **Yap STT Server** with GPU acceleration. Automated C
 - **Testing suite** - Load testing, benchmarks, real-time clients
 - **RunPod compatible** - Tested on cloud GPU instances
 
-## Quick Start (One Command)
+## Quick Start
 
-### Complete Setup + Deployment
 ```bash
 # Export your API key and then download, compile, configure, and start Yap STT server
 KYUTAI_API_KEY=your_secret_here bash scripts/main.sh
@@ -25,26 +24,18 @@ KYUTAI_API_KEY=your_secret_here bash scripts/main.sh
 4. Start server in tmux session on port 8000
 5. Optionally run a smoke test to verify functionality
 
-**Result:** GPU-accelerated STT server at `ws://localhost:8000` ready for connections.
-
 ## Docker
 
 ### One-Command Build & Push
 
-Use the provided script for easy Docker operations:
+Use the provided script for easy Docker operations. Always builds with cache, then pushes to registry:
 
 ```bash
 # Build and push to DockerHub (requires docker login)
-./docker/build.sh myusername/yap-stt-api:latest
+./docker/build.sh sionescu/yap-stt-api:latest
 
-# Build only (for testing)
-./docker/build.sh --build-only myusername/yap-stt-api:dev
-
-# Push existing image
-./docker/build.sh --push-only myusername/yap-stt-api:v1.0.0
-
-# Build without cache (clean build)
-./docker/build.sh --no-cache myusername/yap-stt-api:latest
+# Build for specific platform
+./docker/build.sh --platform linux/arm64 sionescu/yap-stt-api:latest
 ```
 
 **Requirements:**
@@ -58,10 +49,10 @@ If you prefer manual commands:
 
 ```bash
 # Build (from repo root directory)
-DOCKER_BUILDKIT=1 docker build -f docker/Dockerfile -t myusername/yap-stt-api:latest .
+DOCKER_BUILDKIT=1 docker build -f docker/Dockerfile -t sionescu/yap-stt-api:latest .
 
 # Push
-docker push myusername/yap-stt-api:latest
+docker push sionescu/yap-stt-api:latest
 ```
 
 ### Run Container
@@ -72,7 +63,7 @@ docker run --rm -it \
   --gpus all \
   -p 8000:8000 \
   -e KYUTAI_API_KEY=your_secret_here \
-  myusername/yap-stt-api:latest
+  sionescu/yap-stt-api:latest
 ```
 
 **Background/Production:**
@@ -83,13 +74,16 @@ docker run -d \
   -p 8000:8000 \
   -e KYUTAI_API_KEY=your_secret_here \
   -v /path/to/cache:/workspace/hf_cache \
-  myusername/yap-stt-api:latest
+  sionescu/yap-stt-api:latest
 ```
 
-**RunPod/Cloud GPU:**
+**RunPod Template:**
 ```bash
-# Use your pushed image in RunPod template
-# Set environment: KYUTAI_API_KEY=your_secret_here
+# Docker image: sionescu/yap-stt-api:latest
+# Environment variables in RunPod dashboard:
+#   KYUTAI_API_KEY=your_secret_here
+#   YAP_ADDR=0.0.0.0
+#   YAP_PORT=8000
 # Expose port: 8000
 ```
 
@@ -97,7 +91,7 @@ docker run -d \
 
 ```bash
 # Get container ID
-CONTAINER_ID=$(docker ps -q --filter "ancestor=myusername/yap-stt-api:latest")
+CONTAINER_ID=$(docker ps -q --filter "ancestor=sionescu/yap-stt-api:latest")
 
 # Health check
 docker exec -e KYUTAI_API_KEY=your_secret_here $CONTAINER_ID \
@@ -169,34 +163,60 @@ bash scripts/04_status.sh
 bash scripts/05_smoke_test.sh
 ```
 
-## Runpod Deployment
+## RunPod Deployment
 
-### RunPod Setup
+### Method 1: Docker Template (Recommended)
+
+**Create RunPod Template:**
+1. **Create Template** in RunPod dashboard using your Docker image: `sionescu/yap-stt-api:latest`
+2. **Set Environment Variables** (never hardcode in image):
+   ```bash
+   KYUTAI_API_KEY=your_secret_here    # Your Kyutai API key (REQUIRED)
+   YAP_ADDR=0.0.0.0                  # Bind to all interfaces
+   YAP_PORT=8000                     # Server port
+   HF_HOME=/workspace/hf_cache       # Model cache location
+   ```
+3. **Expose Ports**: `8000` 
+4. **Launch Pod** from template
+
+**Deploy & Connect:**
+```bash
+# Pod starts automatically with your environment variables
+# Server available at: ws://your-pod-id-12345.a.runpod.net:8000
+```
+
+### Method 2: Manual Setup
+
+**Launch & Setup:**
 1. **Launch Instance**: Ubuntu 22.04 + L40S/A100/RTX 4090
 2. **Expose Port**: `8000` in RunPod dashboard  
 3. **Run Setup**:
    ```bash
-   git clone <your-repo-url>
+   git clone https://github.com/yourusername/yap-stt-api
    cd yap-stt-api
+   export KYUTAI_API_KEY=your_secret_here
    scripts/main.sh
    ```
 4. **Connect**: Server will be at `ws://your-runpod-ip:8000`
 
-**Requirements:**
+### RunPod Requirements
+
 - **GPU**: L40S/A100 (recommended) or RTX 4090/3090
 - **RAM**: 16GB+ system memory  
 - **Storage**: 10GB+ free space
 - **Network**: Port 8000 exposed publicly
 
-**Environment Variables** (required/optional):
-```bash
-# Server settings  
-YAP_ADDR=0.0.0.0               # Bind address
-YAP_PORT=8000                  # Server port
-HF_HOME=/workspace/hf_cache    # Model cache location
-# Auth (Kyutai server key — NOT your RunPod API key) — must be exported before running scripts
-# Example: export KYUTAI_API_KEY=your_secret_here
-```
+### Security Best Practices
+
+**✅ DO:**
+- Use RunPod environment variables for `KYUTAI_API_KEY`
+- Set environment variables in template or pod launch
+- Use RunPod's built-in secret management
+
+**❌ DON'T:**
+- Hardcode API keys in Docker image
+- Put secrets in Dockerfiles or scripts
+- Use RunPod API key as Kyutai API key (they're different!)
 
 ## Configuration
 
