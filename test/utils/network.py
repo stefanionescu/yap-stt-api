@@ -6,12 +6,25 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 def ws_url(server: str, secure: bool) -> str:
     """Generate WebSocket URL for Yap server ASR streaming endpoint.
 
-    If a full ws:// or wss:// URL is provided, use it as-is; 
-    otherwise build one and append '/api/asr-streaming'.
+    Behavior:
+    - If a full ws:// or wss:// URL is provided, use it as-is.
+    - If an http:// or https:// URL is provided, translate scheme to ws:// or wss://,
+      preserve host and path, and ensure path ends with '/api/asr-streaming'.
+    - Otherwise treat input as host:port and build ws(s)://host:port/api/asr-streaming
+      based on `secure`.
     """
-    server = server or ""
+    server = (server or "").strip()
     if server.startswith(("ws://", "wss://")):
         return server
+    if server.startswith(("http://", "https://")):
+        parsed = urlparse(server)
+        use_secure = (parsed.scheme == "https") or secure
+        scheme = "wss" if use_secure else "ws"
+        # normalize path to include endpoint exactly once
+        base_path = parsed.path.rstrip("/")
+        if not base_path.endswith("/api/asr-streaming"):
+            base_path = f"{base_path}/api/asr-streaming"
+        return urlunparse((scheme, parsed.netloc, base_path, "", parsed.query, parsed.fragment))
     scheme = "wss" if secure else "ws"
     host = server.rstrip("/")
     return f"{scheme}://{host}/api/asr-streaming"

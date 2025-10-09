@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# One-stop Docker build and push script for Yap STT API
-# Usage: ./docker/build.sh [OPTIONS] <username/image:tag>
+# Yap STT API - Docker build and push script
+# Behavior preserved; structure modularized; parameter names clarified.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-# Default values
-PLATFORM="linux/amd64"
+DEFAULT_PLATFORM="linux/amd64"
 
-usage() {
+print_usage() {
     cat << 'EOF'
 Usage: ./docker/build.sh [OPTIONS] <username/image:tag>
 
@@ -21,8 +20,8 @@ ARGUMENTS:
   <username/image:tag>    Full image name (e.g., myuser/yap-stt-api:latest)
 
 OPTIONS:
-  --platform PLATFORM   Target platform (default: linux/amd64)
-  -h, --help            Show this help
+  --platform PLATFORM     Target platform (default: linux/amd64)
+  -h, --help              Show this help
 
 EXAMPLES:
   # Build and push latest
@@ -35,126 +34,153 @@ REQUIREMENTS:
   - Docker with BuildKit enabled
   - DockerHub login: docker login
   - NVIDIA GPU support for testing (optional)
-
 EOF
 }
 
-# Parse arguments
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --platform)
-            PLATFORM="$2"
-            shift 2
-            ;;
-        -h|--help)
-            usage
-            exit 0
-            ;;
-        -*)
-            echo "Error: Unknown option $1" >&2
-            usage
-            exit 1
-            ;;
-        *)
-            if [ -z "${IMAGE_TAG:-}" ]; then
-                IMAGE_TAG="$1"
-            else
-                echo "Error: Too many arguments" >&2
-                usage
+validate_image_ref() {
+    local image_ref="$1"
+    if [[ -z "${image_ref}" ]]; then
+        echo "Error: Image name required" >&2
+        print_usage
+        exit 1
+    fi
+    # Validate image format (username/image:tag) - keep logic identical
+    if [[ ! "${image_ref}" =~ ^[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+:[a-zA-Z0-9._-]+$ ]]; then
+        echo "Error: Invalid image format. Use: username/image:tag" >&2
+        echo "Example: myuser/yap-stt-api:latest" >&2
+        exit 1
+    fi
+}
+
+split_image_ref() {
+    # Echo three values: username image_name tag
+    local image_ref="$1"
+    local username image_name tag
+    username="$(echo "${image_ref}" | cut -d'/' -f1)"
+    image_name="$(echo "${image_ref}" | cut -d'/' -f2 | cut -d':' -f1)"
+    tag="$(echo "${image_ref}" | cut -d':' -f2)"
+    echo "${username}" "${image_name}" "${tag}"
+}
+
+check_docker() {
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "Error: Docker not found. Please install Docker." >&2
+        exit 1
+    fi
+    echo "Checking DockerHub login..."
+    if ! docker system info >/dev/null 2>&1; then
+        echo "Warning: Docker daemon not accessible"
+    fi
+    # Skip login check - let Docker handle auth errors during push
+}
+
+build_image() {
+    local image_ref="$1"
+    local platform="$2"
+    local -a build_args=(
+        build
+        -f docker/Dockerfile
+        -t "${image_ref}"
+        --platform "${platform}"
+        .
+    )
+
+    echo "=== Building Docker image ==="
+    echo "Running: docker ${build_args[*]}"
+    if ! DOCKER_BUILDKIT=1 docker "${build_args[@]}"; then
+        echo "❌ Build failed!" >&2
+        exit 1
+    fi
+    echo "✅ Build complete: ${image_ref}"
+}
+
+show_image_info() {
+    local image_ref="$1"
+    docker images "${image_ref}" --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}"
+}
+
+push_image() {
+    local image_ref="$1"
+    echo
+    echo "=== Pushing to DockerHub ==="
+    echo "Running: docker push ${image_ref}"
+    if ! docker push "${image_ref}"; then
+        echo "❌ Push failed!" >&2
+        exit 1
+    fi
+    echo "✅ Push complete: ${image_ref}"
+}
+
+print_run_instructions() {
+    local username="$1"
+    local image_name="$2"
+    local image_ref="$3"
+    echo
+    echo "Image available at: https://hub.docker.com/r/${username}/${image_name}"
+    echo
+    echo "=== Usage Instructions ==="
+    echo "Run your image:"
+    echo "  docker run --rm -it --gpus all -p 8000:8000 \\
+    -e KYUTAI_API_KEY=your_secret_here \\
+    ${image_ref}"
+    echo
+    echo "Test the server:"
+    echo "  docker exec -e KYUTAI_API_KEY=your_secret_here <container_id> \\
+    python3 /workspace/test/warmup.py --server 127.0.0.1:8000"
+    echo
+    echo "Done! 🚀"
+}
+
+main() {
+    local platform="${DEFAULT_PLATFORM}"
+    local image_ref=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --platform)
+                platform="$2"
+                shift 2
+                ;;
+            -h|--help)
+                print_usage
+                exit 0
+                ;;
+            -*)
+                echo "Error: Unknown option $1" >&2
+                print_usage
                 exit 1
-            fi
-            shift
-            ;;
-    esac
-done
+                ;;
+            *)
+                if [[ -z "${image_ref}" ]]; then
+                    image_ref="$1"
+                else
+                    echo "Error: Too many arguments" >&2
+                    print_usage
+                    exit 1
+                fi
+                shift
+                ;;
+        esac
+    done
 
-# Validate image tag
-if [ -z "${IMAGE_TAG:-}" ]; then
-    echo "Error: Image name required" >&2
-    usage
-    exit 1
-fi
+    validate_image_ref "${image_ref}"
+    read -r username image_name tag <<< "$(split_image_ref "${image_ref}")"
 
-# Validate image format (username/image:tag)
-if [[ ! "$IMAGE_TAG" =~ ^[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+:[a-zA-Z0-9._-]+$ ]]; then
-    echo "Error: Invalid image format. Use: username/image:tag" >&2
-    echo "Example: myuser/yap-stt-api:latest" >&2
-    exit 1
-fi
+    echo "=== Yap STT API Docker Build & Push ==="
+    echo "Username: ${username}"
+    echo "Image: ${image_name}"
+    echo "Tag: ${tag}"
+    echo "Full: ${image_ref}"
+    echo "Platform: ${platform}"
+    echo
 
-# Extract components
-USERNAME=$(echo "$IMAGE_TAG" | cut -d'/' -f1)
-IMAGE_NAME=$(echo "$IMAGE_TAG" | cut -d'/' -f2 | cut -d':' -f1)
-TAG=$(echo "$IMAGE_TAG" | cut -d':' -f2)
+    check_docker
 
-echo "=== Yap STT API Docker Build & Push ==="
-echo "Username: $USERNAME"
-echo "Image: $IMAGE_NAME"
-echo "Tag: $TAG"
-echo "Full: $IMAGE_TAG"
-echo "Platform: $PLATFORM"
-echo
+    cd "${REPO_ROOT}"
+    build_image "${image_ref}" "${platform}"
+    show_image_info "${image_ref}"
+    push_image "${image_ref}"
+    print_run_instructions "${username}" "${image_name}" "${image_ref}"
+}
 
-# Check Docker
-if ! command -v docker &> /dev/null; then
-    echo "Error: Docker not found. Please install Docker." >&2
-    exit 1
-fi
-
-# Check DockerHub access
-echo "Checking DockerHub login..."
-if ! docker system info >/dev/null 2>&1; then
-    echo "Warning: Docker daemon not accessible"
-fi
-# Skip login check - let Docker handle auth errors during push
-
-cd "$REPO_ROOT"
-
-# Build phase
-echo "=== Building Docker image ==="
-
-BUILD_ARGS=(
-    "build"
-    "-f" "docker/Dockerfile"
-    "-t" "$IMAGE_TAG"
-    "--platform" "$PLATFORM"
-    "."
-)
-
-echo "Running: docker ${BUILD_ARGS[*]}"
-if ! DOCKER_BUILDKIT=1 docker "${BUILD_ARGS[@]}"; then
-    echo "❌ Build failed!" >&2
-    exit 1
-fi
-
-echo "✅ Build complete: $IMAGE_TAG"
-
-# Show image info
-docker images "$IMAGE_TAG" --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}"
-
-# Push phase
-echo
-echo "=== Pushing to DockerHub ==="
-
-echo "Running: docker push $IMAGE_TAG"
-if ! docker push "$IMAGE_TAG"; then
-    echo "❌ Push failed!" >&2
-    exit 1
-fi
-
-echo "✅ Push complete: $IMAGE_TAG"
-echo
-echo "Image available at: https://hub.docker.com/r/$USERNAME/$IMAGE_NAME"
-
-echo
-echo "=== Usage Instructions ==="
-echo "Run your image:"
-echo "  docker run --rm -it --gpus all -p 8000:8000 \\"
-echo "    -e KYUTAI_API_KEY=your_secret_here \\"
-echo "    $IMAGE_TAG"
-echo
-echo "Test the server:"
-echo "  docker exec -e KYUTAI_API_KEY=your_secret_here <container_id> \\"
-echo "    python3 /workspace/test/warmup.py --server 127.0.0.1:8000"
-echo
-echo "Done! 🚀"
+main "$@"

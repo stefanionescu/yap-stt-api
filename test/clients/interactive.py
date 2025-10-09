@@ -78,7 +78,13 @@ class InteractiveClient(YapClient):
         # Network latency metrics
         connect_ms = self.connect_time * 1000.0
         handshake_ms = self.handshake_time * 1000.0
-        first_response_ms = handler.first_response_time * 1000.0 if handler.first_response_time is not None else 0.0
+        # Prefer precise measurement from first-audio-sent to first partial; fallback to TTFW
+        if handler.first_response_time is not None:
+            first_response_ms = handler.first_response_time * 1000.0
+        elif handler.ttfw is not None:
+            first_response_ms = handler.ttfw * 1000.0
+        else:
+            first_response_ms = 0.0
         
         ttfw_ms = (handler.ttfw * 1000.0) if handler.ttfw is not None else 0.0
         

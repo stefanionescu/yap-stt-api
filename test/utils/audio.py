@@ -133,17 +133,30 @@ class AudioStreamer:
         self.sr = 24000
         self.last_chunk_sent_ts = 0.0
         
-    async def stream_audio(self, ws, eos_decider: EOSDecider):
-        """Stream audio chunks with RTF control."""
+    async def stream_audio(self, ws, eos_decider: EOSDecider, on_first_audio_sent=None):
+        """Stream audio chunks with RTF control.
+
+        Returns:
+            Tuple[float, float]: (first_audio_sent_ts, last_signal_ts)
+        """
         if self.debug:
             print("DEBUG: Starting audio stream")
         
         t_stream0 = time.perf_counter()
+        first_chunk_sent_ts = 0.0
         samples_sent = 0
         
         for pcm_chunk in iter_chunks(self.pcm_int16, self.hop):
             msg = msgpack.packb({"type": "Audio", "pcm": pcm_chunk.tolist()},
                                use_bin_type=True, use_single_float=True)
+            # Record the first time we place audio on the wire
+            if first_chunk_sent_ts == 0.0:
+                first_chunk_sent_ts = time.perf_counter()
+                if on_first_audio_sent is not None:
+                    try:
+                        on_first_audio_sent(first_chunk_sent_ts)
+                    except Exception:
+                        pass
             await ws.send(msg)
             self.last_chunk_sent_ts = time.perf_counter()
             
@@ -181,4 +194,4 @@ class AudioStreamer:
         if self.debug:
             print("DEBUG: Sent final Flush")
         
-        return time.perf_counter()
+        return (first_chunk_sent_ts or t_stream0), time.perf_counter()

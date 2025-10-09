@@ -1,9 +1,9 @@
 # syntax=docker/dockerfile:1.6
 
-# Complete Yap STT API Docker image that replicates scripts/main.sh functionality
-# Includes: CUDA 12.4, Rust toolchain, yap-server binary, Python test clients, samples
+# Yap STT API Docker image (parity with bare-metal scripts)
+# Includes CUDA 12.4, Rust toolchain, yap-server binary, Python test clients, samples
 #
-# Build leverages .dockerignore for clean copying:
+# Build leverages .dockerignore for deterministic context:
 #   ✅ Includes: server/, test/ (minus client.py), samples/, requirements.txt
 #   ❌ Excludes: scripts/, .env files, build artifacts, cache files, test/client.py
 
@@ -14,7 +14,7 @@ ARG UBUNTU_VERSION=22.04
 FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION} AS base
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install all dependencies (replicates 00_prereqs.sh exactly)
+# Install all dependencies (mirrors scripts/00_prereqs.sh)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # Core build deps (matches 00_prereqs.sh)
     build-essential git curl pkg-config libssl-dev ca-certificates \
@@ -27,15 +27,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libopus0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv (matches 00_prereqs.sh with ENABLE_SMOKE_TEST=1)
+# Install uv (for Python deps and tests)
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     mv /root/.local/bin/uv /usr/local/bin/uv
 
-# Set file descriptor limits (matches 00_prereqs.sh)
+# Set file descriptor limits
 RUN echo '* soft nofile 1048576' > /etc/security/limits.d/moshi-nofile.conf && \
     echo '* hard nofile 1048576' >> /etc/security/limits.d/moshi-nofile.conf
 
-# Optional network tuning (matches 00_prereqs.sh ENABLE_NET_TUNING=1)
+# Optional network tuning
 RUN echo 'net.core.somaxconn = 4096' > /etc/sysctl.d/99-moshi-net.conf && \
     echo 'net.ipv4.tcp_max_syn_backlog = 8192' >> /etc/sysctl.d/99-moshi-net.conf && \
     echo 'net.core.netdev_max_backlog = 16384' >> /etc/sysctl.d/99-moshi-net.conf && \
@@ -45,7 +45,7 @@ RUN echo 'net.core.somaxconn = 4096' > /etc/sysctl.d/99-moshi-net.conf && \
     echo 'net.core.rmem_max = 67108864' >> /etc/sysctl.d/99-moshi-net.conf && \
     echo 'net.core.wmem_max = 67108864' >> /etc/sysctl.d/99-moshi-net.conf
 
-# Set CUDA environment (matches env.lib.sh exactly)
+# CUDA environment
 ENV CUDA_MM=12.4 \
     CUDA_MM_PKG=12-4 \
     CUDA_PREFIX=/usr/local/cuda-12.4 \
@@ -56,7 +56,7 @@ ENV CUDA_MM=12.4 \
     LD_LIBRARY_PATH=/usr/local/cuda-12.4/lib64:/usr/local/cuda-12.4/targets/x86_64-linux/lib \
     CUDARC_NVRTC_PATH=/usr/local/cuda-12.4/lib64/libnvrtc.so
 
-# Set Yap environment (matches env.lib.sh defaults)
+# Yap environment defaults
 ENV HF_HOME=/workspace/hf_cache \
     HF_HUB_ENABLE_HF_TRANSFER=1 \
     YAP_ADDR=0.0.0.0 \
@@ -68,19 +68,19 @@ ENV HF_HOME=/workspace/hf_cache \
 
 WORKDIR /workspace
 
-# ------------ Install Rust toolchain (matches 00_prereqs.sh exactly) ------------
+# ------------ Install Rust toolchain ------------
 FROM base AS rust
-# Install latest stable Rust (matches bare metal: --default-toolchain stable)
+# Install latest stable Rust
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable
 ENV PATH=/root/.cargo/bin:${PATH}
 
-# ------------ Build yap-server (replicates 01_install_yap_server.sh) ------------
+# ------------ Build yap-server ------------
 FROM rust AS builder
 # Copy server source (.dockerignore excludes target/ build artifacts)
 COPY server/ /workspace/server/
 WORKDIR /workspace/server
 
-# Build with proper CUDA environment (matches 01_install_yap_server.sh exactly)
+# Build with CUDA feature
 RUN rm -f Cargo.lock && \
     cargo update --quiet && \
     RUST_BACKTRACE=1 cargo build --release --features cuda -p moshi-server
@@ -101,7 +101,7 @@ COPY server/ /workspace/server/
 COPY test/ /workspace/test/
 COPY samples/ /workspace/samples/
 
-# Install Python test dependencies using uv (matches bare metal)
+# Install Python test dependencies using uv
 RUN uv pip install --system --no-cache -r /workspace/requirements.txt
 
 # Create required directories
@@ -114,6 +114,6 @@ RUN chmod +x /docker-scripts/*.sh
 # Expose port
 EXPOSE 8000
 
-# Use start for API key injection and server startup (matches 03_start_server.sh)
+# Start script handles API key injection and server startup
 ENTRYPOINT ["/docker-scripts/start.sh"]
 CMD ["yap-server", "worker", "--config", "/workspace/server/config-stt-en_fr-hf.toml", "--addr", "0.0.0.0", "--port", "8000"]

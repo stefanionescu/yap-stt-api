@@ -28,5 +28,7 @@ export YAP_CONFIG="${YAP_CONFIG:-/workspace/server/config-stt-en_fr-hf.toml}"
 export TMUX_SESSION="${TMUX_SESSION:-yap-stt}"
 
 # Optional features
+# Smoke test controls (preserve backwards compat with ENABLE_SMOKE_TEST)
 export ENABLE_SMOKE_TEST="${ENABLE_SMOKE_TEST:-0}"
+export RUN_SMOKE_TEST="${RUN_SMOKE_TEST:-${ENABLE_SMOKE_TEST}}"
 export SMOKETEST_RTF="${SMOKETEST_RTF:-1}"

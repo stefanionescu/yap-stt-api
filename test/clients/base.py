@@ -63,8 +63,11 @@ class YapClient:
             if handler.done_event.is_set():
                 return t0, time.perf_counter()
             
-            # Stream audio
-            last_signal_ts = await streamer.stream_audio(ws, handler.eos_decider)
+            # Stream audio and capture first-audio-sent timestamp
+            first_audio_ts, last_signal_ts = await streamer.stream_audio(
+                ws, handler.eos_decider,
+                (handler.set_first_audio_sent if hasattr(handler, "set_first_audio_sent") else None)
+            )
             
             # Wait for final response
             file_duration_s = len(pcm_bytes) // 2 / 24000.0
