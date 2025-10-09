@@ -4,7 +4,7 @@ source "$(dirname "$0")/env.lib.sh"
 
 echo "[05] Smoke test using warmup.py..."
 
-# Use local samples instead of external DSM repo
+# Use local sample
 AUDIO_FILE="samples/mid.wav"
 if [ ! -f "${AUDIO_FILE}" ]; then
     echo "[05] Missing audio file: ${AUDIO_FILE}" >&2

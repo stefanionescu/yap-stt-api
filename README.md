@@ -253,7 +253,7 @@ KYUTAI_API_KEY=public_token python test/bench.py --n 20 --concurrency 5 --rtf 1.
 KYUTAI_API_KEY=public_token python test/bench.py --n 20 --concurrency 5 --rtf 100.0
 
 # Health check (fast warmup)
-KYUTAI_API_KEY=public_token python test/warmup.py --rtf 1000.0
+KYUTAI_API_KEY=public_token python test/warmup.py --rtf 1.0
 ```
 
 ### Checking Test Results & Logs
