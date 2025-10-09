@@ -5,12 +5,13 @@
 ARG CUDA_VERSION=12.4.1
 ARG UBUNTU_VERSION=22.04
 
-# ------------ Base (CUDA runtime) ------------
-FROM nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu${UBUNTU_VERSION} AS base
+# ------------ Base (CUDA development) ------------
+FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION} AS base
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl wget git build-essential pkg-config \
-    libssl-dev libclang-dev clang cmake python3 python3-pip python3-venv \
+    libssl-dev libclang-dev clang cmake python3 python3-pip python3-venv python3-dev \
+    libopus-dev libopus0 \
     ffmpeg tmux net-tools iproute2 && \
     rm -rf /var/lib/apt/lists/*
 
@@ -24,17 +25,20 @@ WORKDIR /workspace
 
 # ------------ Rust toolchain ------------
 FROM base AS rust
-ARG RUST_VERSION=1.80.1
+ARG RUST_VERSION=1.82.0
 RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain ${RUST_VERSION}
 ENV PATH=/root/.cargo/bin:${PATH}
 
 # ------------ Build yap-server ------------
 FROM rust AS builder
+# Set CUDA environment for build
+ENV CUDA_COMPUTE_CAP=89 \
+    CUDARC_NVRTC_PATH=/usr/local/cuda/lib64/libnvrtc.so
 COPY server /workspace/server
 WORKDIR /workspace/server
 # Regenerate lockfile and build with CUDA features
 RUN rm -f Cargo.lock && cargo update --quiet && \
-    cargo build --release --features cuda -p moshi-server
+    RUST_BACKTRACE=1 cargo build --release --features cuda -p moshi-server
 
 # ------------ Final image ------------
 FROM base AS final
