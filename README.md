@@ -35,16 +35,16 @@ Use the provided script for easy Docker operations:
 
 ```bash
 # Build and push to DockerHub (requires docker login)
-bash ./docker/build.sh myusername/yap-stt-api:latest
+./docker/build.sh myusername/yap-stt-api:latest
 
 # Build only (for testing)
-bash ./docker/build.sh --build-only myusername/yap-stt-api:dev
+./docker/build.sh --build-only myusername/yap-stt-api:dev
 
 # Push existing image
-bash ./docker/build.sh --push-only myusername/yap-stt-api:v1.0.0
+./docker/build.sh --push-only myusername/yap-stt-api:v1.0.0
 
 # Build without cache (clean build)
-bash ./docker/build.sh --no-cache myusername/yap-stt-api:latest
+./docker/build.sh --no-cache myusername/yap-stt-api:latest
 ```
 
 **Requirements:**
@@ -57,8 +57,8 @@ bash ./docker/build.sh --no-cache myusername/yap-stt-api:latest
 If you prefer manual commands:
 
 ```bash
-# Build
-docker build -f docker/Dockerfile -t myusername/yap-stt-api:latest .
+# Build (from repo root directory)
+DOCKER_BUILDKIT=1 docker build -f docker/Dockerfile -t myusername/yap-stt-api:latest .
 
 # Push
 docker push myusername/yap-stt-api:latest
@@ -101,13 +101,13 @@ CONTAINER_ID=$(docker ps -q --filter "ancestor=myusername/yap-stt-api:latest")
 
 # Health check
 docker exec -e KYUTAI_API_KEY=your_secret_here $CONTAINER_ID \
-  python3 /workspace/test/warmup.py --server 127.0.0.1:8000 --rtf 1000
+  python3 /workspace/test/warmup.py --server 127.0.0.1:8000 --rtf 1000 --kyutai-key your_secret_here
 
-# Check server status
-docker exec $CONTAINER_ID status
+# Check server status  
+docker exec $CONTAINER_ID /docker-scripts/start.sh status
 
 # Run smoke test
-docker exec $CONTAINER_ID test
+docker exec -e KYUTAI_API_KEY=your_secret_here $CONTAINER_ID /docker-scripts/start.sh test
 
 # Load test
 docker exec -e KYUTAI_API_KEY=your_secret_here $CONTAINER_ID \
@@ -116,10 +116,11 @@ docker exec -e KYUTAI_API_KEY=your_secret_here $CONTAINER_ID \
 
 ### Docker Notes
 
-- **API Key Security**: Key is injected at runtime, never stored in image
-- **Cache Persistence**: Use `-v /host/path:/workspace/hf_cache` to avoid re-downloading models
+- **API Key Security**: Key is injected at runtime via environment variable, never stored in image
+- **Cache Persistence**: Use `-v /host/path:/workspace/hf_cache` to persist model downloads between containers  
 - **Logs**: Available at `/workspace/logs/yap-server.log` inside container
-- **Same Logic**: Docker uses identical config injection as `scripts/03_start_server.sh`
+- **Same Logic**: Docker replicates exact bare metal setup (CUDA 12.4, Rust, environment variables)
+- **Clean Build**: Uses `.dockerignore` to exclude build artifacts, secrets, and unnecessary files
 
 ## Service Management
 
@@ -143,8 +144,8 @@ tmux attach -t yap-stt
 # Graceful shutdown (keeps installation)
 tmux kill-session -t yap-stt
 
-# Complete cleanup
-bash scripts/99_stop.sh
+# Complete cleanup (removes everything)
+bash scripts/stop.sh
 ```
 
 ## ⚙️ Manual Step-by-Step Setup
@@ -155,19 +156,16 @@ For development or custom deployments:
 # 1. Install system dependencies (CUDA, Rust, Python, ffmpeg)
 bash scripts/00_prereqs.sh
 
-# 2. Compile and install yap-server (yap-server) with CUDA support
+# 2. Compile and install yap-server with CUDA support
 bash scripts/01_install_yap_server.sh
 
-# 3. Fetch Kyutai configs and STT model definitions
-bash scripts/02_fetch_configs.sh
-
-# 4. Start server in tmux session
+# 3. Start server in tmux session (auto-downloads models)
 bash scripts/03_start_server.sh
 
-# 5. Check status and verify port binding
+# 4. Check status and verify port binding  
 bash scripts/04_status.sh
 
-# 6. Run smoke test with reference client (if enabled)
+# 5. Run smoke test with reference client (if enabled)
 bash scripts/05_smoke_test.sh
 ```
 
@@ -406,38 +404,24 @@ grep -E '"delta_to_audio_ms":[5-9][0-9][0-9]|[0-9]{4}' test/results/bench_metric
 grep -i "cuda\|ptx\|driver" /workspace/logs/yap-server.log
 
 # Clean install if CUDA problems
-scripts/99_stop.sh  
+scripts/stop.sh  
 scripts/main.sh
-```
-
-## Structure
-
-```
-├── scripts/                       # Deployment scripts
-│   ├── main.sh                    # One-command setup
-│   ├── 00_prereqs.sh              # CUDA 12.4 + dependencies
-│   ├── 01_install_yap_server.sh   # Compile server
-│   ├── 02_fetch_configs.sh        # Get STT configs
-│   ├── 03_start_server.sh         # Start in tmux
-│   ├── 04_status.sh               # Monitor server
-│   └── 99_stop.sh                 # Complete cleanup
-├── test/                          # Testing suite
-│   ├── client.py                  # Interactive client
-│   ├── bench.py                   # Load testing
-│   └── warmup.py                  # Health checks
-├── samples/                       # Test audio files
-└── requirements.txt               # Python deps
 ```
 
 ## Cleanup
 
 ```bash
-# Complete removal
-scripts/99_stop.sh
+# Complete removal (removes everything installed)
+scripts/stop.sh
+
+# Keep system packages (optional)
+scripts/stop.sh --keep-packages
 ```
 
 **Removes**:
-- yap-server binary + Rust toolchain
+- yap-server binary + Rust toolchain  
 - All CUDA installations and configs
-- HuggingFace model cache and logs  
+- HuggingFace model cache and logs
 - tmux sessions and build artifacts
+- Environment variables and system tuning
+- Python caches and temporary files

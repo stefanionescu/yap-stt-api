@@ -162,44 +162,35 @@ find /workspace /tmp /root -type f -size +50M 2>/dev/null | while read -r large_
   fi
 done
 
-# 5k. Offer to remove repo-local build artifacts and virtual environments
-read -p "[99] Remove repo virtualenvs, Rust targets, and __pycache__ directories? [y/N]: " -n 1 -r REPO_REPLY
-echo
-if [[ ${REPO_REPLY:-} =~ ^[Yy]$ ]]; then
-  REPO_ARTIFACT_DIRS=(
-    "${REPO_ROOT}/.venv"
-    "${REPO_ROOT}/venv"
-    "${REPO_ROOT}/server/.venv"
-    "${REPO_ROOT}/server/venv"
-    "${REPO_ROOT}/server/moshi-server/.venv"
-    "${REPO_ROOT}/server/target"
-    "${REPO_ROOT}/target"
-    "${REPO_ROOT}/test/results"
-  )
-  for artifact in "${REPO_ARTIFACT_DIRS[@]}"; do
-    if [ -e "$artifact" ]; then
-      rm -rf "$artifact"
-      echo "[99] ✓ Removed repo artifact: $artifact"
-    fi
-  done
-  find "${REPO_ROOT}" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null && \
-    echo "[99] ✓ Purged Python __pycache__ directories"
-  find "${REPO_ROOT}" -name "*.pyc" -delete 2>/dev/null && \
-    echo "[99] ✓ Purged Python bytecode files"
-else
-  echo "[99] ✓ Keeping repo-local build artifacts"
-fi
+# 5k. Remove repo-local build artifacts and virtual environments
+echo "[99] Removing repo virtualenvs, Rust targets, and __pycache__ directories..."
+REPO_ARTIFACT_DIRS=(
+  "${REPO_ROOT}/.venv"
+  "${REPO_ROOT}/venv"
+  "${REPO_ROOT}/server/.venv"
+  "${REPO_ROOT}/server/venv"
+  "${REPO_ROOT}/server/moshi-server/.venv"
+  "${REPO_ROOT}/server/target"
+  "${REPO_ROOT}/target"
+  "${REPO_ROOT}/test/results"
+)
+for artifact in "${REPO_ARTIFACT_DIRS[@]}"; do
+  if [ -e "$artifact" ]; then
+    rm -rf "$artifact"
+    echo "[99] ✓ Removed repo artifact: $artifact"
+  fi
+done
+find "${REPO_ROOT}" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null && \
+  echo "[99] ✓ Purged Python __pycache__ directories"
+find "${REPO_ROOT}" -name "*.pyc" -delete 2>/dev/null && \
+  echo "[99] ✓ Purged Python bytecode files"
 
-# 5j. NUCLEAR OPTION: Remove even the system packages we installed
+# 5j. Remove system packages we installed (unless --keep-packages flag is used)
 echo
-if [[ "${1:-}" == "--nuclear" ]]; then
-  REPLY="y"
-  echo "[99] --nuclear flag detected, removing system packages..."
+if [[ "${1:-}" == "--keep-packages" ]]; then
+  echo "[99] --keep-packages flag detected, keeping system packages..."
 else
-  read -p "[99] Also remove system packages installed by scripts (cmake, libopus-dev, etc.)? [y/N]: " -n 1 -r
-  echo
-fi
-if [[ $REPLY =~ ^[Yy]$ ]]; then
+  echo "[99] Removing system packages installed by scripts (cmake, libopus-dev, etc.)..."
   if command -v apt-get >/dev/null 2>&1; then
     # Remove packages installed by 00_prereqs.sh
     apt-get remove --purge -y cmake libopus-dev build-essential pkg-config libssl-dev ffmpeg tmux jq python3-pip gnupg 2>/dev/null || true
@@ -233,8 +224,6 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
     ldconfig || true
     echo "[99] ✓ Removed system packages installed by scripts"
   fi
-else
-  echo "[99] ✓ Keeping system packages (cmake, libopus-dev, CUDA toolkit, etc.)"
 fi
 
 # 6. Remove file descriptor limits config
@@ -285,7 +274,9 @@ echo
 echo "[99] ===== CLEANUP COMPLETE ====="
 echo "[99] Preserved:"
 echo "[99]   • Git repository and your code"
-echo "[99]   • System packages that came with RunPod image"
+if [[ "${1:-}" == "--keep-packages" ]]; then
+  echo "[99]   • System packages (--keep-packages flag used)"
+fi
 echo
 echo "[99] Removed:"
 echo "[99]   • yap-server binary and moshi processes"
@@ -295,6 +286,10 @@ echo "[99]   • All downloaded models and HF cache"
 echo "[99]   • All log files and tmux sessions"
 echo "[99]   • Configuration files (outside repo) and cloned repos"
 echo "[99]   • Python pip cache (~/.cache/pip) and bytecode files"
+echo "[99]   • Repo build artifacts (venv, target, __pycache__)"
+if [[ "${1:-}" != "--keep-packages" ]]; then
+  echo "[99]   • System packages (cmake, libopus-dev, CUDA toolkit, etc.)"
+fi
 echo "[99]   • System package caches (apt, debconf, fontconfig)"
 echo "[99]   • All common cache directories"
 echo "[99]   • Large files >50MB (outside git repo)"
@@ -312,4 +307,4 @@ echo "[99] === LARGEST REMAINING DIRECTORIES ==="
 du -sh /workspace/* /root/.* /tmp/* /var/cache/* 2>/dev/null | sort -hr | head -10 || true
 echo
 echo "[99] To reinstall: run './main.sh' again"
-echo "[99] For maximum cleanup: run 'bash scripts/99_stop.sh --nuclear'"
+echo "[99] To keep system packages: run 'bash scripts/stop.sh --keep-packages'"

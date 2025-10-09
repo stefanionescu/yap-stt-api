@@ -12,7 +12,7 @@ README.md
 *.md
 docs/
 
-# Scripts (functionality replicated in entrypoint.sh)
+# Scripts (functionality replicated in start.sh)
 scripts/
 
 # Development Python environment

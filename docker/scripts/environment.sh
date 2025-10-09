@@ -1,13 +1,19 @@
 #!/usr/bin/env bash
-# Docker environment configuration (matches env.lib.sh defaults)
+# Docker environment configuration (matches env.lib.sh defaults exactly)
 
-# CUDA environment
-export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
-export CUDA_PATH="${CUDA_PATH:-/usr/local/cuda}"
-export CUDA_ROOT="${CUDA_ROOT:-/usr/local/cuda}"
+# CUDA environment (matches versioned paths from env.lib.sh)
+export CUDA_MM="${CUDA_MM:-12.4}"
+export CUDA_MM_PKG="${CUDA_MM_PKG:-12-4}"
+export CUDA_PREFIX="${CUDA_PREFIX:-/usr/local/cuda-12.4}"
+export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda-12.4}"
+export CUDA_PATH="${CUDA_PATH:-/usr/local/cuda-12.4}"
+export CUDA_ROOT="${CUDA_ROOT:-/usr/local/cuda-12.4}"
 export CUDA_COMPUTE_CAP="${CUDA_COMPUTE_CAP:-89}"
-export CUDARC_NVRTC_PATH="${CUDARC_NVRTC_PATH:-/usr/local/cuda/lib64/libnvrtc.so}"
-export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-/usr/local/cuda/lib64:/usr/local/cuda/targets/x86_64-linux/lib}"
+export CUDARC_NVRTC_PATH="${CUDARC_NVRTC_PATH:-/usr/local/cuda-12.4/lib64/libnvrtc.so}"
+export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-/usr/local/cuda-12.4/lib64:/usr/local/cuda-12.4/targets/x86_64-linux/lib}"
+
+# Add CUDA to PATH (matches bare metal scripts)
+export PATH="${CUDA_PREFIX}/bin:${PATH:-}"
 
 # HuggingFace environment
 export HF_HOME="${HF_HOME:-/workspace/hf_cache}"

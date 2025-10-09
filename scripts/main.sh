@@ -60,4 +60,4 @@ fi
 echo
 echo "=== All done. Server is running in tmux session '${TMUX_SESSION}' on ${YAP_ADDR}:${YAP_PORT} ==="
 echo "Use: scripts/04_status.sh   (tail logs, health)"
-echo "Use: scripts/99_stop.sh     (stop and clean session)"
+echo "Use: scripts/stop.sh     (stop and clean session)"
