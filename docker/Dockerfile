@@ -5,7 +5,6 @@
 
 ARG CUDA_VERSION=12.4.1
 ARG UBUNTU_VERSION=22.04
-ARG RUST_VERSION=1.82.0
 
 # ------------ Base (CUDA development + all deps) ------------
 FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION} AS base
@@ -46,6 +45,7 @@ WORKDIR /workspace
 
 # ------------ Install Rust toolchain ------------
 FROM base AS rust
+ARG RUST_VERSION=1.82.0
 RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain ${RUST_VERSION}
 ENV PATH=/root/.cargo/bin:${PATH}
 
