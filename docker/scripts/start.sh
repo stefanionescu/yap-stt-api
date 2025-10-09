@@ -17,58 +17,9 @@ echo "[start] Using base config: ${YAP_CONFIG}"
 # Create required directories
 mkdir -p "${HF_HOME}" "${YAP_LOG_DIR}"
 
-# Resolve/inject API key into runtime config (matches 03_start_server.sh logic with robust secret discovery)
-# Try to discover the Kyutai API key from multiple sources:
-#  1) KYUTAI_API_KEY env var
-#  2) File path via KYUTAI_API_KEY_FILE (value is a path)
-#  3) Common secret file mount locations (/run/secrets, /var/run/secrets, /etc/secrets)
-discover_kyutai_api_key() {
-    # 1) Primary env var
-    if [ -n "${KYUTAI_API_KEY:-}" ]; then
-        echo "env"  # source tag to stderr via caller context
-        printf "%s" "${KYUTAI_API_KEY}"
-        return 0
-    fi
-
-    # 2) File specified via *_FILE
-    if [ -n "${KYUTAI_API_KEY_FILE:-}" ] && [ -r "${KYUTAI_API_KEY_FILE}" ]; then
-        echo "file:${KYUTAI_API_KEY_FILE}"
-        # Trim trailing newlines/carriage returns
-        tr -d '\r\n' < "${KYUTAI_API_KEY_FILE}"
-        return 0
-    fi
-
-    # 3) Common secret file locations
-    for secret_path in \
-        /run/secrets/KYUTAI_API_KEY \
-        /var/run/secrets/KYUTAI_API_KEY \
-        /etc/secrets/KYUTAI_API_KEY \
-        /workspace/secrets/KYUTAI_API_KEY; do
-        if [ -r "${secret_path}" ]; then
-            echo "file:${secret_path}"
-            tr -d '\r\n' < "${secret_path}"
-            return 0
-        fi
-    done
-
-    echo ""  # not found
-    return 1
-}
-
-# Call discovery and capture both source tag (to log) and value
-KYU_DISCOVERY_OUTPUT=$(discover_kyutai_api_key 2>/dev/null || true)
-KYU_SOURCE="${KYU_DISCOVERY_OUTPUT%%$'\n'*}"
-KYU_KEY="${KYU_DISCOVERY_OUTPUT##*$'\n'}"
-
+# Inject API key into runtime config (matches 03_start_server.sh logic)
+KYU_KEY="${KYUTAI_API_KEY:-}"
 if [ -n "${KYU_KEY}" ]; then
-    # Log source without revealing the secret
-    case "${KYU_SOURCE}" in
-        env) echo "[start] KYUTAI_API_KEY detected from environment" ;;
-        env:*) echo "[start] KYUTAI_API_KEY detected from ${KYU_SOURCE}" ;;
-        file:*) echo "[start] KYUTAI_API_KEY loaded from secret file (${KYU_SOURCE#file:})" ;;
-        *) echo "[start] KYUTAI_API_KEY detected" ;;
-    esac
-
     echo "[start] Injecting KYUTAI_API_KEY into authorized_ids"
     awk -v key="${KYU_KEY}" '
         BEGIN { replaced = 0 }
@@ -144,6 +95,29 @@ case "${1:-}" in
         yap-server validate "${YAP_CONFIG}" || true
         set -e
         
+        # Build launch command that always uses the effective ${YAP_CONFIG}.
+        # We strip any user-provided --config/--addr/--port and append ours,
+        # so the runtime-injected config is honored even if CMD hardcodes a path.
+        ARGS=("$@")
+        LAUNCH_CMD="$*"
+        if [ "${ARGS[0]:-}" = "yap-server" ]; then
+            FILTERED=()
+            i=0
+            while [ $i -lt ${#ARGS[@]} ]; do
+                case "${ARGS[$i]}" in
+                    --config|--addr|--port)
+                        i=$((i+2))
+                        continue
+                        ;;
+                esac
+                FILTERED+=("${ARGS[$i]}")
+                i=$((i+1))
+            done
+            FILTERED+=(--config "${YAP_CONFIG}" --addr "${YAP_ADDR}" --port "${YAP_PORT}")
+            LAUNCH_CMD="$(printf "%s " "${FILTERED[@]}")"
+        fi
+        echo "[start] Launch: ${LAUNCH_CMD}"
+
         # Kill existing session if present
         tmux has-session -t "${TMUX_SESSION}" 2>/dev/null && tmux kill-session -t "${TMUX_SESSION}"
         
@@ -151,7 +125,7 @@ case "${1:-}" in
         tmux new-session -d -s "${TMUX_SESSION}" \
             "LD_LIBRARY_PATH='${LD_LIBRARY_PATH}' PATH='${PATH}' CUDA_HOME='${CUDA_HOME}' CUDA_PATH='${CUDA_PATH}' CUDA_ROOT='${CUDA_ROOT}' CUDA_COMPUTE_CAP='${CUDA_COMPUTE_CAP}' \
              CUDARC_NVRTC_PATH='${CUDARC_NVRTC_PATH}' HF_HOME='${HF_HOME}' HF_HUB_ENABLE_HF_TRANSFER='${HF_HUB_ENABLE_HF_TRANSFER}' \
-             exec $* 2>&1 | tee '${LOG_FILE}'"
+             exec ${LAUNCH_CMD} 2>&1 | tee '${LOG_FILE}'"
         
         # Wait for server to be ready (matches 03_start_server.sh)
         echo "[start] Waiting for server to start on port ${YAP_PORT}..."
