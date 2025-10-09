@@ -2,6 +2,13 @@
 set -euo pipefail
 source "$(dirname "$0")/env.lib.sh"
 
+# Set default values for variables that might not be defined
+TMUX_SESSION="${TMUX_SESSION:-yap-stt}"
+YAP_LOG_DIR="${YAP_LOG_DIR:-/workspace/logs}"
+HF_HOME="${HF_HOME:-/workspace/hf_cache}"
+CUDA_MM_PKG="${CUDA_MM_PKG:-12-4}"
+DSM_REPO_DIR="${DSM_REPO_DIR:-}"
+
 echo "[99] Stopping and cleaning up yap-server installation..."
 echo
 echo "[99] === DISK USAGE BEFORE CLEANUP ==="
@@ -41,7 +48,9 @@ else
 fi
 
 # 3. Remove cloned repositories and config files
-[ -d "${DSM_REPO_DIR}" ] && rm -rf "${DSM_REPO_DIR}" && echo "[99] ✓ Removed ${DSM_REPO_DIR}"
+if [ -n "${DSM_REPO_DIR}" ] && [ -d "${DSM_REPO_DIR}" ]; then
+  rm -rf "${DSM_REPO_DIR}" && echo "[99] ✓ Removed ${DSM_REPO_DIR}"
+fi
 
 # Preserve repo-tracked config files; only remove external config paths
 REPO_ROOT="$(cd "${ROOT_DIR}/.." && pwd)"
