@@ -25,6 +25,12 @@ if pgrep -f "(^|/| )yap-server( |$)" >/dev/null 2>&1; then
   echo "[99] ✓ Killed stray yap-server processes"
 fi
 
+# 1c. Kill any other moshi-related processes
+if pgrep -f "moshi" >/dev/null 2>&1; then
+  pkill -9 -f "moshi" || true
+  echo "[99] ✓ Killed stray moshi processes"
+fi
+
 # 2. Uninstall yap-server binary
 if command -v yap-server >/dev/null 2>&1; then
   BIN_PATH="$(command -v yap-server)"
@@ -88,7 +94,9 @@ fi
 # 5d. Remove any temporary cargo build directories
 find /tmp -name "cargo-install*" -type d -exec rm -rf {} + 2>/dev/null || true
 find /tmp -name "rustc-*" -type d -exec rm -rf {} + 2>/dev/null || true
-echo "[99] ✓ Cleaned up temporary build directories"
+find /tmp -name "*.deb" -delete 2>/dev/null || true
+find /tmp -name "libtinfo5*" -delete 2>/dev/null || true
+echo "[99] ✓ Cleaned up temporary build directories and packages"
 
 # 5e. Remove any downloaded model files that might be cached elsewhere
 find /workspace -type f \( -name "*.bin" -o -name "*.safetensors" -o -name "*.onnx" \) 2>/dev/null | while read -r model_file; do
@@ -167,6 +175,8 @@ if [[ ${REPO_REPLY:-} =~ ^[Yy]$ ]]; then
   done
   find "${REPO_ROOT}" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null && \
     echo "[99] ✓ Purged Python __pycache__ directories"
+  find "${REPO_ROOT}" -name "*.pyc" -delete 2>/dev/null && \
+    echo "[99] ✓ Purged Python bytecode files"
 else
   echo "[99] ✓ Keeping repo-local build artifacts"
 fi
@@ -223,6 +233,18 @@ if [ -f "/etc/security/limits.d/moshi-nofile.conf" ]; then
   rm -f "/etc/security/limits.d/moshi-nofile.conf"
   echo "[99] ✓ Removed file descriptor limits config"
 fi
+# 6b. Remove network tuning configuration
+if [ -f "/etc/sysctl.d/99-moshi-net.conf" ]; then
+  rm -f "/etc/sysctl.d/99-moshi-net.conf"
+  echo "[99] ✓ Removed network tuning config"
+fi
+
+# 6c. Remove CUDA installation sentinel files
+if [ -d "/var/lib/yap" ]; then
+  rm -rf "/var/lib/yap"
+  echo "[99] ✓ Removed CUDA installation markers (/var/lib/yap)"
+fi
+
 # 7. Clean up environment variables from ~/.bashrc
 if [ -f ~/.bashrc ]; then
   # Remove HF_HOME and HF_HUB_ENABLE_HF_TRANSFER exports
@@ -236,6 +258,10 @@ if [ -f ~/.bashrc ]; then
   sed -i '/export CUDA_HOME=.*\/usr\/local\/cuda/d' ~/.bashrc
   sed -i '/export CUDA_PATH=.*\/usr\/local\/cuda/d' ~/.bashrc
   sed -i '/export CUDA_ROOT=.*\/usr\/local\/cuda/d' ~/.bashrc
+  # Remove CUDA_COMPUTE_CAP export
+  sed -i '/export CUDA_COMPUTE_CAP=/d' ~/.bashrc
+  # Remove LD_LIBRARY_PATH exports (all variations)
+  sed -i '/export LD_LIBRARY_PATH=.*cuda.*lib/d' ~/.bashrc
   echo "[99] ✓ Cleaned up environment variables from ~/.bashrc"
 fi
 
@@ -253,17 +279,22 @@ echo "[99]   • Git repository and your code"
 echo "[99]   • System packages that came with RunPod image"
 echo
 echo "[99] Removed:"
-echo "[99]   • yap-server binary"
+echo "[99]   • yap-server binary and moshi processes"
 echo "[99]   • Rust toolchain (~/.rustup and ~/.cargo)"
 echo "[99]   • uv tool and ~/.local directory"
 echo "[99]   • All downloaded models and HF cache"
 echo "[99]   • All log files and tmux sessions"
 echo "[99]   • Configuration files (outside repo) and cloned repos"
-echo "[99]   • Python pip cache (~/.cache/pip)"
+echo "[99]   • Python pip cache (~/.cache/pip) and bytecode files"
 echo "[99]   • System package caches (apt, debconf, fontconfig)"
 echo "[99]   • All common cache directories"
 echo "[99]   • Large files >50MB (outside git repo)"
-echo "[99]   • Environment variables (Rust, versioned CUDA, HF, uv) from ~/.bashrc"
+echo "[99]   • Network tuning configuration (/etc/sysctl.d/99-moshi-net.conf)"
+echo "[99]   • CUDA installation markers (/var/lib/yap/)"
+echo "[99]   • File descriptor limits config"
+echo "[99]   • Environment variables (Rust, CUDA, HF, uv, LD_LIBRARY_PATH) from ~/.bashrc"
+echo "[99]   • CUDA ldconfig configurations"
+echo "[99]   • Generated .env files and temporary packages"
 echo
 echo "[99] === DISK USAGE AFTER CLEANUP ==="
 df -h | head -2
