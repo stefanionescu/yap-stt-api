@@ -151,7 +151,7 @@ For development or custom deployments:
 bash scripts/00_prereqs.sh
 
 # 2. Compile and install yap-server with CUDA support
-bash scripts/01_install_yap_server.sh
+bash scripts/01_install_server.sh
 
 # 3. Start server in tmux session (auto-downloads models)
 bash scripts/03_start_server.sh

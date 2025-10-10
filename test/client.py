@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 
 from utils import (
-    file_to_pcm16_mono_24k, file_duration_seconds, SAMPLES_DIR,
+    file_to_pcm16_mono_24k, SAMPLES_DIR,
     find_sample_files, find_sample_by_name
 )
 from clients.interactive import InteractiveClient

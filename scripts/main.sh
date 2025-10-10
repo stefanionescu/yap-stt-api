@@ -46,7 +46,7 @@ done
 
 # Run the minimal phases
 "${BASE_DIR}/00_prereqs.sh"
-"${BASE_DIR}/01_install_yap_server.sh"
+"${BASE_DIR}/01_install_server.sh"
 
 # Start server and optionally run smoke test
 "${BASE_DIR}/03_start_server.sh"
