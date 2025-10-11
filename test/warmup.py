@@ -21,6 +21,7 @@ def main() -> int:
     parser.add_argument("--file", type=str, default="mid.wav", help="Audio file. Absolute path or name in samples/")
     parser.add_argument("--rtf", type=float, default=1000.0, help="Real-time factor (1000=fast warmup, 1.0=realtime)")
     parser.add_argument("--debug", action="store_true", help="Print debug info including raw server messages")
+    parser.add_argument("--full-text", action="store_true", help="Print full transcribed text (default: truncate to 50 chars)")
     parser.add_argument("--kyutai-key", type=str, default=None, help="Kyutai API key (overrides KYUTAI_API_KEY env)")
     args = parser.parse_args()
 
@@ -54,7 +55,12 @@ def main() -> int:
     # Print results
     if res.get("error"):
         print(f"Warmup error: {res['error']}")
-    print(f"Text: {res.get('text', '')[:50]}...")
+    
+    text = res.get('text', '')
+    if args.full_text:
+        print(f"Text: {text}")
+    else:
+        print(f"Text: {text[:50]}..." if len(text) > 50 else f"Text: {text}")
     print(f"Audio duration: {duration:.4f}s")
     print(f"Transcription time (to Final): {res.get('wall_to_final_s', 0.0):.4f}s")
     

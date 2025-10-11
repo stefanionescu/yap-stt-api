@@ -8,7 +8,7 @@ One-command deployment for **Yap STT Server** with GPU acceleration. Automated C
 - **CUDA 12.4 optimized** - Automatic GPU setup for L40S/A100/RTX cards  
 - **Production ready** - tmux sessions, logging, monitoring
 - **Testing suite** - Load testing, benchmarks, real-time clients
-- **RunPod compatible** - Tested on cloud GPU instances
+- **Cloud compatible** - Works on various GPU cloud providers
 
 ## Quick Start
 
@@ -19,7 +19,7 @@ KYUTAI_API_KEY=your_secret_here bash scripts/main.sh
 
 **This will:**
 1. Install CUDA 12.4 toolkit (purges conflicting versions)
-2. Install Rust toolchain and compile yap-server (yap-server) with CUDA
+2. Install Rust toolchain and compile yap-server with CUDA
 3. Fetch STT configs and models
 4. Start server in tmux session on port 8000
 5. Optionally run a smoke test to verify functionality
@@ -77,10 +77,10 @@ docker run -d \
   sionescu/yap-stt-api:latest
 ```
 
-**RunPod Template:**
+**Cloud Deployment:**
 ```bash
 # Docker image: sionescu/yap-stt-api:latest
-# Environment variables in RunPod dashboard:
+# Environment variables:
 #   KYUTAI_API_KEY=your_secret_here
 #   YAP_ADDR=0.0.0.0
 #   YAP_PORT=8000
@@ -163,43 +163,32 @@ bash scripts/04_status.sh
 bash scripts/05_smoke_test.sh
 ```
 
-## RunPod Deployment
+## Cloud Deployment
 
-### Method 1: Docker Template (Recommended)
+### Docker Template Method
 
-**Create RunPod Template:**
-1. **Create Template** in RunPod dashboard using your Docker image: `sionescu/yap-stt-api:latest`
-2. **Set Environment Variables** (never hardcode in image):
+1. **Create Template** using Docker image: `sionescu/yap-stt-api:latest`
+2. **Set Environment Variables**:
    ```bash
    KYUTAI_API_KEY=your_secret_here    # Your Kyutai API key (REQUIRED)
    YAP_ADDR=0.0.0.0                  # Bind to all interfaces
    YAP_PORT=8000                     # Server port
    HF_HOME=/workspace/hf_cache       # Model cache location
    ```
-3. **Expose Ports**: `8000` 
-4. **Launch Pod** from template
+3. **Expose Port**: `8000`
 
-**Deploy & Connect:**
-```bash
-# Pod starts automatically with your environment variables
-# Server available at: ws://your-pod-id-12345.a.runpod.net:8000
-```
+### Manual Setup
 
-### Method 2: Manual Setup
-
-**Launch & Setup:**
-1. **Launch Instance**: Ubuntu 22.04 + L40S/A100/RTX 4090
-2. **Expose Port**: `8000` in RunPod dashboard  
-3. **Run Setup**:
+1. **Launch Instance**: Ubuntu 22.04 with GPU (L40S/A100/RTX 4090)
+2. **Run Setup**:
    ```bash
    git clone https://github.com/yourusername/yap-stt-api
    cd yap-stt-api
    export KYUTAI_API_KEY=your_secret_here
    scripts/main.sh
    ```
-4. **Connect**: Server will be at `ws://your-runpod-ip:8000`
 
-### RunPod Requirements
+### Requirements
 
 - **GPU**: L40S/A100 (recommended) or RTX 4090/3090
 - **RAM**: 16GB+ system memory  
@@ -209,14 +198,8 @@ bash scripts/05_smoke_test.sh
 ### Security Best Practices
 
 **✅ DO:**
-- Use RunPod environment variables for `KYUTAI_API_KEY`
-- Set environment variables in template or pod launch
-- Use RunPod's built-in secret management
-
-**❌ DON'T:**
-- Hardcode API keys in Docker image
-- Put secrets in Dockerfiles or scripts
-- Use RunPod API key as Kyutai API key (they're different!)
+- Use environment variables for `KYUTAI_API_KEY`
+- Never hardcode API keys in images or scripts
 
 ## Configuration
 
@@ -258,20 +241,19 @@ pip install -r requirements.txt
 ### Basic Testing
 ```bash
 # Interactive client with network latency measurement (realtime)
-# Use the Kyutai API key (different from your RunPod API key)
-KYUTAI_API_KEY=public_token python test/client.py --server localhost:8000 --rtf 1.0
+KYUTAI_API_KEY=public_token python3 test/client.py --server localhost:8000 --rtf 1.0
 
 # Interactive client (fast)
-KYUTAI_API_KEY=public_token python test/client.py --server localhost:8000 --rtf 10.0
+KYUTAI_API_KEY=public_token python3 test/client.py --server localhost:8000 --rtf 10.0
 
 # Load testing (realtime)
-KYUTAI_API_KEY=public_token python test/bench.py --n 20 --concurrency 5 --rtf 1.0
+KYUTAI_API_KEY=public_token python3 test/bench.py --n 20 --concurrency 5 --rtf 1.0
 
 # Load testing (fast)
-KYUTAI_API_KEY=public_token python test/bench.py --n 20 --concurrency 5 --rtf 100.0
+KYUTAI_API_KEY=public_token python3 test/bench.py --n 20 --concurrency 5 --rtf 100.0
 
 # Health check (fast warmup)
-KYUTAI_API_KEY=public_token python test/warmup.py --rtf 1.0
+KYUTAI_API_KEY=public_token python3 test/warmup.py --rtf 1.0
 ```
 
 ### Checking Test Results & Logs
@@ -329,29 +311,28 @@ tail -f /workspace/logs/yap-server.log | grep -i "batch\|worker"
 
 ## Protocol
 
-**WebSocket Endpoint**: `ws://localhost:8000` 
+**WebSocket Endpoint**: `ws://localhost:8000/api/asr-streaming` 
 
 **Audio Format**:
-- 24kHz, 16-bit PCM, mono
-- Base64 encoded in JSON messages
+- 24kHz, float32 PCM, mono
+- MessagePack binary encoding
 
 **Protocol Flow**:
-```json
-// Client → Server
-{"type":"StartSTT"}                            // Start session
-{"type":"Audio","audio":"<base64_audio>"}      // Audio chunks
-{"type":"Flush"}                               // End session
+```python
+# Client → Server (MessagePack binary)
+{"type": "Audio", "pcm": [float32_samples]}    # Audio chunks
+{"type": "Flush"}                              # End session
 
-// Server → Client  
-{"type":"Ready"}                               // Ready to receive
-{"type":"Word","word":"hello"}                 // Word tokens
-{"type":"Partial","text":"hello world"}       // Partial results
-{"type":"Final","text":"hello world"}         // Final transcript
+# Server → Client (MessagePack binary)
+{"type": "Ready"}                              # Ready to receive
+{"type": "Word", "text": "hello", "start_time": 0.5}  # Word tokens
+{"type": "Step", "step_idx": 42, "prs": [...], "buffered_pcm": 1920}  # Internal state
+{"type": "Error", "message": "error details"}  # Error messages
 ```
 
 ### Authentication
 
-- **Header**: `kyutai-api-key: <your_api_key>` (Kyutai server key; do NOT use your RunPod key)
+- **Header**: `kyutai-api-key: <your_api_key>`
 - **Server config**: `scripts/03_start_server.sh` injects your key into `authorized_ids` at runtime.
 - **Set your key**:
 
@@ -359,20 +340,13 @@ tail -f /workspace/logs/yap-server.log | grep -i "batch\|worker"
 # Option A: set once (default .env written by scripts/main.sh)
 sed -i.bak 's/^KYUTAI_API_KEY=.*/KYUTAI_API_KEY=my_secret_123/' scripts/.env
 
-# Option B: export before starting (Kyutai key)
+# Option B: export before starting
 export KYUTAI_API_KEY=my_secret_123
 scripts/03_start_server.sh
 
-# Clients (Kyutai key):
+# Clients:
 export KYUTAI_API_KEY=my_secret_123
-python test/client.py --server localhost:8000
-
-For RunPod-hosted servers, you must also export your RunPod token and the client will pass it upstream:
-```bash
-export KYUTAI_API_KEY=my_secret_123
-export RUNPOD_API_KEY=rp_xxx
-python test/client.py --server your-pod-id-12345-uc.a.runpod.net:8000
-```
+python3 test/client.py --server localhost:8000
 ```
 
 ## Troubleshooting
@@ -398,12 +372,12 @@ tmux attach -t yap-stt
 ss -tlnp | grep 8000
 
 # Test WebSocket connectivity
-python test/warmup.py
+python3 test/client.py
 
 # Check recent connection errors
 cat test/results/bench_errors.txt | tail -10
 
-# For RunPod: ensure port 8000 is exposed
+# For cloud deployments: ensure port 8000 is exposed
 ```
 
 ### Performance Issues
@@ -437,11 +411,3 @@ scripts/stop.sh
 # Keep system packages (optional)
 scripts/stop.sh --keep-packages
 ```
-
-**Removes**:
-- yap-server binary + Rust toolchain  
-- All CUDA installations and configs
-- HuggingFace model cache and logs
-- tmux sessions and build artifacts
-- Environment variables and system tuning
-- Python caches and temporary files
