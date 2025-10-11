@@ -171,9 +171,9 @@ bash scripts/05_smoke_test.sh
 2. **Set Environment Variables**:
    ```bash
    KYUTAI_API_KEY=your_secret_here    # Your Kyutai API key (REQUIRED)
-   YAP_ADDR=0.0.0.0                  # Bind to all interfaces
-   YAP_PORT=8000                     # Server port
-   HF_HOME=/workspace/hf_cache       # Model cache location
+   YAP_ADDR=0.0.0.0                   # Bind to all interfaces
+   YAP_PORT=8000                      # Server port
+   HF_HOME=/workspace/hf_cache        # Model cache location
    ```
 3. **Expose Port**: `8000`
 
@@ -209,6 +209,29 @@ The service uses the provided STT config (`config-stt-en_fr-hf.toml`) supporting
 - **Models**: Streaming optimized Transformer architecture
 - **GPU**: CUDA acceleration with automatic mixed precision
 - **WebSocket**: Native Rust server with JSON protocol
+
+### Viewing Config File
+
+**Script Deployment:**
+```bash
+# View current config
+cat server/config-stt-en_fr-hf.toml
+
+# View runtime config (with injected API key)
+cat server/config-stt-en_fr-hf.toml.runtime
+```
+
+**Docker Deployment:**
+```bash
+# Get container ID
+CONTAINER_ID=$(docker ps -q --filter "ancestor=sionescu/yap-stt-api:latest")
+
+# View config inside container
+docker exec $CONTAINER_ID cat /workspace/server/config-stt-en_fr-hf.toml
+
+# View runtime config (with injected API key)
+docker exec $CONTAINER_ID cat /workspace/server/config-stt-en_fr-hf.toml.runtime
+```
 
 ### Performance Tuning
 
@@ -356,6 +379,10 @@ python3 test/client.py --server localhost:8000
 # Check CUDA 12.4 installation
 nvidia-smi && nvcc --version
 
+# View current server config
+cat server/config-stt-en_fr-hf.toml
+cat server/config-stt-en_fr-hf.toml.runtime  # Shows injected API key
+
 # View server logs (live)
 tail -f /workspace/logs/yap-server.log
 
@@ -376,6 +403,10 @@ python3 test/client.py
 
 # Check recent connection errors
 cat test/results/bench_errors.txt | tail -10
+
+# For Docker: check config inside container
+CONTAINER_ID=$(docker ps -q --filter "ancestor=sionescu/yap-stt-api:latest")
+docker exec $CONTAINER_ID cat /workspace/server/config-stt-en_fr-hf.toml.runtime
 
 # For cloud deployments: ensure port 8000 is exposed
 ```
